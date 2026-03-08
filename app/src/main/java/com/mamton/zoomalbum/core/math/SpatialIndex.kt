@@ -1,13 +1,17 @@
 package com.mamton.zoomalbum.core.math
 
-/**
- * Spatial index for fast viewport-intersection queries over canvas nodes.
- * Stub — will be backed by a grid or R-tree in later iterations.
- */
-class SpatialIndex {
+import com.mamton.zoomalbum.domain.model.CanvasNode
 
-    fun query(viewport: BoundingBox): List<String> {
-        // TODO: implement spatial lookup returning intersecting node IDs
-        return emptyList()
+/**
+ * Brute-force spatial query over all nodes.
+ * Will be replaced by a grid / R-tree when node counts exceed ~2 000.
+ */
+object ViewportCuller {
+
+    fun visibleNodes(
+        allNodes: List<CanvasNode>,
+        viewport: BoundingBox,
+    ): List<CanvasNode> = allNodes.filter { node ->
+        TransformUtils.toBoundingBox(node.transform).intersects(viewport)
     }
 }

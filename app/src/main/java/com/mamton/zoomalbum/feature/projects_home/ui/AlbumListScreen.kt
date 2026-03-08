@@ -1,0 +1,27 @@
+package com.mamton.zoomalbum.feature.projects_home.ui
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mamton.zoomalbum.feature.projects_home.viewmodel.ProjectsViewModel
+
+@Composable
+fun AlbumListScreen(
+    onAlbumClick: (albumId: Long) -> Unit = {},
+    viewModel: ProjectsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text = "Zoom Album — Projects")
+    }
+}

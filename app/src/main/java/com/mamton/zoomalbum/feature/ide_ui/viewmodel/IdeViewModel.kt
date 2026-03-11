@@ -2,7 +2,6 @@ package com.mamton.zoomalbum.feature.ide_ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import com.mamton.zoomalbum.core.mvi.State
-import com.mamton.zoomalbum.domain.model.PanelDescriptor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

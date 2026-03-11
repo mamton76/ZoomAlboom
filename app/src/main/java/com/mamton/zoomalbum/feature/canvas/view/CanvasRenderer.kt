@@ -1,4 +1,4 @@
-package com.mamton.zoomalbum.feature.canvas.ui
+package com.mamton.zoomalbum.feature.canvas.view
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.sp
@@ -48,6 +49,7 @@ private fun FrameRenderer(frame: CanvasNode.Frame) {
                 width = with(density) { (t.width * t.scale).toDp() },
                 height = with(density) { (t.height * t.scale).toDp() },
             )
+            .rotate(t.rotation)
             .clip(shape)
             .background(fillColor.copy(alpha = 0.35f))
             .border(width = with(density) { 1.5f.toDp() }, color = borderColor, shape = shape),

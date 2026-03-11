@@ -1,4 +1,4 @@
-package com.mamton.zoomalbum.domain.model
+package com.mamton.zoomalbum.feature.ide_ui.viewmodel
 
 /**
  * Models consumed exclusively by the IDE overlay layer.

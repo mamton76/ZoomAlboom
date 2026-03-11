@@ -1,7 +1,6 @@
 package com.mamton.zoomalbum.data.local.file
 
 import com.mamton.zoomalbum.domain.model.CanvasNode
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
 

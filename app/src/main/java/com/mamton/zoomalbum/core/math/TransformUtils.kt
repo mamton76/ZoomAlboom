@@ -12,6 +12,14 @@ import kotlin.math.sin
  */
 object TransformUtils {
 
+    /** Rotates vector (x, y) by angleDeg degrees. */
+    fun rotateVector(x: Float, y: Float, angleDeg: Float): Pair<Float, Float> {
+        val rad = Math.toRadians(angleDeg.toDouble())
+        val cosR = cos(rad).toFloat()
+        val sinR = sin(rad).toFloat()
+        return Pair(x * cosR - y * sinR, x * sinR + y * cosR)
+    }
+
     /** AABB of a node in world coordinates. */
     fun toBoundingBox(transform: Transform): BoundingBox = BoundingBox(
         left = transform.x,

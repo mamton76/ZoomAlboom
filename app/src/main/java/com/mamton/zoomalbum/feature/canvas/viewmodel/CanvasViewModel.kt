@@ -5,18 +5,19 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mamton.zoomalbum.core.math.TransformUtils
 import com.mamton.zoomalbum.core.math.ViewportCuller
+import com.mamton.zoomalbum.domain.model.AlbumData
+import com.mamton.zoomalbum.domain.model.AlbumMeta
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.Transform
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-import kotlin.math.cos
-import kotlin.math.sin
 import kotlin.random.Random
 
 // ── Camera ────────────────────────────────────────────────────────────
@@ -27,8 +28,8 @@ data class Camera(
     val rotation: Float = 0f,
 ) {
     companion object {
-        const val MIN_SCALE = 0.05f
-        const val MAX_SCALE = 10f
+        const val MIN_SCALE = 0.00005f
+        const val MAX_SCALE = 10000f
     }
 }
 
@@ -43,17 +44,18 @@ data class CanvasState(
 @HiltViewModel
 class CanvasViewModel @Inject constructor() : ViewModel() {
 
-    private val allNodes: List<CanvasNode>
+    private val albumData: AlbumData
 
     private val _state = MutableStateFlow(CanvasState())
     val state: StateFlow<CanvasState> = _state.asStateFlow()
 
     private var screenWidth = 1080f
     private var screenHeight = 1920f
+    private var cullingJob: Job? = null
 
     init {
-        allNodes = generateRandomFrames(count = 500, spread = 5000f)
-        _state.update { it.copy(totalNodeCount = allNodes.size) }
+        albumData = generateRandomFrames(count = 500, spread = 5000f)
+        _state.update { it.copy(totalNodeCount = albumData.nodes.size) }
         recalculateVisibleNodes()
     }
 
@@ -62,6 +64,11 @@ class CanvasViewModel @Inject constructor() : ViewModel() {
         if (width <= 0f || height <= 0f) return
         screenWidth = width
         screenHeight = height
+        recalculateVisibleNodes()
+    }
+
+    fun reset() {
+        _state.update { s -> s.copy(camera = Camera()) }
         recalculateVisibleNodes()
     }
 
@@ -96,11 +103,7 @@ class CanvasViewModel @Inject constructor() : ViewModel() {
             val sdy = dy * scaleRatio
 
             // Rotate by the rotation delta (in radians)
-            val radDelta = Math.toRadians(rotationDelta.toDouble())
-            val cosR = cos(radDelta).toFloat()
-            val sinR = sin(radDelta).toFloat()
-            val rdx = sdx * cosR - sdy * sinR
-            val rdy = sdx * sinR + sdy * cosR
+            val (rdx, rdy) = TransformUtils.rotateVector(sdx, sdy, rotationDelta)
 
             val newX = centroid.x + rdx + pan.x
             val newY = centroid.y + rdy + pan.y
@@ -119,7 +122,8 @@ class CanvasViewModel @Inject constructor() : ViewModel() {
 
     // ── internals ─────────────────────────────────────────────────────
     private fun recalculateVisibleNodes() {
-        viewModelScope.launch(Dispatchers.Default) {
+        cullingJob?.cancel()
+        cullingJob = viewModelScope.launch(Dispatchers.Default) {
             val cam = _state.value.camera
             val viewport = TransformUtils.cameraViewport(
                 cameraX = cam.x,
@@ -129,7 +133,7 @@ class CanvasViewModel @Inject constructor() : ViewModel() {
                 screenWidth = screenWidth,
                 screenHeight = screenHeight,
             )
-            val visible = ViewportCuller.visibleNodes(allNodes, viewport)
+            val visible = ViewportCuller.visibleNodes(albumData.nodes, viewport)
             _state.update { it.copy(visibleNodes = visible) }
         }
     }
@@ -148,9 +152,9 @@ class CanvasViewModel @Inject constructor() : ViewModel() {
             0xFF_D8_1B_60, // pink
         )
 
-        private fun generateRandomFrames(count: Int, spread: Float): List<CanvasNode> {
+        private fun generateRandomFrames(count: Int, spread: Float): AlbumData {
             val rng = Random(seed = 42)
-            return List(count) { i ->
+            val list = List(count) { i ->
                 val w = rng.nextFloat() * 200f + 50f
                 val h = rng.nextFloat() * 200f + 50f
                 CanvasNode.Frame(
@@ -160,11 +164,13 @@ class CanvasViewModel @Inject constructor() : ViewModel() {
                         y = rng.nextFloat() * spread * 2 - spread,
                         width = w,
                         height = h,
+                        rotation = rng.nextFloat() * 360 - 180
                     ),
                     zIndex = i.toFloat(),
                     color = palette[i % palette.size],
                 )
             }
+            return AlbumData(meta = AlbumMeta(name = "Random"), nodes = list)
         }
     }
 }

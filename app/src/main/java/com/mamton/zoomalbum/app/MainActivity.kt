@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import com.mamton.zoomalbum.core.designsystem.ZoomAlbumTheme
-import com.mamton.zoomalbum.feature.canvas.ui.CanvasScreen
+import com.mamton.zoomalbum.feature.canvas.view.CanvasScreen
 import com.mamton.zoomalbum.feature.ide_ui.ui.IdeOverlayScreen
 import dagger.hilt.android.AndroidEntryPoint
 

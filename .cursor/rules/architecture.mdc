@@ -1,0 +1,42 @@
+---
+description: ZoomAlboom architecture conventions
+globs:
+  - "**/*.kt"
+---
+
+# Architecture
+
+Source of truth: `docs/architecture/overview.md`
+
+## Layers
+
+Single-module Clean Architecture: `app/` (entry, DI, nav) | `core/` (math, design, MVI) | `domain/` (models, repos, use cases) | `data/` (Room, files, repo impls) | `feature/` (UI + ViewModels).
+
+Dependency rule: feature -> domain <- data. core is shared.
+
+## Patterns
+
+- **MVI** — immutable `StateFlow<State>`, sealed `Intent`/`Action`, ViewModel owns mutations.
+- **Separate ViewModels** for canvas (`CanvasViewModel`) and IDE overlay (`IdeViewModel`) — prevents cross-recomposition.
+- **Single `graphicsLayer`** for all camera transforms (translate, scale, rotate at origin 0,0). Nodes never recompose during gestures.
+- **Viewport culling** via `ViewportCuller` (AABB intersection) on `Dispatchers.Default`.
+
+## Data
+
+- Album metadata: Room (`albums` table, `AlbumDao`).
+- Scene graphs: JSON files (`scene_$albumId.json`) via `SceneGraphSerializer` + `FileStorageHelper`.
+- Repos abstracted behind domain interfaces, bound with Hilt `@Binds`.
+
+## Key Models
+
+- `Transform` — x, y, width, height, scale, rotation.
+- `CanvasNode` (sealed) — `Frame` (navigation area) | `Media` (image/video).
+- `Camera` — x, y, scale, rotation. Centroid-anchored zoom/rotation math in `TransformUtils`.
+
+## DI
+
+Hilt. `@HiltAndroidApp` on app, `@AndroidEntryPoint` on Activity, `@HiltViewModel` on VMs. Singleton scope for DB + repos.
+
+## Design System
+
+Dark-first: `CanvasDark`, `PanelBackground`, `AccentCyan`. Theme in `core/designsystem/`.

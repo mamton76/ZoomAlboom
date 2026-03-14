@@ -14,6 +14,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture
 
+> **Full docs:** [`docs/architecture/overview.md`](docs/architecture/overview.md) — source of truth
+> See also: [data-model](docs/architecture/data-model.md) | [modules & DI](docs/architecture/modules.md) | [rendering](docs/architecture/rendering.md) | [navigation](docs/architecture/navigation.md)
+
 ZoomAlboom is a single-module Android app organized in Clean Architecture layers:
 
 ```

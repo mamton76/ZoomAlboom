@@ -81,7 +81,12 @@ See [data-model.md](data-model.md) for schema details.
 | Data | Storage | Format |
 |------|---------|--------|
 | Album metadata | Room (`albums` table) | SQL |
-| Scene graphs | `filesDir/scene_$albumId.json` | JSON (kotlinx-serialization) |
+| IDE workspace state | Room (`ide_workspaces` table) | SQL + JSON blob |
+| Media registry | Room (`media_library` table) | SQL |
+| Scene graphs | `filesDir/scene_{albumId}.json` | JSON (kotlinx-serialization) |
+| Undo/Redo history | `filesDir/history_{albumId}.json` | JSON (command pattern) |
+
+Canvas mutations go through `CanvasCommand` (sealed interface: `Move`, `AddNode`, `RemoveNode`). Commands are stored in a `Deque` in memory and autosaved to disk. See [data-model.md § Undo/Redo](data-model.md#undoredo-model-command-pattern).
 
 ## IDE Overlay
 
@@ -108,6 +113,17 @@ Routes: `PROJECTS_HOME` (album list) and `CANVAS/{albumId}` (canvas editor). Not
 | Images | Coil 3 (deferred) |
 | Async | Coroutines + Flow |
 | Navigation | Jetpack Navigation Compose |
+
+## Open Questions & Future Direction
+
+See [project-memory.md](project-memory.md) for the full decisions log.
+
+- **Unit System:** Canvas should use abstract `Units` instead of raw pixels. Needs a reliable `Units -> DP` formula accounting for zoom and screen density.
+- **Dynamic Containment:** Frame `containsNodeIds` must be recalculated on `Dispatchers.Default` when nodes move — avoid blocking the main thread.
+- **Persistence Evolution:** Current SQLite + JSON is local-only. Future consideration: CRDT or Protobuf for real-time cloud collaboration.
+- **Media Validation:** On album open, check `media_library` source URIs and substitute placeholders for missing files.
+
+Planned features (post-MVP): animated frame transitions, smart tags, layers, audio/live photos, crop. See [project-memory.md § Planned Features](project-memory.md).
 
 ## Key Architectural Decisions
 

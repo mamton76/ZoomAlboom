@@ -83,7 +83,12 @@ Gap between current implementation and target architecture (from reviewed data-m
 - [ ] Calculate `containsNodeIds` on node move (AABB intersection with frames)
 - [ ] Run on `Dispatchers.Default` to avoid blocking main thread
 
-### 4.4 Viewport culling upgrade
+### 4.4 Media validation
+- [ ] On album open, iterate `media_library` and check `sourceUri` availability
+- [ ] Mark missing files as `status = MISSING`
+- [ ] Show placeholder for missing media on canvas
+
+### 4.5 Viewport culling upgrade
 - [~] Brute-force AABB (current)
 - [ ] Spatial index (grid or R-tree) for >2k nodes
 
@@ -135,11 +140,3 @@ Gap between current implementation and target architecture (from reviewed data-m
 - [ ] Audio / Live Photos support
 - [ ] Crop — media masking via bounding box editing
 - [ ] Cloud sync — CRDT or Protobuf for real-time collaboration
-
----
-
-## 9. Media Validation
-
-- [ ] On album open, iterate `media_library` and check `sourceUri` availability
-- [ ] Mark missing files as `status = MISSING`
-- [ ] Show placeholder for missing media on canvas

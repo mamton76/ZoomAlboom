@@ -78,13 +78,13 @@ See [rendering.md](rendering.md) for full detail.
 
 See [data-model.md](data-model.md) for schema details.
 
-| Data | Storage | Format |
-|------|---------|--------|
-| Album metadata | Room (`albums` table) | SQL |
-| IDE workspace state | Room (`ide_workspaces` table) | SQL + JSON blob |
-| Media registry | Room (`media_library` table) | SQL |
-| Scene graphs | `filesDir/scene_{albumId}.json` | JSON (kotlinx-serialization) |
-| Undo/Redo history | `filesDir/history_{albumId}.json` | JSON (command pattern) |
+| Data | Storage | Format | Status |
+|------|---------|--------|--------|
+| Album metadata | Room (`albums` table) | SQL | implemented |
+| IDE workspace state | Room (`ide_workspaces` table) | SQL + JSON blob | planned |
+| Media registry | Room (`media_library` table) | SQL | planned |
+| Scene graphs | `filesDir/scene_{albumId}.json` | JSON (kotlinx-serialization) | implemented (format changing) |
+| Undo/Redo history | `filesDir/history_{albumId}.json` | JSON (command pattern) | planned |
 
 Canvas mutations go through `CanvasCommand` (sealed interface: `Move`, `AddNode`, `RemoveNode`). Commands are stored in a `Deque` in memory and autosaved to disk. See [data-model.md § Undo/Redo](data-model.md#undoredo-model-command-pattern).
 
@@ -114,6 +114,14 @@ Routes: `PROJECTS_HOME` (album list) and `CANVAS/{albumId}` (canvas editor). Not
 | Async | Coroutines + Flow |
 | Navigation | Jetpack Navigation Compose |
 
+## Key Architectural Decisions
+
+1. **Single `graphicsLayer`** for all camera transforms — GPU-accelerated, zero recomposition.
+2. **Separate Canvas / IDE ViewModels** — isolated recomposition scopes.
+3. **Dual persistence** — Room for queryable metadata, JSON files for flexible scene graphs.
+4. **Brute-force viewport culling** — sufficient now; planned grid/R-tree upgrade for >2k nodes.
+5. **Dark-first design system** — `CanvasDark`, `PanelBackground`, `AccentCyan`.
+
 ## Open Questions & Future Direction
 
 See [project-memory.md](project-memory.md) for the full decisions log.
@@ -124,11 +132,3 @@ See [project-memory.md](project-memory.md) for the full decisions log.
 - **Media Validation:** On album open, check `media_library` source URIs and substitute placeholders for missing files.
 
 Planned features (post-MVP): animated frame transitions, smart tags, layers, audio/live photos, crop. See [project-memory.md § Planned Features](project-memory.md).
-
-## Key Architectural Decisions
-
-1. **Single `graphicsLayer`** for all camera transforms — GPU-accelerated, zero recomposition.
-2. **Separate Canvas / IDE ViewModels** — isolated recomposition scopes.
-3. **Dual persistence** — Room for queryable metadata, JSON files for flexible scene graphs.
-4. **Brute-force viewport culling** — sufficient now; planned grid/R-tree upgrade for >2k nodes.
-5. **Dark-first design system** — `CanvasDark`, `PanelBackground`, `AccentCyan`.

@@ -1,5 +1,7 @@
 # Data Model
 
+> This document describes the **target** data model. See [Migration Notes](#migration-notes) at the bottom for differences from the current implementation.
+
 Three independent storage layers:
 
 1. **Metadata & UI State** — relational (Room)
@@ -166,7 +168,7 @@ domain/repository/
 
 Implementations in `data/repository/`, bound via Hilt `@Binds`.
 
-## Migration Notes (Current → Target)
+## Migration Notes
 
 | Area | Current | Target |
 |------|---------|--------|

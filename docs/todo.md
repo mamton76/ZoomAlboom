@@ -1,6 +1,8 @@
 # TODO — ZoomAlboom
 
-Gap between current implementation and target architecture (from reviewed data-model, PRD, and project-memory).
+Gap between current implementation and target architecture.
+
+> Sources: [data-model](architecture/data-model.md) | [PRD](product/PRD.md) | [project-memory](product/project-memory.md) | [future-ideas](product/future-ideas.md)
 
 ## Legend
 - `[ ]` — not started
@@ -134,7 +136,8 @@ Gap between current implementation and target architecture (from reviewed data-m
 
 ## 8. Future (Post-MVP)
 
-- [ ] Animated frame transitions (camera interpolation — linear/bezier)
+See [future-ideas.md](product/future-ideas.md) for the full list.
+
 - [ ] Smart tags — tap tag to teleport to frame
 - [ ] Layers — global show/hide groups
 - [ ] Audio / Live Photos support

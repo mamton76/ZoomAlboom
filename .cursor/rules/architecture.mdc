@@ -1,42 +1,36 @@
 ---
-description: ZoomAlboom architecture conventions
+description: ZoomAlboom architecture rules
 globs:
   - "**/*.kt"
+alwaysApply: true
 ---
 
-# Architecture
+# ZoomAlboom
 
-Source of truth: `docs/architecture/overview.md`
+Read first:
+- `docs/product/vision.md`
+- `docs/architecture/overview.md`
+- `docs/architecture/data-model.md`
+- `docs/architecture/rendering.md`
+- `docs/architecture/navigation.md`
+- `docs/architecture/conventions.md`
+- `memory/MEMORY.md`
 
-## Layers
+## Critical rules
 
-Single-module Clean Architecture: `app/` (entry, DI, nav) | `core/` (math, design, MVI) | `domain/` (models, repos, use cases) | `data/` (Room, files, repo impls) | `feature/` (UI + ViewModels).
+- Do not invent a second architecture when docs already define one.
+- Keep **canvas/navigation state** separate from **IDE overlay / panel state**.
+- Keep domain models independent from Compose UI.
+- Use the shared camera transform approach described in `docs/architecture/rendering.md`.
+- Put stable architecture in `docs/architecture/*`.
+- Put discovered implementation notes and quirks in `memory/MEMORY.md`.
 
-Dependency rule: feature -> domain <- data. core is shared.
+## Dependency direction
 
-## Patterns
+`feature -> domain <- data`, with `core` shared.
 
-- **MVI** — immutable `StateFlow<State>`, sealed `Intent`/`Action`, ViewModel owns mutations.
-- **Separate ViewModels** for canvas (`CanvasViewModel`) and IDE overlay (`IdeViewModel`) — prevents cross-recomposition.
-- **Single `graphicsLayer`** for all camera transforms (translate, scale, rotate at origin 0,0). Nodes never recompose during gestures.
-- **Viewport culling** via `ViewportCuller` (AABB intersection) on `Dispatchers.Default`.
+## Implementation style
 
-## Data
-
-- Album metadata: Room (`albums` table, `AlbumDao`).
-- Scene graphs: JSON files (`scene_$albumId.json`) via `SceneGraphSerializer` + `FileStorageHelper`.
-- Repos abstracted behind domain interfaces, bound with Hilt `@Binds`.
-
-## Key Models
-
-- `Transform` — x, y, width, height, scale, rotation.
-- `CanvasNode` (sealed) — `Frame` (navigation area) | `Media` (image/video).
-- `Camera` — x, y, scale, rotation. Centroid-anchored zoom/rotation math in `TransformUtils`.
-
-## DI
-
-Hilt. `@HiltAndroidApp` on app, `@AndroidEntryPoint` on Activity, `@HiltViewModel` on VMs. Singleton scope for DB + repos.
-
-## Design System
-
-Dark-first: `CanvasDark`, `PanelBackground`, `AccentCyan`. Theme in `core/designsystem/`.
+- Prefer immutable UI state.
+- Avoid putting heavy canvas work on the main thread.
+- When adding a new major concept, update docs if the architecture changes.

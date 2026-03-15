@@ -1,5 +1,7 @@
 # Rendering Architecture
 
+> Related: [overview](overview.md) | [data-model](data-model.md) | [navigation](navigation.md)
+
 ## Canvas Rendering Pipeline
 
 ### 1. Gesture Input

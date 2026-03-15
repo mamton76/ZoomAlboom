@@ -1,5 +1,7 @@
 # Modules & Dependency Injection
 
+> Related: [overview](overview.md) | [data-model](data-model.md) | [rendering](rendering.md)
+
 ## Single-Module Structure
 
 ZoomAlboom is a single Gradle module (`app`). Packages enforce the layer boundaries:

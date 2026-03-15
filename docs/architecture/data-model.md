@@ -1,6 +1,8 @@
 # Data Model
 
 > This document describes the **target** data model. See [Migration Notes](#migration-notes) at the bottom for differences from the current implementation.
+>
+> Related: [overview](overview.md) | [rendering](rendering.md) | [modules & DI](modules.md) | [TODO](../todo.md)
 
 Three independent storage layers:
 

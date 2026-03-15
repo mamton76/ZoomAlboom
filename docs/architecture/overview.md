@@ -1,6 +1,8 @@
 # ZoomAlboom Architecture Overview
 
 > **Source of truth** for the project's architecture. Other docs in this folder expand on individual subsystems.
+>
+> Related: [PRD](../product/PRD.md) | [Vision](../product/vision.md) | [Future Ideas](../product/future-ideas.md) | [TODO](../todo.md)
 
 ## High-Level Summary
 
@@ -51,6 +53,8 @@ com.mamton.zoomalbum/
 
 Each feature owns its ViewModel(s) and Compose UI. ViewModels are `@HiltViewModel`.
 
+See [conventions.md](conventions.md) for code style, file placement rules, and "how to add" recipes.
+
 ## State Management — MVI
 
 Every feature follows the MVI pattern:
@@ -98,7 +102,11 @@ Six docked slots (`LeftTop`, `LeftBottom`, `RightTop`, `RightBottom`, `Top`, `Bo
 
 See [navigation.md](navigation.md).
 
-Routes: `PROJECTS_HOME` (album list) and `CANVAS/{albumId}` (canvas editor). Not yet fully integrated — `MainActivity` currently composes canvas directly.
+Three navigation levels:
+
+1. **App-level** — Jetpack Navigation between screens (`PROJECTS_HOME` -> `CANVAS/{albumId}`). Not yet wired into `MainActivity`.
+2. **In-album camera** — pan / zoom / rotate via gestures. Continuous, user-driven.
+3. **Frame transitions** — animated camera interpolation (linear/bezier) to focus on a frame. Discrete, intent-driven.
 
 ## Tech Stack
 
@@ -114,21 +122,48 @@ Routes: `PROJECTS_HOME` (album list) and `CANVAS/{albumId}` (canvas editor). Not
 | Async | Coroutines + Flow |
 | Navigation | Jetpack Navigation Compose |
 
+## Dependencies
+
+Managed via version catalog (`gradle/libs.versions.toml`). Compose libraries via BOM.
+
+| Dependency | Version |
+|------------|---------|
+| Compose BOM | 2026.02.01 |
+| Hilt | 2.59.1 |
+| Room | 2.8.4 |
+| Coil | 3.4.0 |
+| kotlinx-serialization | 1.9.0 |
+| Navigation Compose | 2.9.7 |
+| Lifecycle | 2.10.0 |
+| Coroutines | 1.10.1 |
+| KSP | 2.2.10-2.0.2 |
+| AGP | 9.0.1 |
+
+**Gotchas:** No `material-icons-core` in deps (use Unicode chars). `TabRow` deprecated in this BOM — use `PrimaryTabRow` with `@OptIn(ExperimentalMaterial3Api::class)`.
+
 ## Key Architectural Decisions
 
-1. **Single `graphicsLayer`** for all camera transforms — GPU-accelerated, zero recomposition.
-2. **Separate Canvas / IDE ViewModels** — isolated recomposition scopes.
-3. **Dual persistence** — Room for queryable metadata, JSON files for flexible scene graphs.
-4. **Brute-force viewport culling** — sufficient now; planned grid/R-tree upgrade for >2k nodes.
-5. **Dark-first design system** — `CanvasDark`, `PanelBackground`, `AccentCyan`.
+1. **Frames are navigation anchors, not only visual containers** — they structure the canvas and support transitions through album space.
+2. **Single `graphicsLayer`** for all camera transforms — GPU-accelerated, zero recomposition.
+3. **Separate Canvas / IDE ViewModels** — isolated recomposition scopes.
+4. **Dual persistence** — Room for queryable metadata, JSON files for flexible scene graphs.
+5. **Brute-force viewport culling** — sufficient now; planned grid/R-tree upgrade for >2k nodes.
+6. **Dark-first design system** — `CanvasDark`, `PanelBackground`, `AccentCyan`.
+
+## Performance Principles
+
+- Single shared transform layer (`graphicsLayer`) — avoid per-node recomposition during gestures
+- Heavy geometry and containment work runs off main thread (`Dispatchers.Default`)
+- Progressive image loading / downsampling at low zoom to prevent OOM
+- Viewport culling — only render nodes visible in the current camera AABB
 
 ## Open Questions & Future Direction
 
-See [project-memory.md](project-memory.md) for the full decisions log.
+See [project-memory.md](../product/project-memory.md) for the full decisions log.
 
 - **Unit System:** Canvas should use abstract `Units` instead of raw pixels. Needs a reliable `Units -> DP` formula accounting for zoom and screen density.
 - **Dynamic Containment:** Frame `containsNodeIds` must be recalculated on `Dispatchers.Default` when nodes move — avoid blocking the main thread.
 - **Persistence Evolution:** Current SQLite + JSON is local-only. Future consideration: CRDT or Protobuf for real-time cloud collaboration.
 - **Media Validation:** On album open, check `media_library` source URIs and substitute placeholders for missing files.
 
-Planned features (post-MVP): animated frame transitions, smart tags, layers, audio/live photos, crop. See [project-memory.md § Planned Features](project-memory.md).
+Planned features (post-MVP): smart tags, layers, audio/live photos, crop. See [future-ideas.md](../product/future-ideas.md).

@@ -1,81 +1,434 @@
 # Product Requirements Document (PRD)
 
-**Product:** Alboom (Android)
+## 1. Product Summary
 
-**Stage:** MVP (Core Product)
+**ZoomAlboom** is an Android-first interactive multimedia album built around an infinite zoomable canvas.
 
-## 1. Core Concept
+Instead of browsing content page by page, users move through a spatial world made of photos, videos, text, stickers, and frames. The album behaves more like a visual map, memory space, or story landscape than a traditional photo gallery.
 
-An Infinite Canvas for the spatial organization of media content (photos, videos, notes) with a system of navigation frames and a customizable interface (IDE-style).
+The product is intended to support rich personal and creative storytelling: family albums, travel diaries, educational albums, recipe albums, and project journals.
 
-### References (Inspirations):
+---
 
-* **Prezi:** Zoomable User Interface (ZUI) concept, non-linear presentations, and using frames as "scenes" for storytelling.
+## 2. Product Vision
 
-* **ZoomNotes:** Free infinite space for notes and spatial organization of thoughts.
+ZoomAlboom turns an album into a navigable space.
 
-* **Figma / Miro:** Logic of frame-containers, object selection (Bounding Box), and an advanced interface with side panels (IDE-style).
+A user does not simply open “the next page.”  
+They pan, zoom, rotate, and move between meaningful areas of the album. Frames help structure this space and create visual and semantic anchors. A family story, a trip, a collection of recipes, or a project timeline can all exist inside one spatial canvas.
 
-* **Obsidian / Notion:** System of smart tags and interactive hyperlinks (portals) to create a connected knowledge base.
+The experience should feel:
+- visual
+- intuitive
+- exploratory
+- emotionally rich
+- spatial rather than linear
 
-### Use Cases:
+---
 
-* **Travel Diaries:** A visual map of a trip, where photos are tied to locations, and text notes and impressions are scattered around.
+## 3. Problem Statement
 
-* **Family Archives and Family Trees:** A spatial structure of generations with the ability to "dive" into the details of each family member through a system of tag-links.
+Traditional albums and galleries are good at storing media, but weak at expressing relationships between pieces of media.
 
-* **Moodboards and Design Projects:** (e.g., renovations): Gathering references, palettes, and before/after photos in a single infinite space divided by room-frames.
+Users often want to show:
+- how people are connected
+- how places relate to each other
+- how events evolve over time
+- clusters of memories, topics, or stories
+- both overview and detail in one space
 
-## 2. Core Functionality (Core / MVP)
+Existing tools usually force one of these models:
+- a flat gallery
+- a slideshow
+- a folder tree
+- a timeline
+- a presentation deck
 
-* **Infinite Canvas:** A scalable workspace for freely arranging various types of media files.
+These models are useful, but they do not fully support exploratory, nested, spatial storytelling.
 
-* **Frame System:** A tool for visually highlighting areas on the canvas, creating logical groups, and enabling smooth navigation (transitions) between them.
+ZoomAlboom addresses this by giving users a canvas where media can be arranged meaningfully and navigated visually.
 
-* **Media Library:** Basic lists for managing uploaded content and created frames.
+---
 
-## 3. Advanced Interface (IDE Custom UI)
+## 4. Goals
 
-For convenient and professional work with the canvas, the app provides a customizable user interface inspired by desktop Integrated Development Environments (IDEs):
+### 4.1 Primary goals
+- Let users create a multimedia album on an infinite canvas
+- Support intuitive spatial navigation: pan, zoom, rotation
+- Let users organize media into meaningful frames and zones
+- Support both overview and deep detail in the same album
+- Make the album suitable for emotional, narrative, and creative use cases
 
-* **Panel System:** Information panels can be either docked or floating above the canvas.
+### 4.2 Product goals
+- Build a strong MVP for Android
+- Establish a clean architecture for future growth
+- Make core interactions performant on large canvases
+- Support extensibility for future content types and navigation models
 
-* **Adaptive States:** Interface elements support compact (collapsed to an icon and name) and expanded (maximum detail) views.
+---
 
-* **Dynamic Themes:** The color scheme of the interface can reactively adapt to the visual style and content of the currently open album.
+## 5. Non-Goals for MVP
 
-## 10. Technical Challenges and Architecture
+The following are explicitly **out of scope for MVP**:
 
-### 10.2. Coordinate Math and Frames
+- real-time multi-user collaboration
+- cloud sync across devices
+- web or desktop editor parity
+- AI tagging and semantic search
+- advanced animations and motion design system
+- rich media editing inside the app
+- full version history
+- publishing/sharing platform
+- CRDT-based collaborative document model
+- highly polished export to video/print/web
 
-* **Challenge:** The need to process intersections of element Bounding Boxes with frames (dynamic ownership) during group movement, ensuring it doesn't block the Main Thread.
+These may be considered after core canvas and album interactions are stable.
 
-### 10.3. Media and Memory Management (OOM Prevention)
+---
 
-* **Challenge:** The application stores only file URIs, not the actual images.
+## 6. Target Users
 
-* **Solutions:**
+### 6.1 Primary user segments
 
-    * Using a library for asynchronous image loading (Coil) with aggressive caching.
+#### A. Family storytellers
+People who want to create rich family albums with:
+- relatives
+- children
+- pets
+- homes
+- travel
+- milestones
+- generational structure
 
-    * Implementing "downsampling" (reducing bitmap quality) when the camera is zoomed out heavily to avoid `OutOfMemoryError`, and loading high-res versions when zooming in.
+#### B. Creative personal archivists
+Users who enjoy arranging memories, notes, visuals, and stories in a meaningful visual space.
 
-### 10.4. State Management and Layers (IDE UI)
+#### C. Hobby/project documenters
+People who want to document:
+- a creative project
+- learning materials
+- a long-term hobby
+- a trip
+- a process or archive
 
-* **Challenge:** The application features a complex interface with floating and docked panels, as well as an editing mode (object selection).
+### 6.2 Secondary user segments
+- teachers or parents making educational albums
+- home cooks building visual recipe collections
+- travelers creating route-based memory maps
+- users who think visually and dislike rigid linear album structures
 
-* **Solutions:**
+---
 
-    * State management via the MVI pattern.
+## 7. Core Use Cases
 
-    * **Critical Separation:** Strict separation of the Canvas State (nodes, coordinates) and the Interface State (which panels are open, which object is selected) so that UI changes do not trigger a recomposition of the heavy canvas.
+### 7.1 Family album
+The user creates a family canvas with:
+- central family overview
+- individual areas for each family member
+- pets
+- homes and places
+- relatives and branches
+- trips and life chapters
 
-### 10.5. Persistence (Data Saving)
+A user can start from a shared family overview and zoom into a person, a place, a branch of relatives, or a specific story.
 
-* **Challenge:** Fast app startup and reliable autosaving are required.
+### 7.2 Travel diary
+The user creates a map-like or narrative travel album with:
+- trips
+- cities
+- routes
+- notes
+- media clusters by location or day
 
-* **Solutions:**
+### 7.3 Cookbook
+The user creates a visual recipe book where each dish or recipe cluster contains:
+- ingredient notes
+- process photos
+- short videos
+- tips and variations
 
-    * Storing metadata (project list, UI state) in a relational database (Room).
+### 7.4 Educational album
+The user arranges explanations, illustrations, diagrams, and examples spatially.
 
-    * Serializing the entire Scene Graph into JSON format (using kotlinx-serialization) to save the infinite canvas structure.
+### 7.5 Project album
+The user documents a process, concept, or long-term project with:
+- reference material
+- progress snapshots
+- notes
+- milestones
+- outcomes
+
+---
+
+## 8. Core Product Concepts
+
+### 8.1 Infinite canvas
+The album exists on an effectively unbounded 2D space.
+
+### 8.2 Frames
+Frames are structured areas of the album.  
+They are not just decorative boundaries: they help users organize content and navigate between meaningful regions.
+
+Frames may represent:
+- a person
+- a family branch
+- a trip
+- a recipe
+- a chapter
+- a place
+- a topic
+
+### 8.3 Media items
+The main media types in MVP are:
+- photo
+- video
+- text
+- sticker
+
+Each media item can be placed spatially on the canvas.
+
+### 8.4 Camera-based navigation
+The user navigates the album with camera-like movement:
+- pan
+- zoom
+- rotate
+- focus on a frame
+
+### 8.5 Spatial storytelling
+The meaning of the album comes not only from the media itself, but also from:
+- spatial grouping
+- proximity
+- nesting
+- scale
+- transitions between areas
+
+---
+
+## 9. MVP Scope
+
+### 9.1 In scope for MVP
+
+#### Album canvas
+- create and open an album
+- display album on an infinite or effectively unbounded canvas
+- support panning
+- support zooming
+- support rotation
+
+#### Frames
+- create frames
+- place frames on canvas
+- move/resize frames
+- visually distinguish frames from general content
+- navigate/focus into frames
+- animated frame transitions — smooth camera interpolation (linear/bezier) between frames
+
+#### Media items
+- add photo item
+- add video item
+- add text item
+- add sticker item
+- move / scale / rotate media items
+- display media within the canvas
+
+#### Editing
+- basic selection
+- transform selected object
+- edit basic text content
+- delete object
+- duplicate object
+
+#### Structure / panels / workspace
+- media library panel
+- frame list / structure panel
+- contextual editing panels
+- IDE-like overlay panels that do not break canvas interaction model
+
+#### Persistence
+- save and reopen albums locally
+- persist canvas structure, frames, and item placement
+- persist references to media files
+
+---
+
+## 10. Future Scope (Post-MVP)
+
+These are likely future directions, but not required for initial release. See [future-ideas.md](future-ideas.md) for the full categorized list.
+
+- smart tags for people / places / topics
+- semantic jumps across the album
+- layers and visibility control
+- crop / masking
+- audio notes
+- live-photo-like media
+- timeline mode / temporal dimension
+- AI-assisted organization
+- cloud backup and sync
+- export to video / print / web page
+
+---
+
+## 11. Functional Requirements
+
+### 11.1 Album lifecycle
+- User can create a new album
+- User can open an existing album
+- User can save album state locally
+- User can continue editing after reopening
+
+### 11.2 Canvas interaction
+- User can pan across album space
+- User can zoom in and out smoothly
+- User can rotate the view
+- Interactions should remain responsive with non-trivial amounts of content
+
+### 11.3 Frame management
+- User can create a frame
+- User can rename a frame
+- User can move and resize a frame
+- User can focus/navigate to a frame
+- Frame list should help navigate project structure
+
+### 11.4 Media placement
+- User can import or attach media items
+- User can place media onto canvas
+- User can move, scale, and rotate items
+- User can edit text items
+- User can remove items
+- User can duplicate items
+
+### 11.5 Panels / editor shell
+- User can access supporting panels without losing the canvas mental model
+- Panels can coexist with the canvas
+- Panels should feel like tools around the canvas, not a separate mode replacing it
+
+### 11.6 Persistence
+- Album state should survive app restart
+- Missing media references should be handled gracefully
+- Data model should support future extension
+
+---
+
+## 12. UX Principles
+
+### 12.1 Spatial first
+The app should feel like navigating a visual space, not filling a form.
+
+### 12.2 Overview + detail
+Users should be able to:
+- see the big picture
+- zoom into small stories
+- move naturally between levels
+
+### 12.3 Direct manipulation
+Objects should feel directly movable and transformable.
+
+### 12.4 Non-destructive mental model
+The user should feel that content lives in a stable world and is being explored, not constantly restructured by hidden system logic.
+
+### 12.5 Lightweight editing shell
+Editor tools should support the canvas rather than dominate it.
+
+---
+
+## 13. UX Risks
+
+- Too much UI chrome can destroy the feeling of free navigation
+- Too many overlapping gestures can make interaction confusing
+- Large canvases can become disorienting without structure
+- Panels can compete with the core canvas metaphor
+- Performance drops during gestures will immediately damage perceived quality
+
+---
+
+## 14. Technical Constraints
+
+See [architecture overview](../architecture/overview.md) for implementation details.
+
+### 14.1 Platform
+- Android-first
+- Kotlin
+- Jetpack Compose
+
+### 14.2 Rendering model
+- Canvas-heavy UI
+- Shared transform strategy for pan/zoom/rotation
+- Performance-sensitive rendering path
+
+### 14.3 Persistence model
+Likely split between:
+- structured local metadata storage
+- serialized scene/canvas content
+- media URI/file references
+
+### 14.4 Architecture requirements
+- clean separation of domain, data, and UI concerns
+- canvas state separate from overlay/panel state
+- future extensibility for more media types and navigation modes
+
+---
+
+## 15. Success Criteria for MVP
+
+The MVP is successful if a user can:
+
+1. create an album
+2. place several frames
+3. add photos, videos, text, and stickers
+4. navigate the canvas smoothly with pan/zoom/rotation
+5. use frames as meaningful anchors
+6. save the album and reopen it without losing structure
+7. feel that the album is spatial and expressive rather than just a gallery
+
+---
+
+## 16. Key Product Risks
+
+### 16.1 Interaction complexity
+Users may struggle if navigation and editing modes are unclear.
+
+### 16.2 Performance risk
+A spatial media canvas can become expensive to render and update.
+
+### 16.3 Scope creep
+There are many tempting future features; MVP must stay tight.
+
+### 16.4 Discoverability
+Users may need gentle structure to understand how to build meaningful albums.
+
+---
+
+## 17. Open Product Questions
+
+- How opinionated should frame behavior be in MVP?
+- Should frame containment be explicit, inferred, or hybrid?
+- How much rotation should be exposed in everyday UX?
+- Should navigation favor free exploration or structured jumping?
+- How much editing power belongs in MVP versus post-MVP?
+- Should the first-run experience include templates?
+
+---
+
+## 18. Inspirations
+
+The product is inspired by tools and ideas in the space of:
+- zoomable interfaces
+- spatial note-taking
+- visual knowledge spaces
+- multimedia scrapbooks
+- interactive albums
+- Prezi-like navigation
+- ZoomNotes-like freeform composition
+
+ZoomAlboom is not intended to be just a presentation tool or note app.  
+Its main focus is **multimedia storytelling in a navigable space**.
+
+---
+
+## 19. Summary
+
+ZoomAlboom is a spatial multimedia album for Android.
+
+Its MVP should prove one core thing:
+
+> users can build and navigate emotionally meaningful multimedia spaces, not just store files in a gallery. toma

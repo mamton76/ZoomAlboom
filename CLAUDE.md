@@ -1,23 +1,46 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This repository contains **ZoomAlboom**, an Android-first interactive multimedia album on an infinite zoomable canvas.
+
+Users build spatial stories from photos, videos, text, stickers, and frames.
+Frames are not just visual containers — they are navigation anchors inside the album space.
+
+## Read first
+
+Source-of-truth docs:
+
+- `docs/product/vision.md`
+- `docs/product/PRD.md`
+- `docs/architecture/overview.md`
+- `docs/architecture/data-model.md`
+- `docs/architecture/modules.md`
+- `docs/architecture/rendering.md`
+- `docs/architecture/navigation.md`
+- - `docs/architecture/decisions.md` (if present)
+- `docs/architecture/conventions.md`
+
+Working memory / discovered implementation notes:
+
+- `memory/MEMORY.md`
+
+## How to work in this repo
+
+- Do not invent a second architecture if docs already define one.
+- Keep **canvas state** separate from **IDE overlay state**.
+- Keep domain models independent from Compose/UI concerns.
+- Prefer short targeted edits over broad rewrites.
+- If architecture changes, update the relevant docs in `docs/architecture/`.
+- Put discovered implementation facts and gotchas into `memory/MEMORY.md`, not into architecture docs.
 
 ## Commands
 
 ```bash
-./gradlew assembleDebug              # Build debug APK
-./gradlew test                       # Run unit tests
-./gradlew testDebugUnitTest          # Run a specific test class: add --tests "com.mamton.zoomalboom.ExampleUnitTest"
-./gradlew connectedAndroidTest       # Run instrumented tests on connected device/emulator
-./gradlew clean                      # Clean build artifacts
+./gradlew assembleDebug
+./gradlew test
+./gradlew testDebugUnitTest
+./gradlew connectedAndroidTest
+./gradlew clean
 ```
-
-## Architecture
-
-> **Full docs:** [`docs/architecture/overview.md`](docs/architecture/overview.md) — source of truth
-> See also: [data-model](docs/architecture/data-model.md) | [modules & DI](docs/architecture/modules.md) | [rendering](docs/architecture/rendering.md) | [navigation](docs/architecture/navigation.md)
-
-Always refer to docs/architecture/
 
 ## Tech Stack
 - **Language:** Kotlin 2.2.10, **Min SDK:** 24, **Target SDK:** 36

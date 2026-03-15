@@ -1,18 +1,6 @@
 # Project Memory & Decisions Log
 
-This file replaces the raw audio transcripts. It records future ideas and unresolved architectural questions.
-
-## 📌 Planned Features (Product Backlog)
-
-* **Animated Transitions:** Transitions between frames (cameras) are not instant, but use linear/bezier camera interpolation.
-
-* **Smart Tags:** Ability to tag objects (people, places). Clicking a tag = teleporting to the corresponding frame.
-
-* **Layers:** Ability to globally hide/show groups of objects (in addition to frames).
-
-* **Audio/Live Photos:** Support for audio notes and moving photos (Harry Potter style).
-
-* **Crop:** Masking media through internal editing of the Bounding Box.
+This file records unresolved architectural questions. Planned features live in [future-ideas.md](future-ideas.md).
 
 ## 🛠 Open Technical Questions (Tech Debt / Research)
 

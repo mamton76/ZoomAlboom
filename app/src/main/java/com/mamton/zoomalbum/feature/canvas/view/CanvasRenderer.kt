@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.sp
 import com.mamton.zoomalbum.domain.model.CanvasNode
+import androidx.core.graphics.toColorInt
 
 /**
  * Renders a single [CanvasNode] inside the camera-transformed container.
@@ -35,7 +36,7 @@ private fun FrameRenderer(frame: CanvasNode.Frame) {
     val density = LocalDensity.current
     val t = frame.transform
     val shape = RoundedCornerShape(size = with(density) { 4f.toDp() })
-    val fillColor = Color(frame.color)
+    val fillColor = Color(frame.color.toColorInt())
     val borderColor = fillColor.copy(alpha = 0.6f)
 
     Box(
@@ -46,8 +47,8 @@ private fun FrameRenderer(frame: CanvasNode.Frame) {
                 y = with(density) { t.y.toDp() },
             )
             .size(
-                width = with(density) { (t.width * t.scale).toDp() },
-                height = with(density) { (t.height * t.scale).toDp() },
+                width = with(density) { (t.w * t.scale).toDp() },
+                height = with(density) { (t.h * t.scale).toDp() },
             )
             .rotate(t.rotation)
             .clip(shape)

@@ -139,17 +139,17 @@ class CanvasViewModel @Inject constructor() : ViewModel() {
     }
 
     companion object {
-        private val palette = longArrayOf(
-            0xFF_E5_39_35, // red
-            0xFF_1E_88_E5, // blue
-            0xFF_43_A0_47, // green
-            0xFF_FB_8C_00, // orange
-            0xFF_8E_24_AA, // purple
-            0xFF_00_89_7B, // teal
-            0xFF_F4_51_1E, // deep-orange
-            0xFF_39_49_AB, // indigo
-            0xFF_C0_CA_33, // lime
-            0xFF_D8_1B_60, // pink
+        private val palette = arrayOf(
+            "#E53935", // red
+            "#1E88E5", // blue
+            "#43A047", // green
+            "#FB8C00", // orange
+            "#8E24AA", // purple
+            "#00897B", // teal
+            "#F4511E", // deep-orange
+            "#3949AB", // indigo
+            "#C0CA33", // lime
+            "#D81B60", // pink
         )
 
         private fun generateRandomFrames(count: Int, spread: Float): AlbumData {
@@ -162,11 +162,11 @@ class CanvasViewModel @Inject constructor() : ViewModel() {
                     transform = Transform(
                         x = rng.nextFloat() * spread * 2 - spread,
                         y = rng.nextFloat() * spread * 2 - spread,
-                        width = w,
-                        height = h,
-                        rotation = rng.nextFloat() * 360 - 180
+                        w = w,
+                        h = h,
+                        rotation = rng.nextFloat() * 360 - 180,
+                        zIndex = i.toFloat(),
                     ),
-                    zIndex = i.toFloat(),
                     color = palette[i % palette.size],
                 )
             }

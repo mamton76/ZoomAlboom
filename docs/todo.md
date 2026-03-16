@@ -14,13 +14,13 @@ Gap between current implementation and target architecture.
 ## 1. Data Model Migration
 
 ### 1.1 Transform & CanvasNode refactor
-- [ ] Rename `Transform.width/height` to `w/h`
-- [ ] Move `zIndex` from `CanvasNode` into `Transform`
-- [ ] `Frame.color`: change from `Long` (ARGB) to hex `String`
-- [ ] `Frame.childIds` -> `containsNodeIds` (dynamic calculation)
-- [ ] `Media.uri` -> `mediaRefId` (FK to `media_library`)
-- [ ] Add `tags: List<String>` to `CanvasNode.Media`
-- [ ] Add `MediaType.AUDIO` variant
+- [x] Rename `Transform.width/height` to `w/h`
+- [x] Move `zIndex` from `CanvasNode` into `Transform`
+- [x] `Frame.color`: change from `Long` (ARGB) to hex `String`
+- [x] `Frame.childIds` -> `containsNodeIds` (dynamic calculation)
+- [x] `Media.uri` -> `mediaRefId` (FK to `media_library`)
+- [x] Add `tags: List<String>` to `CanvasNode.Media`
+- [x] Add `MediaType.AUDIO` variant
 - [ ] Update `SceneGraphSerializer` for new JSON structure
 
 ### 1.2 AlbumMeta / albums table

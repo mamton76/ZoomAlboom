@@ -24,8 +24,8 @@ object TransformUtils {
     fun toBoundingBox(transform: Transform): BoundingBox = BoundingBox(
         left = transform.x,
         top = transform.y,
-        right = transform.x + transform.width * transform.scale,
-        bottom = transform.y + transform.height * transform.scale,
+        right = transform.x + transform.w * transform.scale,
+        bottom = transform.y + transform.h * transform.scale,
     )
 
     /**

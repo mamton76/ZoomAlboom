@@ -89,9 +89,51 @@ Rendered **outside** the graphicsLayer Box (not affected by camera):
 
 ## IDE Overlay
 
-### Layout
+### Canvas-First Default Layout
 
-`IdeOverlayScreen` composes on top of `CanvasScreen` in `MainActivity`:
+By default, the IDE overlay is minimal — the canvas dominates the screen:
+
+```
+┌──────────────────────────────────────┐
+│  TopBar: album name | undo/redo | ≡  │
+├──────────────────────────────────────┤
+│                                      │
+│                                      │
+│            (canvas ~100%)            │
+│                                      │
+│                                      │
+│                                [+]   │  ← FAB
+└──────────────────────────────────────┘
+```
+
+All docked and floating panels are hidden/collapsed by default. Users can enable them via the Panel Configuration UI (menu-accessible).
+
+### Canvas-First UI Modes
+
+> See also: [PRD §12.6 — Canvas-first chrome](../product/PRD.md#126-canvas-first-chrome)
+
+Three modes layer over the canvas depending on user action:
+
+**1. Navigate mode** (default)
+- Canvas takes ~100% of screen
+- Thin TopBar: album name, undo/redo buttons, menu icon
+- Single FAB [+] bottom-right for adding content
+- No panels visible
+
+**2. Add content mode** (triggered by FAB [+])
+- Bottom Sheet slides up from the bottom edge
+- Contains: content type picker (photo, video, text, sticker) + media library browser
+- Canvas remains visible and interactive behind the sheet
+- Sheet dismisses on drag-down or content placement
+
+**3. Object selected mode** (triggered by tapping a canvas node)
+- Contextual action bar appears at the bottom of the screen
+- Actions: move, scale, delete, duplicate, edit
+- Bar disappears when selection is cleared (tap on empty canvas)
+
+### Full Panel Layout (Opt-In)
+
+When panels are enabled via the Panel Configuration UI, `IdeOverlayScreen` composes on top of `CanvasScreen` in `MainActivity`:
 
 ```
 ┌──────────────────────────────────────┐
@@ -105,6 +147,8 @@ Rendered **outside** the graphicsLayer Box (not affected by camera):
 └──────────────────────────────────────┘
          + floating panels on top
 ```
+
+This layout is hidden by default and available as a power-user configuration.
 
 ### Panel System
 

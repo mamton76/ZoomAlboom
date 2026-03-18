@@ -96,26 +96,38 @@ Gap between current implementation and target architecture.
 
 ---
 
-## 5. IDE Overlay
+## 5. UI Architecture — Canvas-First Refactor
 
-### 5.1 Panel content
-- [~] `MediaLibraryPanel` — stub
-- [~] `FrameListPanel` — stub
+- [ ] Refactor `IdeViewModel` default state: all panels hidden by default
+- [ ] Implement FAB [+] with content type picker bottom sheet
+- [ ] Implement media library as bottom sheet (currently: docked panel stub)
+- [ ] Implement contextual action bar for selected canvas node
+- [ ] Design and implement Panel Configuration UI (menu-accessible)
+- [ ] Update `IdeState` to support panel config persistence
+- [ ] Move frame list to menu/swipe-accessible surface
+
+---
+
+## 6. IDE Overlay
+
+### 6.1 Panel content (opt-in panel mode)
+- [~] `MediaLibraryPanel` — stub (default users use bottom sheet from §5 instead)
+- [~] `FrameListPanel` — stub (default users access via menu/swipe from §5 instead)
 - [ ] Wire `MediaLibraryPanel` to `media_library` data
 - [ ] Wire `FrameListPanel` to scene graph frames
 - [ ] Add media to canvas from library panel
 
-### 5.2 Panel persistence
+### 6.2 Panel persistence
 - [ ] Save panel state to `ide_workspaces` on change
 - [ ] Restore panel state on album open
 
-### 5.3 Dynamic themes
+### 6.3 Dynamic themes
 - [ ] Theme switching per album (`activeTheme` in `ide_workspaces`)
 - [ ] Reactive theme adaptation based on album content (PRD § 3)
 
 ---
 
-## 6. Projects Home
+## 7. Projects Home
 
 - [~] `AlbumListScreen` — stub
 - [~] `ProjectsViewModel` — stub, not wired to repos
@@ -126,7 +138,7 @@ Gap between current implementation and target architecture.
 
 ---
 
-## 7. Unit System (Research)
+## 8. Unit System (Research)
 
 - [ ] Define abstract `Units` for canvas coordinates
 - [ ] Formula: `Units -> DP` accounting for zoom (scale) and screen density
@@ -134,7 +146,7 @@ Gap between current implementation and target architecture.
 
 ---
 
-## 8. Future (Post-MVP)
+## 9. Future (Post-MVP)
 
 See [future-ideas.md](product/future-ideas.md) for the full list.
 

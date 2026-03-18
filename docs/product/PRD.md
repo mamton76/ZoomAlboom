@@ -239,10 +239,11 @@ The meaning of the album comes not only from the media itself, but also from:
 - duplicate object
 
 #### Structure / panels / workspace
-- media library panel
-- frame list / structure panel
-- contextual editing panels
-- IDE-like overlay panels that do not break canvas interaction model
+- media library as a panel OR bottom sheet (accessible via FAB → Add content flow)
+- frame list / structure panel (accessible via menu or swipe gesture, not permanently visible)
+- contextual action bar for selected canvas nodes
+- IDE-like overlay panels available as opt-in power-user configuration
+- Panel Configuration UI: allows users to toggle panels on/off, choose position (docked slot or floating), and reset to defaults 
 
 #### Persistence
 - save and reopen albums locally
@@ -298,9 +299,10 @@ These are likely future directions, but not required for initial release. See [f
 - User can duplicate items
 
 ### 11.5 Panels / editor shell
+- By default, the canvas uses minimal chrome (TopBar, FAB, contextual action bar) — see [§12.6](#126-canvas-first-chrome)
 - User can access supporting panels without losing the canvas mental model
-- Panels can coexist with the canvas
-- Panels should feel like tools around the canvas, not a separate mode replacing it
+- Panels are hidden by default and available as an opt-in power-user configuration via the Panel Configuration UI
+- When enabled, panels coexist with the canvas and feel like tools around it, not a separate mode replacing it
 
 ### 11.6 Persistence
 - Album state should survive app restart
@@ -329,6 +331,15 @@ The user should feel that content lives in a stable world and is being explored,
 ### 12.5 Lightweight editing shell
 Editor tools should support the canvas rather than dominate it.
 
+### 12.6 Canvas-first chrome
+The default UI should maximize canvas visibility. On a phone screen, persistent panels consume 20–30% of canvas width and conflict with spatial immersion. The default experience therefore uses minimal chrome:
+
+- **Navigate mode** (default): canvas takes ~100% of screen. Only a thin TopBar (album name, undo/redo, menu icon) and a single FAB [+] for adding content.
+- **Add content mode**: a bottom sheet slides up with content type picker and media library. The canvas remains visible behind the sheet.
+- **Object selected mode**: a contextual action bar appears at the bottom (move/scale/delete/duplicate/edit) and disappears when selection is cleared.
+
+The full IDE-style panel system (docked + floating panels) is preserved but hidden by default. Users can opt in to panels via a Panel Configuration UI accessible from the menu.
+
 ---
 
 ## 13. UX Risks
@@ -338,6 +349,7 @@ Editor tools should support the canvas rather than dominate it.
 - Large canvases can become disorienting without structure
 - Panels can compete with the core canvas metaphor
 - Performance drops during gestures will immediately damage perceived quality
+- **Panel discoverability:** panels are hidden by default in the canvas-first model. Power users who would benefit from docked panels (media library, frame list) may not discover the Panel Configuration UI without guidance. Mitigations: onboarding hint, menu labeling, and first-run tooltip.
 
 ---
 

@@ -6,7 +6,7 @@
 
 ## High-Level Summary
 
-ZoomAlboom is a single-module Android app for creating and navigating infinite-canvas photo/video albums. Users place media and navigation frames on a zoomable, pannable, rotatable canvas, then browse albums through an IDE-style overlay UI.
+ZoomAlboom is a single-module Android app for creating and navigating infinite-canvas photo/video albums. Users place media and navigation frames on a zoomable, pannable, rotatable canvas. The default UI is canvas-first with minimal chrome; an IDE-style panel overlay is available as an opt-in power-user configuration.
 
 ## Layers (Clean Architecture)
 
@@ -96,7 +96,23 @@ Canvas mutations go through `CanvasCommand` (sealed interface: `Move`, `AddNode`
 
 See [rendering.md](rendering.md) § IDE Overlay.
 
+### Canvas-First Default
+
+The default UI uses minimal chrome to maximize canvas visibility. Three modes drive the UI surface:
+
+1. **Navigate mode** (default) — canvas takes ~100% of screen. Only a thin TopBar (album name, undo/redo, menu) and a FAB [+] bottom-right.
+2. **Add content mode** (FAB tap) — a Bottom Sheet slides up with content type picker and media library. Canvas remains visible behind the sheet.
+3. **Object selected mode** (node tap) — a contextual action bar appears at the bottom (move/scale/delete/duplicate/edit). Disappears on deselection.
+
+**Bottom Sheet** is a new UI surface alongside the panel system, used for content addition and media browsing in the default canvas-first flow.
+
+### Panel System (Opt-In)
+
 Six docked slots (`LeftTop`, `LeftBottom`, `RightTop`, `RightBottom`, `Top`, `Bottom`) plus floating panels. Each slot supports multiple panels via tab switching. Floating panels auto-dock when dragged near edges.
+
+**Default state: all panels are hidden/collapsed.** The panel system is preserved as a power-user feature but is not visible unless explicitly enabled.
+
+A **Panel Configuration screen** (accessible from the menu) is planned to let users toggle individual panels on/off, choose panel position (docked slot or floating), and reset to defaults. Not yet implemented.
 
 ## Navigation
 

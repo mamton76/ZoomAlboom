@@ -13,8 +13,11 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -36,7 +39,11 @@ class CanvasViewModel @Inject constructor(
 
     private val albumId: Long = savedStateHandle.get<Long>("albumId") ?: 0L
 
-    private var allNodes: List<CanvasNode> = emptyList()
+    private val _allNodes = MutableStateFlow<List<CanvasNode>>(emptyList())
+
+    val frames: StateFlow<List<CanvasNode.Frame>> = _allNodes
+        .map { nodes -> nodes.filterIsInstance<CanvasNode.Frame>() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _state = MutableStateFlow(CanvasState())
     val state: StateFlow<CanvasState> = _state.asStateFlow()
@@ -101,14 +108,14 @@ class CanvasViewModel @Inject constructor(
     }
 
     fun addNode(node: CanvasNode) {
-        allNodes = allNodes + node
-        _state.update { it.copy(totalNodeCount = allNodes.size) }
+        _allNodes.update { it + node }
+        _state.update { it.copy(totalNodeCount = _allNodes.value.size) }
         recalculateVisibleNodes()
     }
 
     fun removeNode(nodeId: String) {
-        allNodes = allNodes.filter { it.id != nodeId }
-        _state.update { it.copy(totalNodeCount = allNodes.size) }
+        _allNodes.update { nodes -> nodes.filter { it.id != nodeId } }
+        _state.update { it.copy(totalNodeCount = _allNodes.value.size) }
         recalculateVisibleNodes()
     }
 
@@ -124,16 +131,17 @@ class CanvasViewModel @Inject constructor(
 
     fun currentCamera(): Camera = _state.value.camera
 
-    fun nextZIndex(): Float = (allNodes.maxOfOrNull { it.transform.zIndex } ?: 0f) + 1f
+    fun nextZIndex(): Float = (_allNodes.value.maxOfOrNull { it.transform.zIndex } ?: 0f) + 1f
 
     override fun onCleared() {
         super.onCleared()
-        if (albumId != 0L && allNodes.isNotEmpty()) {
+        val nodes = _allNodes.value
+        if (albumId != 0L && nodes.isNotEmpty()) {
             // Fire-and-forget save — ViewModel scope is cancelled but we use
             // a non-cancellable context for the final save.
             kotlinx.coroutines.MainScope().launch(Dispatchers.IO) {
                 try {
-                    mediaRepository.saveSceneGraph(albumId, allNodes)
+                    mediaRepository.saveSceneGraph(albumId, nodes)
                 } catch (_: Exception) {
                     // Best-effort save on exit
                 }
@@ -150,7 +158,7 @@ class CanvasViewModel @Inject constructor(
             } else {
                 emptyList()
             }
-            allNodes = nodes
+            _allNodes.value = nodes
             _state.update {
                 it.copy(
                     totalNodeCount = nodes.size,
@@ -173,7 +181,7 @@ class CanvasViewModel @Inject constructor(
                 screenWidth = screenWidth,
                 screenHeight = screenHeight,
             )
-            val visible = ViewportCuller.visibleNodes(allNodes, viewport)
+            val visible = ViewportCuller.visibleNodes(_allNodes.value, viewport)
             _state.update { it.copy(visibleNodes = visible) }
         }
     }

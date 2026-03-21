@@ -17,7 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
 import com.mamton.zoomalbum.feature.canvas.view.CanvasScreen
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
@@ -35,7 +34,7 @@ fun CanvasScaffold(
     val ideViewModel: IdeViewModel = hiltViewModel()
     val ideState by ideViewModel.state.collectAsStateWithLifecycle()
 
-    val frames = canvasState.visibleNodes.filterIsInstance<CanvasNode.Frame>()
+    val frames by canvasViewModel.frames.collectAsStateWithLifecycle()
 
     var showAddSheet by remember { mutableStateOf(false) }
     var showFrameList by remember { mutableStateOf(false) }

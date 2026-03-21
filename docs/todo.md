@@ -141,7 +141,8 @@ Gap between current implementation and target architecture.
 - [~] `MediaLibraryPanel` — stub text only (default users use bottom sheet from §5 instead)
 - [x] `FrameListPanel` — delegates to `FrameListContent` (frame list with delete, shared with bottom sheet)
 - [ ] Wire `MediaLibraryPanel` to `media_library` data
-- [~] Wire `FrameListPanel` to scene graph frames (`CanvasViewModel.frames: StateFlow<List<Frame>>` is now exposed; docked panel still needs to collect from it)
+- [x] Wire `FrameListBottomSheet` to all frames via `CanvasViewModel.frames` (reactive StateFlow, not filtered to visible)
+- [~] Wire `FrameListPanel` (docked panel) to `CanvasViewModel.frames` — still passes empty list
 - [ ] Add media to canvas from library panel
 
 ### 6.2 Panel persistence

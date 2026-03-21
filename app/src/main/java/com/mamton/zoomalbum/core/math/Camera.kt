@@ -3,7 +3,10 @@ package com.mamton.zoomalbum.core.math
 /**
  * Camera state for the infinite canvas.
  *
- * (cx, cy) = world-coordinate point at the center of the screen.
+ * (cx, cy) = graphicsLayer translationX/Y in screen-pixel units.
+ *            Screen position of world point (wx, wy) = (wx * scale + cx, wy * scale + cy).
+ *            To center world point (wx, wy) at screen center:
+ *            cx = screenWidth/2 - wx * scale, cy = screenHeight/2 - wy * scale.
  * scale    = zoom factor (1.0 = 100%, 2.0 = zoomed in 2x).
  * rotation = canvas rotation in degrees.
  */

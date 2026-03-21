@@ -84,3 +84,32 @@ object TransformUtils {
         return BoundingBox(minX, minY, maxX, maxY)
     }
 }
+
+/**
+ * Compute the [Camera] state that centers this [Transform] on screen and
+ * scales it so its render size fills [fillFraction] of the screen.
+ *
+ * Camera.cx/cy are graphicsLayer translation values (screen-pixel units), not
+ * world coordinates. The translation that places world point (wx, wy) at the
+ * screen center is: cx = screenWidth/2 - wx*scale, cy = screenHeight/2 - wy*scale.
+ *
+ * NOTE: Camera.scale and Transform.scale have different semantics —
+ * do NOT copy one to the other.
+ * Camera.scale = 2.0 → world appears 2× magnified (zoom in).
+ * Transform.scale = 2.0 → this node is 2× its base size.
+ */
+fun Transform.toCamera(
+    screenWidth: Float,
+    screenHeight: Float,
+    fillFraction: Float = 0.9f,
+): Camera {
+    val fitScaleW = (screenWidth * fillFraction) / renderW
+    val fitScaleH = (screenHeight * fillFraction) / renderH
+    val scale = minOf(fitScaleW, fitScaleH)
+    return Camera(
+        cx = screenWidth / 2f - cx * scale,
+        cy = screenHeight / 2f - cy * scale,
+        scale = scale,
+        rotation = rotation,
+    )
+}

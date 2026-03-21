@@ -1,23 +1,19 @@
 package com.mamton.zoomalbum.feature.ide_ui.ui.panels
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import com.mamton.zoomalbum.core.designsystem.TextSecondary
+import com.mamton.zoomalbum.domain.model.CanvasNode
+import com.mamton.zoomalbum.feature.ide_ui.ui.content.FrameListContent
 
 @Composable
-fun FrameListPanel(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        Text(text = "Frame List", color = TextSecondary)
-    }
+fun FrameListPanel(
+    frames: List<CanvasNode.Frame>,
+    onDeleteFrame: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FrameListContent(
+        frames = frames,
+        onDeleteFrame = onDeleteFrame,
+        modifier = modifier,
+    )
 }

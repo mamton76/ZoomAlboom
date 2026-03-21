@@ -35,6 +35,9 @@
 ```
 feature/<name>/
 ├── ui/           # Composable screens and components
+│   ├── content/  # Reusable content composables (shared between panels and sheets)
+│   ├── panels/   # Docked panel wrappers (delegate to content/)
+│   └── sheets/   # Bottom sheet wrappers (delegate to content/)
 ├── viewmodel/    # ViewModel + State/Action definitions
 ├── gestures/     # Gesture handling (if needed)
 ├── view/         # Rendering logic (if needed)

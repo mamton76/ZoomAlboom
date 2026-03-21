@@ -166,6 +166,9 @@ private fun InnerTabBar(
 private fun InnerTabContent(activeTab: PanelTab) {
     when (activeTab) {
         PanelTab.MediaLibrary -> MediaLibraryPanel()
-        PanelTab.FrameList -> FrameListPanel()
+        PanelTab.FrameList -> FrameListPanel(
+            frames = emptyList(),
+            onDeleteFrame = {},
+        )
     }
 }

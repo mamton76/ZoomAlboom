@@ -74,16 +74,25 @@ All child nodes are positioned in world coordinates inside this Box. The GPU app
 
 `CanvasNodeRenderer` dispatches on node type:
 
-- **`Frame`** — `Box` with offset/size/rotation, semi-transparent fill, border, optional label.
+- **`Frame`** — `Spacer` with `graphicsLayer` (translationX/Y, rotationZ) + `drawBehind` (fill + border at world-coordinate size).
 - **`Media`** — placeholder (Coil image loading deferred to Stage 2).
 
-Nodes use `Modifier.offset` (world position in dp) + `Modifier.size` (width * scale, height * scale in dp) + `Modifier.rotate`.
+Nodes use **`graphicsLayer`** for position and rotation (GPU-only, no Compose Constraints limits) and **`drawBehind`** for painting at exact world-coordinate dimensions. This avoids the ~16383dp Compose `Constraints` limit that `Modifier.size()` hits at extreme zoom levels.
 
-### 7. HUD Overlay
+### 7. Node Creation
 
-Rendered **outside** the graphicsLayer Box (not affected by camera):
+`CanvasNodeFactory` creates nodes positioned relative to the current viewport:
+
+- **Frame `w`, `h`** encode the viewport's aspect ratio (normalized, short side = 1).
+- **`Transform.scale`** is derived from camera zoom so the frame fills ~80% of the visible area.
+- **`Transform.rotation`** is set to `-camera.rotation` so the frame appears axis-aligned on screen.
+- **`Transform.x`, `y`** are computed from the viewport center, offset by the rotated half-size so the frame's visual center aligns with the screen center.
+
+### 8. HUD / TopBar
+
+Debug info rendered in `CanvasTopBar` (outside the canvas, not affected by camera):
 - Node count: `"visible: N / total"`
-- Zoom level: `"zoom: Nx"`
+- Camera: zoom level, rotation, xy position
 
 ---
 

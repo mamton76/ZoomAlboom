@@ -74,7 +74,7 @@ See [rendering.md](rendering.md) for full detail.
 2. `CanvasViewModel.onGesture()` updates `Camera` state (centroid-anchored zoom/rotation).
 3. `ViewportCuller` filters visible nodes on `Dispatchers.Default`.
 4. `CanvasScreen` applies **one `graphicsLayer`** (translate + scale + rotate, origin `(0,0)`) to an inner `Box`.
-5. `CanvasNodeRenderer` draws each visible node at its world-coordinate position.
+5. `CanvasNodeRenderer` draws each visible node via per-node `graphicsLayer` (position/rotation) + `drawBehind` (fill/border at world-coordinate size). No `Modifier.size()` — avoids Compose Constraints limits.
 
 **Key insight:** all pan/zoom/rotation is a single GPU transform — child nodes never recompose during gestures.
 

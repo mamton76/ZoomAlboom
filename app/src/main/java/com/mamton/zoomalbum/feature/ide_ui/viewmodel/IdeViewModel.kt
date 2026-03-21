@@ -68,6 +68,38 @@ class IdeViewModel @Inject constructor() : ViewModel() {
                     activePanelPerSlot = state.activePanelPerSlot + (action.position to action.panelId),
                 )
             }
+            is IdeAction.TogglePanelEnabled -> togglePanelEnabled(action.panelId)
+            is IdeAction.ResetPanelConfig -> _state.update {
+                it.copy(panels = emptyList(), panelConfig = PanelConfig())
+            }
+        }
+    }
+
+    private fun togglePanelEnabled(panelId: String) {
+        _state.update { state ->
+            val config = state.panelConfig
+            val enabled = panelId in config.enabledPanelIds
+            val newEnabledIds = if (enabled) {
+                config.enabledPanelIds - panelId
+            } else {
+                config.enabledPanelIds + panelId
+            }
+            val newPanels = if (enabled) {
+                state.panels.filter { it.id != panelId }
+            } else {
+                val position = config.positionOverrides[panelId] ?: PanelPosition.LeftTop
+                state.panels + PanelState(
+                    id = panelId,
+                    title = panelId.replace("_", " ").replaceFirstChar { it.uppercase() },
+                    position = position,
+                    isVisible = true,
+                    isExpanded = true,
+                )
+            }
+            state.copy(
+                panels = newPanels,
+                panelConfig = config.copy(enabledPanelIds = newEnabledIds),
+            )
         }
     }
 

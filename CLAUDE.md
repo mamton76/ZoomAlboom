@@ -29,7 +29,7 @@ Working memory / discovered implementation notes:
 - Keep **canvas state** separate from **IDE overlay state**.
 - Keep domain models independent from Compose/UI concerns.
 - Prefer short targeted edits over broad rewrites.
-- If architecture changes, update the relevant docs in `docs/architecture/`.
+- If architecture changes, update the relevant docs in `docs/architecture/` and 'docs/todo.md'
 - Put discovered implementation facts and gotchas into `memory/MEMORY.md`, not into architecture docs.
 
 ## Commands

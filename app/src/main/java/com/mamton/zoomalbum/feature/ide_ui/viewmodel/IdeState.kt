@@ -35,16 +35,21 @@ data class PanelState(
 )
 
 @Immutable
+data class PanelConfig(
+    val enabledPanelIds: Set<String> = emptySet(),
+    val positionOverrides: Map<String, PanelPosition> = emptyMap(),
+)
+
+@Immutable
 data class IdeUiState(
-    val panels: List<PanelState> = listOf(
-        PanelState(id = "left_top", title = "Left Panel", position = PanelPosition.LeftTop),
-    ),
+    val panels: List<PanelState> = emptyList(),
     /**
      * Tracks which panel is "active" (selected tab) per slot position.
      * Defaults to the first panel in the slot when no entry is present.
      */
     val activePanelPerSlot: Map<PanelPosition, String> = emptyMap(),
     val isToolbarExpanded: Boolean = true,
+    val panelConfig: PanelConfig = PanelConfig(),
 ) : State
 
 sealed interface IdeAction : Intent {
@@ -57,4 +62,8 @@ sealed interface IdeAction : Intent {
     data class BringToFront(val panelId: String) : IdeAction
     /** Selects which panel to display when a slot contains multiple panels. */
     data class SelectSlotActivePanel(val position: PanelPosition, val panelId: String) : IdeAction
+
+    // Panel configuration actions
+    data class TogglePanelEnabled(val panelId: String) : IdeAction
+    data object ResetPanelConfig : IdeAction
 }

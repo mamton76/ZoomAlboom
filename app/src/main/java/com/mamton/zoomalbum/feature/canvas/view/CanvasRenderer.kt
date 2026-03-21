@@ -1,27 +1,24 @@
 package com.mamton.zoomalbum.feature.canvas.view
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import androidx.core.graphics.toColorInt
 
 /**
  * Renders a single [CanvasNode] inside the camera-transformed container.
- * Positions and sizes are in world-coordinate dp; the parent graphicsLayer
- * handles all camera pan/zoom, so these composables stay stable across gestures.
+ *
+ * Positioning and sizing use [graphicsLayer] (GPU-only) + [drawBehind],
+ * bypassing Compose layout Constraints entirely. This allows arbitrarily
+ * large world-coordinate dimensions without crashing.
  */
 @Composable
 fun CanvasNodeRenderer(node: CanvasNode) {
@@ -33,34 +30,35 @@ fun CanvasNodeRenderer(node: CanvasNode) {
 
 @Composable
 private fun FrameRenderer(frame: CanvasNode.Frame) {
-    val density = LocalDensity.current
     val t = frame.transform
-    val shape = RoundedCornerShape(size = with(density) { 4f.toDp() })
     val fillColor = Color(frame.color.toColorInt())
     val borderColor = fillColor.copy(alpha = 0.6f)
+    val widthPx = t.w * t.scale
+    val heightPx = t.h * t.scale
 
-    Box(
-        contentAlignment = Alignment.Center,
+    Spacer(
         modifier = Modifier
-            .offset(
-                x = with(density) { t.x.toDp() },
-                y = with(density) { t.y.toDp() },
-            )
-            .size(
-                width = with(density) { (t.w * t.scale).toDp() },
-                height = with(density) { (t.h * t.scale).toDp() },
-            )
-            .rotate(t.rotation)
-            .clip(shape)
-            .background(fillColor.copy(alpha = 0.35f))
-            .border(width = with(density) { 1.5f.toDp() }, color = borderColor, shape = shape),
-    ) {
-        if (frame.label.isNotEmpty()) {
-            Text(
-                text = frame.label,
-                color = Color.White.copy(alpha = 0.8f),
-                fontSize = 10.sp,
-            )
-        }
-    }
+            .graphicsLayer {
+                translationX = t.x
+                translationY = t.y
+                rotationZ = t.rotation
+                transformOrigin = TransformOrigin(0f, 0f)
+                clip = false
+            }
+            .drawBehind {
+                val nodeSize = Size(widthPx, heightPx)
+                val radius = CornerRadius(4f, 4f)
+                drawRoundRect(
+                    color = fillColor.copy(alpha = 0.35f),
+                    size = nodeSize,
+                    cornerRadius = radius,
+                )
+                drawRoundRect(
+                    color = borderColor,
+                    size = nodeSize,
+                    cornerRadius = radius,
+                    style = Stroke(width = 1.5f),
+                )
+            },
+    )
 }

@@ -4,19 +4,18 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Text
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mamton.zoomalbum.core.designsystem.CanvasDark
-import com.mamton.zoomalbum.core.designsystem.TextSecondary
 import com.mamton.zoomalbum.feature.canvas.gestures.infiniteCanvasGestures
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
 
@@ -51,7 +50,7 @@ fun CanvasScreen(
                 scaleX = cam.scale
                 scaleY = cam.scale
                 rotationZ = cam.rotation
-                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+                transformOrigin = TransformOrigin(0f, 0f)
             },
         ) {
             for (node in state.visibleNodes) {
@@ -59,13 +58,8 @@ fun CanvasScreen(
             }
         }
 
-        // HUD overlay — not affected by camera
-        Text(
-            text = "visible: ${state.visibleNodes.size} / ${state.totalNodeCount}" +
-                "  zoom: ${"%.2f".format(cam.scale)}x",
-            color = TextSecondary,
-            fontSize = 12.sp,
-            modifier = Modifier.align(Alignment.TopCenter),
-        )
+        if (state.isLoading) {
+            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+        }
     }
 }

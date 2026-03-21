@@ -10,10 +10,12 @@ fun FrameListPanel(
     frames: List<CanvasNode.Frame>,
     onDeleteFrame: (String) -> Unit,
     modifier: Modifier = Modifier,
+    visibleFrameIds: Set<String> = emptySet(),
 ) {
     FrameListContent(
         frames = frames,
         onDeleteFrame = onDeleteFrame,
+        visibleFrameIds = visibleFrameIds,
         modifier = modifier,
     )
 }

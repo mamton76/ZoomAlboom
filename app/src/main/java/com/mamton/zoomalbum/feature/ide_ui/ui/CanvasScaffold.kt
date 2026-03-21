@@ -107,10 +107,15 @@ fun CanvasScaffold(
         )
     }
     if (showFrameList) {
+        val visibleFrameIds = canvasState.visibleNodes
+            .filterIsInstance<com.mamton.zoomalbum.domain.model.CanvasNode.Frame>()
+            .map { it.id }
+            .toHashSet()
         FrameListBottomSheet(
             frames = frames,
             onDeleteFrame = { canvasViewModel.removeNode(it) },
             onDismiss = { showFrameList = false },
+            visibleFrameIds = visibleFrameIds,
         )
     }
 

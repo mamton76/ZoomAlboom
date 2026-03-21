@@ -1,5 +1,6 @@
 package com.mamton.zoomalbum.feature.ide_ui.ui.content
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -26,12 +28,16 @@ import com.mamton.zoomalbum.domain.model.CanvasNode
  * Reusable frame list content — rendered inside both
  * [com.mamton.zoomalbum.feature.ide_ui.ui.panels.FrameListPanel] (docked panel)
  * and [com.mamton.zoomalbum.feature.ide_ui.ui.sheets.FrameListBottomSheet].
+ *
+ * [visibleFrameIds] — IDs of frames currently visible in the camera viewport.
+ * Items whose ID is in the set are highlighted with a colored border.
  */
 @Composable
 fun FrameListContent(
     frames: List<CanvasNode.Frame>,
     onDeleteFrame: (String) -> Unit,
     modifier: Modifier = Modifier,
+    visibleFrameIds: Set<String> = emptySet(),
 ) {
     if (frames.isEmpty()) {
         Box(
@@ -56,6 +62,7 @@ fun FrameListContent(
             items(frames, key = { it.id }) { frame ->
                 FrameListItem(
                     frame = frame,
+                    isVisible = frame.id in visibleFrameIds,
                     onDelete = { onDeleteFrame(frame.id) },
                 )
             }
@@ -66,6 +73,7 @@ fun FrameListContent(
 @Composable
 private fun FrameListItem(
     frame: CanvasNode.Frame,
+    isVisible: Boolean,
     onDelete: () -> Unit,
 ) {
     val frameColor = Color(frame.color.toColorInt())
@@ -75,7 +83,12 @@ private fun FrameListItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(vertical = 4.dp)
+            .then(
+                if (isVisible) Modifier.border(1.dp, frameColor.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
+                else Modifier
+            )
+            .padding(horizontal = if (isVisible) 8.dp else 0.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {

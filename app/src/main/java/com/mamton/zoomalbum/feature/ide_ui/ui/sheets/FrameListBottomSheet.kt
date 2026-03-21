@@ -20,6 +20,7 @@ fun FrameListBottomSheet(
     frames: List<CanvasNode.Frame>,
     onDeleteFrame: (String) -> Unit,
     onDismiss: () -> Unit,
+    visibleFrameIds: Set<String> = emptySet(),
 ) {
     val sheetState = rememberModalBottomSheetState()
 
@@ -36,6 +37,7 @@ fun FrameListBottomSheet(
         FrameListContent(
             frames = frames,
             onDeleteFrame = onDeleteFrame,
+            visibleFrameIds = visibleFrameIds,
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 100.dp, max = 400.dp),

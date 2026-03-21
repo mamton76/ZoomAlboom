@@ -29,7 +29,8 @@ com.mamton.zoomalbum/
 
 ### core/
 - **`mvi/MviContract.kt`** — marker interfaces: `State`, `Intent`, `Effect`.
-- **`math/TransformUtils.kt`** — pure functions: `rotateVector`, `toBoundingBox`, `cameraViewport`.
+- **`math/Camera.kt`** — `Camera` data class (cx/cy as graphicsLayer translations, scale, rotation).
+- **`math/TransformUtils.kt`** — pure functions: `rotateVector`, `toBoundingBox`, `cameraViewport`, `Transform.toCamera()`.
 - **`math/SpatialIndex.kt`** — `ViewportCuller`: brute-force AABB visible-node filter.
 - **`math/BoundingBox.kt`** — axis-aligned bounding box with `intersects()`.
 - **`designsystem/`** — `Color.kt` (dark-first palette), `Theme.kt` (Material 3 `ZoomAlbumTheme`).
@@ -74,7 +75,10 @@ See [rendering.md](rendering.md) for full detail.
 2. `CanvasViewModel.onGesture()` updates `Camera` state (centroid-anchored zoom/rotation).
 3. `ViewportCuller` filters visible nodes on `Dispatchers.Default`.
 4. `CanvasScreen` applies **one `graphicsLayer`** (translate + scale + rotate, origin `(0,0)`) to an inner `Box`.
-5. `CanvasNodeRenderer` draws each visible node via per-node `graphicsLayer` (position/rotation) + `drawBehind` (fill/border at world-coordinate size). No `Modifier.size()` — avoids Compose Constraints limits.
+5. `CanvasNodeRenderer` draws each visible node via per-node `graphicsLayer`:
+   - `translationX = t.cx - renderW/2` (center → top-left offset)
+   - `transformOrigin = TransformOrigin(0.5f, 0.5f)` (rotation around visual center)
+   - `drawBehind` paints fill/border at `Size(renderW, renderH)`. No `Modifier.size()` — avoids Compose Constraints limits.
 
 **Key insight:** all pan/zoom/rotation is a single GPU transform — child nodes never recompose during gestures.
 

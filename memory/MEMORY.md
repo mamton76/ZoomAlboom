@@ -5,6 +5,22 @@
 - MVI pattern: State/Intent/Effect interfaces in `core/mvi/MviContract.kt`
 - Canvas: single `graphicsLayer` on Box, GPU-transformed, never recomposes nodes on gesture
 
+## Coordinate Model (refactored 2026-03-21)
+- `Transform.cx/cy` = **center** of node in world space (not top-left corner)
+- `Transform.w/h` = actual world-unit base dimensions (not normalized)
+- `Transform.scale` = user-applied multiplier; `renderW = w*scale`, `renderH = h*scale`
+- `Camera.cx/cy` = graphicsLayer **translationX/Y** (screen-pixel units, NOT world coords)
+  - Screen pos of world point (wx,wy) = (wx*scale + cx, wy*scale + cy)
+  - To center world point (wx,wy) at screen center: cx = screenW/2 - wx*scale
+- **Camera.scale ≠ Transform.scale** — do NOT copy one to the other
+  - Camera.scale=2.0 → world appears 2× magnified; Transform.scale=2.0 → node is 2× its base size
+- `Transform.toCamera(screenW, screenH)` in `TransformUtils.kt` computes the Camera to center and fit a node
+- `TransformOrigin(0.5f, 0.5f)` in FrameRenderer — rotation around visual center
+- Node render offset: `translationX = cx - renderW/2f` (center → top-left for graphicsLayer)
+- `Camera` lives in `core/math/Camera.kt` (moved from CanvasViewModel to fix layer violation)
+- `CanvasViewModel._allNodes` is `MutableStateFlow<List<CanvasNode>>` (was mutable var)
+- `CanvasViewModel.frames` is a reactive `StateFlow<List<Frame>>` derived from `_allNodes`
+
 ## IDE Panel System (implemented 2026-03-12)
 - PanelPosition: LeftTop, LeftBottom, RightTop, RightBottom, Top, Bottom, Floating
 - PanelState: `expandedWidth`/`expandedHeight` preserve dims across collapse cycles; `width`/`height` are current rendered dims

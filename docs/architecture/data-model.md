@@ -17,14 +17,57 @@ Three independent storage layers:
 ```kotlin
 @Serializable
 data class Transform(
-    val x: Float = 0f,        // world X
-    val y: Float = 0f,        // world Y
-    val w: Float = 100f,      // unscaled width
-    val h: Float = 100f,      // unscaled height
-    val scale: Float = 1f,    // uniform scale
+    val cx: Float = 0f,       // center X in world space
+    val cy: Float = 0f,       // center Y in world space
+    val w: Float = 100f,      // base width in world units
+    val h: Float = 100f,      // base height in world units
+    val scale: Float = 1f,    // user-applied scale multiplier (pinch-to-resize)
     val rotation: Float = 0f, // degrees
     val zIndex: Float = 0f,   // draw order
-)
+) {
+    val renderW: Float get() = w * scale   // rendered width in world units
+    val renderH: Float get() = h * scale   // rendered height in world units
+}
+```
+
+**Coordinate contract:**
+- `cx`/`cy` = center of the node in world space (not top-left corner).
+- `w`/`h` = actual world-unit base dimensions (not normalized).
+- `scale` = user-applied multiplier (default 1.0); used for pinch-to-resize on a node.
+- Render size = `renderW × renderH = w*scale × h*scale`.
+- **Do NOT conflate `Transform.scale` with `Camera.scale`** — they have different semantics (see Camera below).
+
+### Camera
+
+`Camera` lives in `core/math/Camera.kt`:
+
+```kotlin
+data class Camera(
+    val cx: Float = 0f,       // graphicsLayer translationX (screen-pixel units)
+    val cy: Float = 0f,       // graphicsLayer translationY (screen-pixel units)
+    val scale: Float = 1f,    // zoom factor: 1.0 = 100%, 2.0 = zoomed in 2×
+    val rotation: Float = 0f, // canvas rotation in degrees
+) {
+    companion object {
+        const val MIN_SCALE = 0.00005f
+        const val MAX_SCALE = 10000f
+    }
+}
+```
+
+**Camera.cx/cy semantics:** `cx`/`cy` are the `translationX`/`Y` values applied to the Compose `graphicsLayer`. Screen position of world point `(wx, wy)` = `(wx*scale + cx, wy*scale + cy)`. To center world point `(wx, wy)` at screen center: `cx = screenWidth/2 - wx*scale`.
+
+**Camera ↔ Transform conversion** — `Transform.toCamera()` in `core/math/TransformUtils.kt`:
+```kotlin
+fun Transform.toCamera(screenWidth: Float, screenHeight: Float, fillFraction: Float = 0.9f): Camera {
+    val scale = minOf(screenWidth * fillFraction / renderW, screenHeight * fillFraction / renderH)
+    return Camera(
+        cx = screenWidth / 2f - cx * scale,
+        cy = screenHeight / 2f - cy * scale,
+        scale = scale,
+        rotation = rotation,
+    )
+}
 ```
 
 ### CanvasNode (sealed)
@@ -101,14 +144,14 @@ Registry of all media used in an album. Allows finding all usages of a single fi
       "id": "node_1",
       "type": "MEDIA",
       "mediaRefId": "media_abc",
-      "transform": { "x": 100, "y": 200, "w": 400, "h": 300, "scale": 1.0, "rotation": 0, "zIndex": 1 },
+      "transform": { "cx": 300, "cy": 350, "w": 400, "h": 300, "scale": 1.0, "rotation": 0, "zIndex": 1 },
       "tags": ["vacation", "2024"]
     },
     {
       "id": "frame_1",
       "type": "FRAME",
       "color": "#FF5555",
-      "transform": { "x": 50, "y": 150, "w": 800, "h": 600, "scale": 1.0, "rotation": 0, "zIndex": 0 },
+      "transform": { "cx": 450, "cy": 450, "w": 800, "h": 600, "scale": 1.0, "rotation": 0, "zIndex": 0 },
       "containsNodeIds": ["node_1"]
     }
   ]
@@ -176,8 +219,11 @@ Implementations in `data/repository/`, bound via Hilt `@Binds`.
 |------|---------|--------|
 | `albums.createdAt` | exists | removed (not needed) |
 | `albums.thumbnailPath` | String? | renamed to `thumbnailUri` |
-| `Transform.width/height` | `width`, `height` | renamed to `w`, `h` |
-| `Transform.zIndex` | separate field on `CanvasNode` | moved into `Transform` |
+| `Transform.width/height` | `width`, `height` | renamed to `w`, `h` ✓ |
+| `Transform.x/y` | top-left corner | renamed to `cx/cy` (center-based) ✓ |
+| `Transform.w/h` | normalized (short side = 1) | actual world-unit size ✓ |
+| `Transform.zIndex` | separate field on `CanvasNode` | moved into `Transform` ✓ |
+| `Camera` | in `CanvasViewModel` | moved to `core/math/Camera.kt` ✓ |
 | `CanvasNode.Media.uri` | direct URI string | `mediaRefId` FK to `media_library` |
 | `Frame.childIds` | static list | `containsNodeIds` (dynamic) |
 | `Frame.color` | Long (ARGB) | hex string |

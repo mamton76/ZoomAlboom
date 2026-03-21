@@ -19,18 +19,18 @@ Double-tap resets the camera to origin.
 
 ### 2. Camera State
 
-`Camera` in `CanvasViewModel`:
+`Camera` in `core/math/Camera.kt`:
 
 ```kotlin
 data class Camera(
-    val x: Float = 0f,        // translation X (screen px)
-    val y: Float = 0f,        // translation Y (screen px)
-    val scale: Float = 1f,    // zoom level
+    val cx: Float = 0f,       // graphicsLayer translationX (screen-pixel units)
+    val cy: Float = 0f,       // graphicsLayer translationY (screen-pixel units)
+    val scale: Float = 1f,    // zoom level: 1.0 = 100%, 2.0 = zoomed in 2×
     val rotation: Float = 0f, // degrees
 )
 ```
 
-Scale clamped to `[0.00005, 10000]`.
+Scale clamped to `[0.00005, 10000]`. `cx`/`cy` are graphicsLayer translation values — see [data-model.md](data-model.md) for the Camera.cx/cy → world coordinate formula.
 
 ### 3. Camera Math (Centroid-Anchored)
 
@@ -59,8 +59,8 @@ After each camera update, `recalculateVisibleNodes()` runs on `Dispatchers.Defau
 
 ```kotlin
 Box(modifier = Modifier.graphicsLayer {
-    translationX = cam.x
-    translationY = cam.y
+    translationX = cam.cx
+    translationY = cam.cy
     scaleX = cam.scale
     scaleY = cam.scale
     rotationZ = cam.rotation
@@ -74,7 +74,10 @@ All child nodes are positioned in world coordinates inside this Box. The GPU app
 
 `CanvasNodeRenderer` dispatches on node type:
 
-- **`Frame`** — `Spacer` with `graphicsLayer` (translationX/Y, rotationZ) + `drawBehind` (fill + border at world-coordinate size).
+- **`Frame`** — `Spacer` with per-node `graphicsLayer`:
+  - `translationX = t.cx - renderW/2`, `translationY = t.cy - renderH/2` (top-left offset from center)
+  - `rotationZ = t.rotation`, `transformOrigin = TransformOrigin(0.5f, 0.5f)` (rotation around visual center)
+  - `drawBehind` paints fill + border at `Size(renderW, renderH)` in world units.
 - **`Media`** — placeholder (Coil image loading deferred to Stage 2).
 
 Nodes use **`graphicsLayer`** for position and rotation (GPU-only, no Compose Constraints limits) and **`drawBehind`** for painting at exact world-coordinate dimensions. This avoids the ~16383dp Compose `Constraints` limit that `Modifier.size()` hits at extreme zoom levels.
@@ -83,10 +86,11 @@ Nodes use **`graphicsLayer`** for position and rotation (GPU-only, no Compose Co
 
 `CanvasNodeFactory` creates nodes positioned relative to the current viewport:
 
-- **Frame `w`, `h`** encode the viewport's aspect ratio (normalized, short side = 1).
-- **`Transform.scale`** is derived from camera zoom so the frame fills ~80% of the visible area.
-- **`Transform.rotation`** is set to `-camera.rotation` so the frame appears axis-aligned on screen.
-- **`Transform.x`, `y`** are computed from the viewport center, offset by the rotated half-size so the frame's visual center aligns with the screen center.
+- **`Transform.cx`, `cy`** = `viewport.centerX`, `viewport.centerY` — frame is simply centered in the viewport.
+- **`Transform.w`, `h`** = `viewport.width * 0.8`, `viewport.height * 0.8` — actual world-unit dimensions, ~80% of viewport.
+- **`Transform.scale`** = 1.0 (default; user can pinch-resize later).
+- **`Transform.rotation`** = `-camera.rotation` so the frame appears axis-aligned on screen.
+- No trigonometric compensation needed — center-based placement makes this trivial.
 
 ### 8. HUD / TopBar
 

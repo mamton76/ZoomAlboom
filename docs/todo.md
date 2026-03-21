@@ -21,7 +21,16 @@ Gap between current implementation and target architecture.
 - [x] `Media.uri` -> `mediaRefId` (FK to `media_library`)
 - [x] Add `tags: List<String>` to `CanvasNode.Media`
 - [x] Add `MediaType.AUDIO` variant
-- [~] Update `SceneGraphSerializer` for new JSON structure (serializer exists, but emits flat `List<CanvasNode>` — needs root wrapper)
+- [x] `Transform.x/y` → `cx/cy` (center-based world coords, not top-left)
+- [x] `Transform.w/h` → actual world-unit size (not normalized aspect ratio)
+- [x] `Transform.renderW`/`renderH` computed properties added
+- [x] `Camera` moved to `core/math/Camera.kt` (was in `CanvasViewModel`)
+- [x] `Camera.x/y` → `cx/cy` (graphicsLayer translation values)
+- [x] `Transform.toCamera()` conversion helper added in `TransformUtils.kt`
+- [x] `CanvasNodeFactory` simplified (no rotateVector compensation needed with center-based coords)
+- [x] `CanvasViewModel.allNodes` → `MutableStateFlow` (fixes P5 race condition)
+- [x] `CanvasViewModel.frames: StateFlow<List<Frame>>` exposed reactively
+- [~] Update `SceneGraphSerializer` for new JSON structure (serializer exists, but emits flat `List<CanvasNode>` — needs root wrapper; JSON field names now cx/cy)
 
 ### 1.2 AlbumMeta / albums table
 - [ ] Remove `createdAt` field (still present in `AlbumMeta` + `AlbumEntity`)
@@ -132,7 +141,7 @@ Gap between current implementation and target architecture.
 - [~] `MediaLibraryPanel` — stub text only (default users use bottom sheet from §5 instead)
 - [x] `FrameListPanel` — delegates to `FrameListContent` (frame list with delete, shared with bottom sheet)
 - [ ] Wire `MediaLibraryPanel` to `media_library` data
-- [~] Wire `FrameListPanel` to scene graph frames (wired in bottom sheet via CanvasScaffold; docked panel passes empty list — needs CanvasViewModel access)
+- [~] Wire `FrameListPanel` to scene graph frames (`CanvasViewModel.frames: StateFlow<List<Frame>>` is now exposed; docked panel still needs to collect from it)
 - [ ] Add media to canvas from library panel
 
 ### 6.2 Panel persistence

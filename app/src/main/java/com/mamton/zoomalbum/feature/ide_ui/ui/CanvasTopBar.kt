@@ -14,7 +14,7 @@ import androidx.compose.ui.unit.sp
 import com.mamton.zoomalbum.core.designsystem.PanelBackground
 import com.mamton.zoomalbum.core.designsystem.TextPrimary
 import com.mamton.zoomalbum.core.designsystem.TextSecondary
-import com.mamton.zoomalbum.feature.canvas.viewmodel.Camera
+import com.mamton.zoomalbum.core.math.Camera
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,7 +42,7 @@ fun CanvasTopBar(
                 Text(
                     text = "zoom: ${"%.2f".format(camera.scale)}x" +
                         "  rot: ${"%.1f".format(camera.rotation)}\u00B0" +
-                        "  xy: ${"%.0f".format(camera.x)}, ${"%.0f".format(camera.y)}",
+                        "  xy: ${"%.0f".format(camera.cx)}, ${"%.0f".format(camera.cy)}",
                     fontSize = 11.sp,
                     color = TextSecondary,
                     modifier = Modifier.padding(horizontal = 5.dp),

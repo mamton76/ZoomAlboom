@@ -45,8 +45,8 @@ fun CanvasScreen(
         // the GPU performs the transform on the entire layer.
         Box(
             modifier = Modifier.graphicsLayer {
-                translationX = cam.x
-                translationY = cam.y
+                translationX = cam.cx
+                translationY = cam.cy
                 scaleX = cam.scale
                 scaleY = cam.scale
                 rotationZ = cam.rotation

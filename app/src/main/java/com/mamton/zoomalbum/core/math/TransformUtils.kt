@@ -41,8 +41,8 @@ object TransformUtils {
      * we return its AABB (slightly larger, but correct for culling).
      */
     fun cameraViewport(
-        cameraX: Float,
-        cameraY: Float,
+        cameraCx: Float,
+        cameraCy: Float,
         cameraScale: Float,
         cameraRotation: Float,
         screenWidth: Float,
@@ -67,8 +67,8 @@ object TransformUtils {
         var maxY = -Float.MAX_VALUE
 
         for (i in corners.indices step 2) {
-            val sx = (corners[i] - cameraX) * invS
-            val sy = (corners[i + 1] - cameraY) * invS
+            val sx = (corners[i] - cameraCx) * invS
+            val sy = (corners[i + 1] - cameraCy) * invS
             val wx = sx * cosR - sy * sinR
             val wy = sx * sinR + sy * cosR
             minX = min(minX, wx)

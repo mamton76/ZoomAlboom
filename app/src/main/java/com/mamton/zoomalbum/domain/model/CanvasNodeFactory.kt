@@ -2,7 +2,7 @@ package com.mamton.zoomalbum.domain.model
 
 import com.mamton.zoomalbum.core.math.BoundingBox
 import com.mamton.zoomalbum.core.math.TransformUtils
-import com.mamton.zoomalbum.feature.canvas.viewmodel.Camera
+import com.mamton.zoomalbum.core.math.Camera
 import kotlin.random.Random
 
 /**

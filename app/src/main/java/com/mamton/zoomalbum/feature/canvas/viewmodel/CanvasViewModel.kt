@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.mamton.zoomalbum.core.math.Camera
 import com.mamton.zoomalbum.core.math.TransformUtils
 import com.mamton.zoomalbum.core.math.ViewportCuller
 import com.mamton.zoomalbum.domain.model.CanvasNode
@@ -17,19 +18,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-
-// ── Camera ────────────────────────────────────────────────────────────
-data class Camera(
-    val x: Float = 0f,
-    val y: Float = 0f,
-    val scale: Float = 1f,
-    val rotation: Float = 0f,
-) {
-    companion object {
-        const val MIN_SCALE = 0.00005f
-        const val MAX_SCALE = 10000f
-    }
-}
 
 // ── State ─────────────────────────────────────────────────────────────
 data class CanvasState(
@@ -88,8 +76,8 @@ class CanvasViewModel @Inject constructor(
             val newScale = (oldCam.scale * zoom).coerceIn(Camera.MIN_SCALE, Camera.MAX_SCALE)
             val newRotation = oldCam.rotation + rotationDelta
 
-            val dx = oldCam.x - centroid.x
-            val dy = oldCam.y - centroid.y
+            val dx = oldCam.cx - centroid.x
+            val dy = oldCam.cy - centroid.y
 
             val scaleRatio = newScale / oldCam.scale
             val sdx = dx * scaleRatio
@@ -97,13 +85,13 @@ class CanvasViewModel @Inject constructor(
 
             val (rdx, rdy) = TransformUtils.rotateVector(sdx, sdy, rotationDelta)
 
-            val newX = centroid.x + rdx + pan.x
-            val newY = centroid.y + rdy + pan.y
+            val newCx = centroid.x + rdx + pan.x
+            val newCy = centroid.y + rdy + pan.y
 
             s.copy(
                 camera = Camera(
-                    x = newX,
-                    y = newY,
+                    cx = newCx,
+                    cy = newCy,
                     scale = newScale,
                     rotation = newRotation,
                 ),
@@ -128,7 +116,7 @@ class CanvasViewModel @Inject constructor(
     fun currentViewport(): com.mamton.zoomalbum.core.math.BoundingBox {
         val cam = _state.value.camera
         return TransformUtils.cameraViewport(
-            cameraX = cam.x, cameraY = cam.y,
+            cameraCx = cam.cx, cameraCy = cam.cy,
             cameraScale = cam.scale, cameraRotation = cam.rotation,
             screenWidth = screenWidth, screenHeight = screenHeight,
         )
@@ -178,8 +166,8 @@ class CanvasViewModel @Inject constructor(
         cullingJob = viewModelScope.launch(Dispatchers.Default) {
             val cam = _state.value.camera
             val viewport = TransformUtils.cameraViewport(
-                cameraX = cam.x,
-                cameraY = cam.y,
+                cameraCx = cam.cx,
+                cameraCy = cam.cy,
                 cameraScale = cam.scale,
                 cameraRotation = cam.rotation,
                 screenWidth = screenWidth,

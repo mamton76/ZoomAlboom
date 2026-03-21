@@ -161,3 +161,26 @@ sealed interface MyAction : Intent {
 2. Third-party (`dagger.*`, `javax.*`, `kotlinx.*`)
 3. Project (`com.mamton.zoomalbum.*`)
 4. `kotlin.*`
+
+## Fully-Qualified Types
+
+Never use fully-qualified type names inline. Always add an import.
+
+```kotlin
+// BAD
+val frames = nodes.filterIsInstance<com.mamton.zoomalbum.domain.model.CanvasNode.Frame>()
+fun foo(repo: com.mamton.zoomalbum.domain.repository.MediaRepository) { }
+
+// GOOD
+import com.mamton.zoomalbum.domain.model.CanvasNode
+import com.mamton.zoomalbum.domain.repository.MediaRepository
+
+val frames = nodes.filterIsInstance<CanvasNode.Frame>()
+fun foo(repo: MediaRepository) { }
+```
+
+Exception: disambiguation when two imports have the same simple name — prefer an alias instead:
+
+```kotlin
+import com.mamton.zoomalbum.core.math.BoundingBox as MathBoundingBox
+```

@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
 import com.mamton.zoomalbum.feature.canvas.view.CanvasScreen
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
@@ -108,7 +109,7 @@ fun CanvasScaffold(
     }
     if (showFrameList) {
         val visibleFrameIds = canvasState.visibleNodes
-            .filterIsInstance<com.mamton.zoomalbum.domain.model.CanvasNode.Frame>()
+            .filterIsInstance<CanvasNode.Frame>()
             .map { it.id }
             .toHashSet()
         FrameListBottomSheet(

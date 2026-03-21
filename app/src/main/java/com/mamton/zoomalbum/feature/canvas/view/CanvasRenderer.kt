@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -39,24 +40,33 @@ private fun FrameRenderer(frame: CanvasNode.Frame) {
     Spacer(
         modifier = Modifier
             .graphicsLayer {
-                // Center-based: translate so top-left = center - half size
-                translationX = t.cx - renderW / 2f
-                translationY = t.cy - renderH / 2f
+                // Place the layer origin at the node's world center (cx, cy).
+                // drawBehind draws the rect at topLeft = (-renderW/2, -renderH/2),
+                // so it is centered on the origin. Rotation around TransformOrigin(0f,0f)
+                // = rotation around (cx, cy) = rotation around the visual center.
+                //
+                // NOTE: Spacer has 0×0 layout size, so TransformOrigin(0.5f, 0.5f)
+                // would compute pivot = (0.5*0, 0.5*0) = (0,0) — same as top-left,
+                // NOT the visual center. Always use TransformOrigin(0f, 0f) here.
+                translationX = t.cx
+                translationY = t.cy
                 rotationZ = t.rotation
-                // Rotation origin at visual center (0.5, 0.5 of the rendered rect)
-                transformOrigin = TransformOrigin(0.5f, 0.5f)
+                transformOrigin = TransformOrigin(0f, 0f)
                 clip = false
             }
             .drawBehind {
+                val topLeft = Offset(-renderW / 2f, -renderH / 2f)
                 val nodeSize = Size(renderW, renderH)
                 val radius = CornerRadius(4f, 4f)
                 drawRoundRect(
                     color = fillColor.copy(alpha = 0.35f),
+                    topLeft = topLeft,
                     size = nodeSize,
                     cornerRadius = radius,
                 )
                 drawRoundRect(
                     color = borderColor,
+                    topLeft = topLeft,
                     size = nodeSize,
                     cornerRadius = radius,
                     style = Stroke(width = 1.5f),

@@ -75,9 +75,12 @@ All child nodes are positioned in world coordinates inside this Box. The GPU app
 `CanvasNodeRenderer` dispatches on node type:
 
 - **`Frame`** — `Spacer` with per-node `graphicsLayer`:
-  - `translationX = t.cx - renderW/2`, `translationY = t.cy - renderH/2` (top-left offset from center)
-  - `rotationZ = t.rotation`, `transformOrigin = TransformOrigin(0.5f, 0.5f)` (rotation around visual center)
-  - `drawBehind` paints fill + border at `Size(renderW, renderH)` in world units.
+  - `translationX = t.cx`, `translationY = t.cy` — places graphicsLayer origin at node center.
+  - `rotationZ = t.rotation`, `transformOrigin = TransformOrigin(0f, 0f)` — rotates around origin = visual center.
+  - `drawBehind` draws rect at `topLeft = Offset(-renderW/2, -renderH/2)`, size `(renderW, renderH)`.
+  - **Gotcha:** `Spacer` has 0×0 layout size. `TransformOrigin(0.5f, 0.5f)` on a 0×0 composable
+    computes pivot = `(0,0)` (not center), which rotates around the top-left corner of the visual
+    rect and shifts the center. Always use `TransformOrigin(0f, 0f)` with this pattern.
 - **`Media`** — placeholder (Coil image loading deferred to Stage 2).
 
 Nodes use **`graphicsLayer`** for position and rotation (GPU-only, no Compose Constraints limits) and **`drawBehind`** for painting at exact world-coordinate dimensions. This avoids the ~16383dp Compose `Constraints` limit that `Modifier.size()` hits at extreme zoom levels.

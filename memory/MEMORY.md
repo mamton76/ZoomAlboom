@@ -16,7 +16,7 @@
   - Camera.scale=2.0 → world appears 2× magnified; Transform.scale=2.0 → node is 2× its base size
 - `Transform.toCamera(screenW, screenH)` in `TransformUtils.kt` computes the Camera to center and fit a node
 - `TransformOrigin(0.5f, 0.5f)` in FrameRenderer — rotation around visual center
-- Node render offset: `translationX = cx - renderW/2f` (center → top-left for graphicsLayer)
+- Node render: `translationX = t.cx`, `translationY = t.cy`; `drawBehind` draws at `topLeft=Offset(-renderW/2,-renderH/2)`. `TransformOrigin(0f,0f)` then rotates around (cx,cy). NEVER use TransformOrigin(0.5f,0.5f) on a zero-size Spacer — it computes pivot=(0,0)=top-left, not center, causing center shift on rotation.
 - `Camera` lives in `core/math/Camera.kt` (moved from CanvasViewModel to fix layer violation)
 - `CanvasViewModel._allNodes` is `MutableStateFlow<List<CanvasNode>>` (was mutable var)
 - `CanvasViewModel.frames` is a reactive `StateFlow<List<Frame>>` derived from `_allNodes`

@@ -20,13 +20,17 @@ object TransformUtils {
         return Pair(x * cosR - y * sinR, x * sinR + y * cosR)
     }
 
-    /** AABB of a node in world coordinates. */
-    fun toBoundingBox(transform: Transform): BoundingBox = BoundingBox(
-        left = transform.x,
-        top = transform.y,
-        right = transform.x + transform.w * transform.scale,
-        bottom = transform.y + transform.h * transform.scale,
-    )
+    /** AABB of a node in world coordinates (non-rotation-aware). */
+    fun toBoundingBox(transform: Transform): BoundingBox {
+        val halfW = transform.renderW / 2f
+        val halfH = transform.renderH / 2f
+        return BoundingBox(
+            left = transform.cx - halfW,
+            top = transform.cy - halfH,
+            right = transform.cx + halfW,
+            bottom = transform.cy + halfH,
+        )
+    }
 
     /**
      * Camera viewport in world coordinates (axis-aligned bounding box).

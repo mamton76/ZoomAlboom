@@ -33,20 +33,22 @@ private fun FrameRenderer(frame: CanvasNode.Frame) {
     val t = frame.transform
     val fillColor = Color(frame.color.toColorInt())
     val borderColor = fillColor.copy(alpha = 0.6f)
-    val widthPx = t.w * t.scale
-    val heightPx = t.h * t.scale
+    val renderW = t.renderW
+    val renderH = t.renderH
 
     Spacer(
         modifier = Modifier
             .graphicsLayer {
-                translationX = t.x
-                translationY = t.y
+                // Center-based: translate so top-left = center - half size
+                translationX = t.cx - renderW / 2f
+                translationY = t.cy - renderH / 2f
                 rotationZ = t.rotation
-                transformOrigin = TransformOrigin(0f, 0f)
+                // Rotation origin at visual center (0.5, 0.5 of the rendered rect)
+                transformOrigin = TransformOrigin(0.5f, 0.5f)
                 clip = false
             }
             .drawBehind {
-                val nodeSize = Size(widthPx, heightPx)
+                val nodeSize = Size(renderW, renderH)
                 val radius = CornerRadius(4f, 4f)
                 drawRoundRect(
                     color = fillColor.copy(alpha = 0.35f),

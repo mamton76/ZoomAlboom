@@ -21,7 +21,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
 import com.mamton.zoomalbum.domain.model.CanvasNode
-import kotlin.math.roundToLong
 
 /**
  * Reusable frame list content — rendered inside both
@@ -97,7 +96,7 @@ private fun FrameListItem(
 
         // Frame transform
         Text(
-            text = "XY: ${transform.x},${transform.y} rot: ${transform.rotation}, scale: ${transform.scale}",
+            text = "center: ${"%.0f".format(transform.cx)},${"%.0f".format(transform.cy)} rot: ${"%.1f".format(transform.rotation)}",
             style = MaterialTheme.typography.bodyMedium,
         )
 

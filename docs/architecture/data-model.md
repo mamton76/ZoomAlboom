@@ -135,10 +135,12 @@ Registry of all media used in an album. Allows finding all usages of a single fi
 
 **Location:** `filesDir/scene_{albumId}.json`
 
+> **Current implementation:** `SceneGraphSerializer` emits a bare `List<CanvasNode>` (flat JSON array), not the wrapped format below. The root object with `albumId` and `viewport` is the **target** format — see todo §1.3.
+
 ```json
 {
   "albumId": 123,
-  "viewport": { "x": 0, "y": 0, "scale": 1.0 },
+  "viewport": { "cx": 0, "cy": 0, "scale": 1.0 },
   "nodes": [
     {
       "id": "node_1",
@@ -217,8 +219,8 @@ Implementations in `data/repository/`, bound via Hilt `@Binds`.
 
 | Area | Current | Target |
 |------|---------|--------|
-| `albums.createdAt` | exists | removed (not needed) |
-| `albums.thumbnailPath` | String? | renamed to `thumbnailUri` |
+| `albums.createdAt` | exists (not yet removed) | to be removed |
+| `albums.thumbnailPath` | `thumbnailPath: String?` (not yet renamed) | rename to `thumbnailUri` |
 | `Transform.width/height` | `width`, `height` | renamed to `w`, `h` ✓ |
 | `Transform.x/y` | top-left corner | renamed to `cx/cy` (center-based) ✓ |
 | `Transform.w/h` | normalized (short side = 1) | actual world-unit size ✓ |

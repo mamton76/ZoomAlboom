@@ -13,22 +13,20 @@ Defined in `app/navigation/AppNavigation.kt`:
 
 ## Current State
 
-`AppNavigation` composable sets up a `NavHost` with `PROJECTS_HOME` as the start destination. The `CANVAS` route accepts an `albumId` path parameter.
-
-**Not yet integrated:** `MainActivity` currently composes `CanvasScreen` and `IdeOverlayScreen` directly in a `Box`, bypassing the NavHost. Full navigation wiring is planned.
+`AppNavigation` composable sets up a `NavHost` with `PROJECTS_HOME` as the start destination. The `CANVAS` route accepts an `albumId` path parameter. Navigation is fully wired into `MainActivity`.
 
 ## Screen Composition
-
-When navigation is fully wired:
 
 ```
 MainActivity
 └── AppNavigation (NavHost)
     ├── projects_home -> AlbumListScreen
-    └── canvas/{albumId} -> Box {
-            CanvasScreen(albumId)      // background layer
-            IdeOverlayScreen()         // foreground layer
-        }
+    └── canvas/{albumId} -> CanvasScaffold
+            ├── CanvasTopBar (album name, HUD, back, frame list, panel config)
+            ├── FAB [+] -> AddContentBottomSheet
+            ├── CanvasScreen        // infinite canvas, gestures, node rendering
+            ├── IdeOverlayScreen    // IDE panel overlay (opt-in, hidden by default)
+            └── ContextualActionBar // stub, shown on node selection
 ```
 
 ## Album List (projects_home/)
@@ -38,8 +36,13 @@ MainActivity
 
 ## Canvas Editor (canvas/)
 
-Two-layer composition:
-1. **`CanvasScreen`** — infinite canvas with gesture handling, node rendering, viewport culling.
-2. **`IdeOverlayScreen`** — IDE-style panel overlay (docked + floating panels).
+`CanvasScaffold` is the root composable for the canvas route. It composes:
 
-Each has its own ViewModel to prevent cross-recomposition.
+1. **`CanvasScreen`** — infinite canvas with gesture handling, node rendering, viewport culling.
+2. **`IdeOverlayScreen`** — IDE-style panel overlay (docked + floating panels, hidden by default).
+3. **`ContextualActionBar`** — stub shown at bottom when a node is selected.
+4. **`AddContentBottomSheet`** — slides up from FAB tap; content type picker (Frame, Photo, Video, …).
+5. **`FrameListBottomSheet`** — accessible from TopBar ☰; lists frames with delete.
+6. **`PanelConfigDialog`** — accessible from TopBar ⚙; toggle IDE panels on/off.
+
+`CanvasViewModel` and `IdeViewModel` are separate to prevent cross-recomposition.

@@ -24,7 +24,7 @@ com.mamton.zoomalbum/
 ### app/
 - `ZoomAlbumApp` (`@HiltAndroidApp`) — application entry point.
 - `MainActivity` (`@AndroidEntryPoint`) — single Activity composing `CanvasScreen` (background) + `IdeOverlayScreen` (foreground) in a `Box`.
-- `AppNavigation` — Jetpack Navigation routes (`PROJECTS_HOME`, `CANVAS/{albumId}`). Currently defined but not yet wired into `MainActivity`.
+- `AppNavigation` — Jetpack Navigation routes (`PROJECTS_HOME`, `CANVAS/{albumId}`), wired into `MainActivity`.
 - `AppModule` — Hilt DI: `DatabaseModule` (Room singleton, DAO), `RepositoryModule` (binds impls).
 
 ### core/
@@ -104,11 +104,11 @@ See [rendering.md](rendering.md) § IDE Overlay.
 
 The default UI uses minimal chrome to maximize canvas visibility. Three modes drive the UI surface:
 
-1. **Navigate mode** (default) — canvas takes ~100% of screen. Only a thin TopBar (album name, undo/redo, menu) and a FAB [+] bottom-right.
-2. **Add content mode** (FAB tap) — a Bottom Sheet slides up with content type picker and media library. Canvas remains visible behind the sheet.
-3. **Object selected mode** (node tap) — a contextual action bar appears at the bottom (move/scale/delete/duplicate/edit). Disappears on deselection.
+1. **Navigate mode** (default) — canvas takes ~100% of screen. `CanvasTopBar` (album name, node count HUD, zoom/rotation/xy, back, ☰ frame list, ⚙ panel config) and a FAB [+] bottom-right.
+2. **Add content mode** (FAB tap) — `AddContentBottomSheet` slides up with a content type picker (Frame, Photo, Video, Text, Sticker). Canvas remains visible behind the sheet.
+3. **Object selected mode** (node tap) — `ContextualActionBar` appears at the bottom (stub; awaits §4.2 node interaction). Disappears on deselection.
 
-**Bottom Sheet** is a new UI surface alongside the panel system, used for content addition and media browsing in the default canvas-first flow.
+**Bottom sheets** (`AddContentBottomSheet`, `FrameListBottomSheet`) are the primary UI surface for canvas-first users, alongside the opt-in IDE panel system.
 
 ### Panel System (Opt-In)
 
@@ -124,7 +124,7 @@ See [navigation.md](navigation.md).
 
 Three navigation levels:
 
-1. **App-level** — Jetpack Navigation between screens (`PROJECTS_HOME` -> `CANVAS/{albumId}`). Not yet wired into `MainActivity`.
+1. **App-level** — Jetpack Navigation between screens (`PROJECTS_HOME` -> `CANVAS/{albumId}`), wired into `MainActivity` via `AppNavigation`.
 2. **In-album camera** — pan / zoom / rotate via gestures. Continuous, user-driven.
 3. **Frame transitions** — animated camera interpolation (linear/bezier) to focus on a frame. Discrete, intent-driven.
 

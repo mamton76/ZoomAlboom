@@ -41,7 +41,7 @@ MainActivity
 1. **`CanvasScreen`** — infinite canvas with gesture handling, node rendering, viewport culling.
 2. **`IdeOverlayScreen`** — IDE-style panel overlay (docked + floating panels, hidden by default).
 3. **`ContextualActionBar`** — stub shown at bottom when a node is selected.
-4. **`AddContentBottomSheet`** — slides up from FAB tap; content type picker (Frame, Photo, Video, …).
+4. **`AddContentBottomSheet`** — slides up from FAB tap; content type picker (Frame + MediaType variants: Image, Video, Text; future: Audio, Sticker, AnimatedPhoto, VectorShape).
 5. **`FrameListBottomSheet`** — accessible from TopBar ☰; lists frames with delete.
 6. **`PanelConfigDialog`** — accessible from TopBar ⚙; toggle IDE panels on/off.
 

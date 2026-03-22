@@ -36,7 +36,7 @@ com.mamton.zoomalbum/
 - **`designsystem/`** — `Color.kt` (dark-first palette), `Theme.kt` (Material 3 `ZoomAlbumTheme`).
 
 ### domain/
-- **Models:** `Transform`, `CanvasNode` (sealed: `Frame` | `Media`), `AlbumMeta`, `AlbumData`, `MediaType`.
+- **Models:** `Transform`, `CanvasNode` (sealed: `Frame` | `Media`), `AlbumMeta`, `AlbumData`, `MediaType` (Image, Video, Text; future: Audio, Sticker, AnimatedPhoto, VectorShape).
 - **Repository interfaces:** `ProjectRepository` (albums CRUD), `MediaRepository` (scene graph load/save).
 - **Use cases:** `CalculateViewportIntersectionsUseCase`, `SaveSceneGraphUseCase`.
 
@@ -105,7 +105,7 @@ See [rendering.md](rendering.md) § IDE Overlay.
 The default UI uses minimal chrome to maximize canvas visibility. Three modes drive the UI surface:
 
 1. **Navigate mode** (default) — canvas takes ~100% of screen. `CanvasTopBar` (album name, node count HUD, zoom/rotation/xy, back, ☰ frame list, ⚙ panel config) and a FAB [+] bottom-right.
-2. **Add content mode** (FAB tap) — `AddContentBottomSheet` slides up with a content type picker (Frame, Photo, Video, Text, Sticker). Canvas remains visible behind the sheet.
+2. **Add content mode** (FAB tap) — `AddContentBottomSheet` slides up with a content type picker (Frame + all `MediaType` variants: Image, Video, Text; future: Audio, Sticker, AnimatedPhoto, VectorShape). Canvas remains visible behind the sheet.
 3. **Object selected mode** (node tap) — `ContextualActionBar` appears at the bottom (stub; awaits §4.2 node interaction). Disappears on deselection.
 
 **Bottom sheets** (`AddContentBottomSheet`, `FrameListBottomSheet`) are the primary UI surface for canvas-first users, alongside the opt-in IDE panel system.

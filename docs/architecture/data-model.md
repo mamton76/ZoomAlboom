@@ -75,7 +75,7 @@ fun Transform.toCamera(screenWidth: Float, screenHeight: Float, fillFraction: Fl
 | Variant | Extra fields | Purpose |
 |---------|-------------|---------|
 | `Frame` | `label`, `color` (hex string), `containsNodeIds` (dynamically calculated) | Navigation area / logical grouping |
-| `Media` | `mediaRefId` (FK to `media_library`), `mediaType`, `tags` | Image/video asset |
+| `Media` | `mediaRefId` (FK to `media_library`), `mediaType`, `tags` | Any media asset (image, video, text; future: audio, sticker, animated photo, vector shape) |
 
 Both share `id: String`, `transform: Transform`. Both are `@Serializable`.
 
@@ -128,7 +128,7 @@ Registry of all media used in an album. Allows finding all usages of a single fi
 | `id` | String (PK) | Hash or UUID of the file |
 | `album_id` | Long (FK) | Binding to album |
 | `sourceUri` | String | Content URI (local) or URL (network) |
-| `mediaType` | Enum | IMAGE, VIDEO, AUDIO |
+| `mediaType` | Enum | IMAGE, VIDEO, TEXT (current); AUDIO, STICKER, ANIMATED_PHOTO, VECTOR_SHAPE (future) |
 | `status` | Enum | AVAILABLE, MISSING (validated at startup) |
 
 ### JSON Scene Graph

@@ -138,7 +138,7 @@ Three modes layer over the canvas depending on user action:
 
 **2. Add content mode** (triggered by FAB [+])
 - Bottom Sheet slides up from the bottom edge
-- Contains: content type picker (photo, video, text, sticker) + media library browser
+- Contains: content type picker (Frame + all `MediaType` variants: Image, Video, Text; future: Audio, Sticker, AnimatedPhoto, VectorShape) + media library browser
 - Canvas remains visible and interactive behind the sheet
 - Sheet dismisses on drag-down or content placement
 

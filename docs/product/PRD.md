@@ -179,11 +179,19 @@ Frames may represent:
 - a topic
 
 ### 8.3 Media items
-The main media types in MVP are:
-- photo
-- video
-- text
-- sticker
+
+Media types are defined by the `MediaType` enum:
+
+**Current:**
+- Image
+- Video
+- Text
+
+**Future:**
+- Audio
+- Sticker
+- AnimatedPhoto
+- VectorShape
 
 Each media item can be placed spatially on the canvas.
 

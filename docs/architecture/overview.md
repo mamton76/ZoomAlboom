@@ -186,4 +186,4 @@ See [project-memory.md](../product/project-memory.md) for the full decisions log
 - **Persistence Evolution:** Current SQLite + JSON is local-only. Future consideration: CRDT or Protobuf for real-time cloud collaboration.
 - **Media Validation:** On album open, check `media_library` source URIs and substitute placeholders for missing files.
 
-Planned features (post-MVP): smart tags, layers, audio/live photos, crop. See [future-ideas.md](../product/future-ideas.md).
+Planned features (post-MVP): cinematic transition editor, smart tags, layers, audio/live photos, crop. See [future-ideas.md](../product/future-ideas.md) and [future-features/](future-features/) for architecture concepts.

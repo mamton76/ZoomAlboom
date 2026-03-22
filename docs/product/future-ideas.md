@@ -3,6 +3,7 @@
 > Related: [PRD § 10](PRD.md#10-future-scope-post-mvp) | [Vision](vision.md) | [Architecture](../architecture/overview.md) | [TODO](../todo.md)
 
 ## Navigation & Transitions
+- **Cinematic transition editor** — editable camera paths between frames with duration, easing presets, waypoints, and Bezier curves. See [architecture concept](../architecture/future-features/transition-editor.md).
 - **Smart tags** — tag objects with people/places/topics; clicking a tag teleports to the corresponding frame
 - **Semantic jumps** — navigate across the album via tag-based graph, not just spatial proximity
 - **Timeline mode** — temporal dimension for chronological navigation

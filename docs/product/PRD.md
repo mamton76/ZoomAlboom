@@ -264,6 +264,7 @@ The meaning of the album comes not only from the media itself, but also from:
 
 These are likely future directions, but not required for initial release. See [future-ideas.md](future-ideas.md) for the full categorized list.
 
+- cinematic transition editor — editable camera paths between frames with presets, waypoints, and curves. See [future-ideas](future-ideas.md#navigation--transitions).
 - smart tags for people / places / topics
 - semantic jumps across the album
 - layers and visibility control

@@ -205,41 +205,33 @@ Key points:
 
 **Components:** `FileStorageHelper` (raw file I/O) + `SceneGraphSerializer` (encode/decode) + `MediaRepositoryImpl` (abstraction).
 
-## Undo/Redo Model (Command Pattern)
+## Undo/Redo Model (Snapshot-Based)
 
-In-memory `Deque<CanvasCommand>`, persisted to `filesDir/history_{albumId}.json` during autosave. Each action is atomic.
+`Deque<UndoEntry>`, capped at ~50-100 entries. Persisted to `filesDir/history_{albumId}.json` on each mutation, loaded on album open.
 
 ```kotlin
-@Serializable
-sealed interface CanvasCommand {
-    val targetNodeId: String
+data class CanvasCommand(
+    val nodeId: String,
+    val before: CanvasNode?,  // null = node didn't exist (this was an add)
+    val after: CanvasNode?,   // null = node was removed (this was a delete)
+)
 
-    data class Move(
-        override val targetNodeId: String,
-        val oldTransform: Transform,
-        val newTransform: Transform,
-    ) : CanvasCommand
-
-    data class AddNode(
-        override val targetNodeId: String,
-        val node: CanvasNode,
-    ) : CanvasCommand
-
-    data class RemoveNode(
-        override val targetNodeId: String,
-        val node: CanvasNode,
-    ) : CanvasCommand
-
-    // undo() applies oldTransform / removes node / re-adds node
-    // redo() applies newTransform / adds node / removes node
+sealed interface UndoEntry {
+    data class Single(val command: CanvasCommand) : UndoEntry
+    data class Compound(val commands: List<CanvasCommand>) : UndoEntry
 }
 ```
 
+Snapshot-based: captures full node state before/after, so any mutation (transform, property edit, add, delete) is covered without new command types.
+
+**Grouping:**
+- **Drag/resize gestures** — snapshot on gesture start, commit one `Single` command on gesture end. No intermediate commands.
+- **Multi-node operations** (e.g. delete frame + unparent children) — wrapped in `Compound` and undo/redo atomically.
+
 **Mechanics:**
-- `undo()` — pop from undo stack, apply reverse, push to redo stack.
-- `redo()` — pop from redo stack, apply forward, push to undo stack.
+- `undo()` — pop from undo stack, restore `before` state for each command, push entry to redo stack.
+- `redo()` — pop from redo stack, apply `after` state, push to undo stack.
 - Any new command clears the redo stack.
-- History file (`history_{albumId}.json`) written on autosave, loaded on album open.
 
 ## Repository Interfaces
 
@@ -270,4 +262,4 @@ Implementations in `data/repository/`, bound via Hilt `@Binds`.
 | `ide_workspaces` table | not present | new table |
 | `media_library` table | not present | new table |
 | Scene graph `viewport` | not saved | saved in JSON root |
-| Undo/Redo | not present | `CanvasCommand` deque + `history_{albumId}.json` |
+| Undo/Redo | not present | Snapshot-based `UndoEntry` deque, persisted to `history_{albumId}.json` |

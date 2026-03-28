@@ -56,14 +56,31 @@ Gap between current implementation and target architecture.
 
 ---
 
-## 2. Undo/Redo (Command Pattern)
+## 2. Undo/Redo
 
-- [ ] `CanvasCommand` sealed interface (`Move`, `AddNode`, `RemoveNode`)
-- [ ] `CommandHistory` class — undo/redo `Deque` management
-- [ ] Integrate into `CanvasViewModel` (all mutations go through commands)
-- [ ] Autosave history to `filesDir/history_{albumId}.json`
-- [ ] Load history on album open
+Snapshot-based: each command captures `before`/`after` node state (not a sealed class per mutation type). Automatically covers any current or future mutation without new command classes.
+
+### 2.1 Core model
+- [ ] `CanvasCommand` data class — `nodeId`, `before: CanvasNode?` (null = add), `after: CanvasNode?` (null = delete)
+- [ ] `UndoEntry` sealed interface — `Single(command)` / `Compound(commands: List)` for atomic multi-node operations
+- [ ] `CommandHistory` class — undo/redo `Deque<UndoEntry>`, capped at ~50-100 entries
+
+### 2.2 Gesture grouping
+- [ ] `onGestureStart` → snapshot node state as `before`
+- [ ] Gesture updates apply transforms directly (no intermediate commands)
+- [ ] `onGestureEnd` → create one `CanvasCommand(before=snapshot, after=currentState)`, push to history
+- [ ] Multi-node operations (e.g. delete frame + unparent children) → `Compound` entry
+
+### 2.3 Persistence
+- [ ] `@Serializable` on `CanvasCommand` and `UndoEntry`
+- [ ] Autosave history to `filesDir/history_{albumId}.json` on each mutation
+- [ ] Load history on album open, cap at ~50-100 entries
+
+### 2.4 Integration
+- [ ] Integrate into `CanvasViewModel` — all mutations go through commands
 - [ ] Undo/redo UI buttons in TopBar
+
+> **Timing:** implement after §4.2 (node interaction) — undo is most useful once move/resize/delete exists.
 
 ---
 

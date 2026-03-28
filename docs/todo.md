@@ -104,6 +104,16 @@ Gap between current implementation and target architecture.
 - [ ] Mark missing files as `status = MISSING`
 - [ ] Show placeholder for missing media on canvas
 
+### 4.7 Media adding & editing
+- [ ] Photo picker integration (Android photo picker / `ACTION_PICK`)
+- [ ] Register picked media in `media_library` table (copy to app storage or keep content URI)
+- [ ] Create `CanvasNode.Media` from picked photo (viewport-centered placement, like frames)
+- [ ] Wire "Photo" action in FAB / AddContentBottomSheet to photo picker flow
+- [ ] Basic media editing: move, resize, delete (depends on §4.2 Node interaction)
+- [ ] Media property editing (label/tags via contextual UI, depends on §5 Object selected mode)
+- [ ] Video picker + thumbnail extraction for video nodes
+- [ ] Text node creation (inline text input → `CanvasNode.Media` with `MediaType.TEXT`)
+
 ### 4.5 Viewport culling upgrade
 - [x] Brute-force AABB (`ViewportCuller` in `core/math/SpatialIndex.kt`)
 - [ ] Spatial index (grid or R-tree) for >2k nodes
@@ -134,6 +144,21 @@ Gap between current implementation and target architecture.
 - [x] `CanvasNodeFactory` — creates frames with viewport-proportional w/h, zoom-derived scale, rotation-aligned placement
 - [x] `CanvasViewModel.addNode()` / `removeNode()` — generic node add/remove
 - [x] Reusable content composables in `ide_ui/ui/content/` (shared between panels and sheets)
+
+---
+
+## 5b. Radial FAB (Quarter-Circle)
+
+Replaces current FAB [+] + BottomSheet. Planned immediately after photo node adding/editing (§4.1 Media).
+
+- [ ] `RadialFab` composable — bottom-right corner, quarter-circle arc with 4 sectors
+- [ ] 3 customizable sectors (user-pinned media types, default: Photo, Frame, Text)
+- [ ] 1 fixed ".." sector → opens full `AddContentBottomSheet` with all media types
+- [ ] Fan-out / collapse arc animation (staggered per sector)
+- [ ] Hit-testing via arc path geometry (`pointerInput` + angle calculation)
+- [ ] Long-press to enter "edit sectors" mode (drag media types in/out)
+- [ ] Persist pinned sector config (per-user or per-album in `ide_workspaces`)
+- [ ] Remove old `FloatingActionButton` + rewire content creation flow
 
 ---
 

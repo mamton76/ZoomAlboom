@@ -17,17 +17,27 @@ object CanvasNodeFactory {
     /**
      * Creates a frame centered in the viewport, ~80% of visible area.
      *
-     * Transform uses center-based coordinates: cx/cy = center of the frame in world space.
-     * w/h = actual world-unit dimensions (not normalized).
+     * Frame dimensions are derived from screen pixels / camera.scale — NOT from
+     * the viewport AABB. The AABB expands when the camera is rotated (at 45° it is
+     * nearly square even on a portrait screen), so using it for w/h produces wrong
+     * aspect ratios. Screen pixels are always rotation-independent.
+     *
+     * viewport is only used for cx/cy (the world point at the screen center).
      * rotation = -camera.rotation so the frame appears axis-aligned on screen.
      */
     fun createFrame(
+        screenWidth: Float,
+        screenHeight: Float,
         viewport: BoundingBox,
         nextZIndex: Float,
         camera: Camera,
     ): CanvasNode.Frame {
-        val frameW = viewport.width * 0.8f
-        val frameH = viewport.height * 0.8f
+        // Visible world extent along screen axes — rotation-independent.
+        val visibleWorldW = screenWidth / camera.scale
+        val visibleWorldH = screenHeight / camera.scale
+
+        val frameW = visibleWorldW * 0.8f
+        val frameH = visibleWorldH * 0.8f
 
         return CanvasNode.Frame(
             id = "frame_${System.currentTimeMillis()}",

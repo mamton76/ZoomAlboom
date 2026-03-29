@@ -96,7 +96,9 @@ private fun FrameListItem(
 
         // Frame transform
         Text(
-            text = "center: ${"%.0f".format(transform.cx)},${"%.0f".format(transform.cy)} rot: ${"%.1f".format(transform.rotation)}",
+            text = "center: ${"%.0f".format(transform.cx)},${"%.0f".format(transform.cy)} " +
+                    "wh: ${"%.0f".format(transform.w)},${"%.0f".format(transform.h)}=${"%.2f".format(transform.w/transform.h)}} " +
+                    "rot: ${"%.0f".format(transform.rotation)}",
             style = MaterialTheme.typography.bodyMedium,
         )
 

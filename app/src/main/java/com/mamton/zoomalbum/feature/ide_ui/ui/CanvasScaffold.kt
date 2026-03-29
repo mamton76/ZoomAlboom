@@ -90,11 +90,16 @@ fun CanvasScaffold(
                 val camera = canvasViewModel.currentCamera()
                 val zIndex = canvasViewModel.nextZIndex()
                 val node = when (type) {
-                    "Frame" -> CanvasNodeFactory.createFrame(
-                        viewport = viewport,
-                        nextZIndex = zIndex,
-                        camera = camera,
-                    )
+                    "Frame" -> {
+                        val (sw, sh) = canvasViewModel.screenSize()
+                        CanvasNodeFactory.createFrame(
+                            screenWidth = sw,
+                            screenHeight = sh,
+                            viewport = viewport,
+                            nextZIndex = zIndex,
+                            camera = camera,
+                        )
+                    }
                     else -> null
                 }
                 node?.let { canvasViewModel.addNode(it) }

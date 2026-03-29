@@ -20,6 +20,7 @@
 - `Camera` lives in `core/math/Camera.kt` (moved from CanvasViewModel to fix layer violation)
 - `CanvasViewModel._allNodes` is `MutableStateFlow<List<CanvasNode>>` (was mutable var)
 - `CanvasViewModel.frames` is a reactive `StateFlow<List<Frame>>` derived from `_allNodes`
+- `CanvasNodeFactory.createFrame()` sizes frames from `screenWidth/camera.scale` — NOT from `viewport.width/height`. The viewport AABB changes aspect ratio with camera rotation (at 45° it is nearly square even on a portrait screen). Screen pixels are always rotation-independent.
 
 ## IDE Panel System (implemented 2026-03-12)
 - PanelPosition: LeftTop, LeftBottom, RightTop, RightBottom, Top, Bottom, Floating

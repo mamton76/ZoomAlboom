@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.mamton.zoomalbum.core.math.BoundingBox
 import com.mamton.zoomalbum.core.math.Camera
 import com.mamton.zoomalbum.core.math.TransformUtils
 import com.mamton.zoomalbum.core.math.ViewportCuller
@@ -120,7 +121,7 @@ class CanvasViewModel @Inject constructor(
     }
 
     /** Current viewport in world coordinates. */
-    fun currentViewport(): com.mamton.zoomalbum.core.math.BoundingBox {
+    fun currentViewport(): BoundingBox {
         val cam = _state.value.camera
         return TransformUtils.cameraViewport(
             cameraCx = cam.cx, cameraCy = cam.cy,
@@ -130,6 +131,8 @@ class CanvasViewModel @Inject constructor(
     }
 
     fun currentCamera(): Camera = _state.value.camera
+
+    fun screenSize(): Pair<Float, Float> = screenWidth to screenHeight
 
     fun nextZIndex(): Float = (_allNodes.value.maxOfOrNull { it.transform.zIndex } ?: 0f) + 1f
 

@@ -53,6 +53,40 @@ After each camera update, `recalculateVisibleNodes()` runs on `Dispatchers.Defau
 
 **Current:** brute-force O(n). **Planned:** spatial index (grid or R-tree) for >2k nodes.
 
+### 4b. Level-of-Detail Resolution (LOD)
+
+After viewport culling, each visible node is assigned a `RenderDetail` level by `LodResolver` (`core/math/LodResolver.kt`). This determines **how** (or whether) to render a node at the current zoom.
+
+**Two-stage resolution:**
+
+1. **Screen-size culling** — if the node's largest rendered dimension × `camera.scale` is below `MIN_VISIBLE_PX` (2px), the node is `Hidden`. This prevents rendering sub-pixel objects.
+
+2. **Semantic zoom filtering** — uses the node's `VisibilityPolicy` (or a type-based default) to compute `relativeZoom = camera.scale / policy.referenceScale`:
+   - Below `minRelativeZoom` → `belowRangeMode` (e.g. `Hidden` for media, `Stub` for frames)
+   - Above `maxRelativeZoom` → `aboveRangeMode` (e.g. `Simplified` for frames, `Full` for media)
+   - In range → `Full`
+
+**`RenderDetail`** enum: `Hidden`, `Stub`, `Preview`, `Full`, `Simplified`.
+
+**`VisibilityPolicy`** (per-node, optional — falls back to type defaults):
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `referenceScale` | Float | Camera zoom at which the node is "meant to be viewed" |
+| `minRelativeZoom` | Float | Below this ratio → `belowRangeMode` |
+| `maxRelativeZoom` | Float | Above this ratio → `aboveRangeMode` |
+| `belowRangeMode` | RenderDetail | What to show when zoomed too far out |
+| `aboveRangeMode` | RenderDetail | What to show when zoomed too far in |
+
+**Default policies:**
+
+| Node type | minRelativeZoom | maxRelativeZoom | belowRangeMode | aboveRangeMode |
+|-----------|-----------------|-----------------|----------------|----------------|
+| Frame | 0.001 | 500 | Stub | Simplified |
+| Media | 0.01 | 100 | Hidden | Full |
+
+**Debug logging:** `LodResolver` emits `Log.d("LodResolver", ...)` whenever a node is hidden or downgraded, logging the node ID, reason (screen-size-cull or semantic-zoom), all relevant values (screen size, relative zoom, policy bounds, camera scale). Filter with `adb logcat -s LodResolver:D`.
+
 ### 5. graphicsLayer Transform
 
 `CanvasScreen` uses a **single `Modifier.graphicsLayer`** on an inner `Box`:

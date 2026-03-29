@@ -19,6 +19,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
+import com.mamton.zoomalbum.domain.model.RenderDetail
 import com.mamton.zoomalbum.feature.canvas.view.CanvasScreen
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.AddContentBottomSheet
@@ -46,11 +47,15 @@ fun CanvasScaffold(
 
     Scaffold(
         topBar = {
+            val lodCounts = canvasState.visibleNodes.groupingBy { it.detail }.eachCount()
             CanvasTopBar(
                 albumName = albumName,
                 visibleNodeCount = canvasState.visibleNodes.size,
                 totalNodeCount = canvasState.totalNodeCount,
                 camera = canvasState.camera,
+                lodFullCount = lodCounts[RenderDetail.Full] ?: 0,
+                lodStubCount = lodCounts[RenderDetail.Stub] ?: 0,
+                lodSimplifiedCount = lodCounts[RenderDetail.Simplified] ?: 0,
                 onNavigateBack = onNavigateBack,
                 onOpenFrameList = { showFrameList = true },
                 onOpenPanelConfig = { showPanelConfig = true },
@@ -109,6 +114,7 @@ fun CanvasScaffold(
     }
     if (showFrameList) {
         val visibleFrameIds = canvasState.visibleNodes
+            .map { it.node }
             .filterIsInstance<CanvasNode.Frame>()
             .map { it.id }
             .toHashSet()

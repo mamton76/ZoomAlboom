@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 sealed class CanvasNode {
     abstract val id: String
     abstract val transform: Transform
+    abstract val visibilityPolicy: VisibilityPolicy?
 
     @Serializable
     data class Media(
@@ -14,6 +15,7 @@ sealed class CanvasNode {
         val mediaRefId: String,
         val mediaType: MediaType = MediaType.IMAGE,
         val tags: List<String> = emptyList(),
+        override val visibilityPolicy: VisibilityPolicy? = null,
     ) : CanvasNode()
 
     @Serializable
@@ -23,6 +25,7 @@ sealed class CanvasNode {
         val label: String = "",
         val color: String = "#888888",
         val containsNodeIds: List<String> = emptyList(),
+        override val visibilityPolicy: VisibilityPolicy? = null,
     ) : CanvasNode()
 }
 

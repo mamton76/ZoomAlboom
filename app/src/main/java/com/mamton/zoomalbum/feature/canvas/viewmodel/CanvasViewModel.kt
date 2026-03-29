@@ -6,9 +6,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mamton.zoomalbum.core.math.BoundingBox
 import com.mamton.zoomalbum.core.math.Camera
+import com.mamton.zoomalbum.core.math.LodResolver
 import com.mamton.zoomalbum.core.math.TransformUtils
 import com.mamton.zoomalbum.core.math.ViewportCuller
 import com.mamton.zoomalbum.domain.model.CanvasNode
+import com.mamton.zoomalbum.domain.model.RenderDetail
 import com.mamton.zoomalbum.domain.repository.MediaRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -24,9 +26,16 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 // ── State ─────────────────────────────────────────────────────────────
+
+/** A node paired with its resolved render detail for the current camera. */
+data class VisibleNode(
+    val node: CanvasNode,
+    val detail: RenderDetail,
+)
+
 data class CanvasState(
     val camera: Camera = Camera(),
-    val visibleNodes: List<CanvasNode> = emptyList(),
+    val visibleNodes: List<VisibleNode> = emptyList(),
     val totalNodeCount: Int = 0,
     val isLoading: Boolean = true,
 )
@@ -184,8 +193,12 @@ class CanvasViewModel @Inject constructor(
                 screenWidth = screenWidth,
                 screenHeight = screenHeight,
             )
-            val visible = ViewportCuller.visibleNodes(_allNodes.value, viewport)
-            _state.update { it.copy(visibleNodes = visible) }
+            val geometryVisible = ViewportCuller.visibleNodes(_allNodes.value, viewport)
+            val resolved = geometryVisible.mapNotNull { node ->
+                val detail = LodResolver.resolveRenderDetail(node, cam)
+                if (detail == RenderDetail.Hidden) null else VisibleNode(node, detail)
+            }
+            _state.update { it.copy(visibleNodes = resolved) }
         }
     }
 

@@ -77,7 +77,44 @@ fun Transform.toCamera(screenWidth: Float, screenHeight: Float, fillFraction: Fl
 | `Frame` | `label`, `color` (hex string), `containsNodeIds` (dynamically calculated) | Navigation area / logical grouping |
 | `Media` | `mediaRefId` (FK to `media_library`), `mediaType`, `tags` | Any media asset (image, video, text; future: audio, sticker, animated photo, vector shape) |
 
-Both share `id: String`, `transform: Transform`. Both are `@Serializable`.
+Both share `id: String`, `transform: Transform`, `visibilityPolicy: VisibilityPolicy?`. Both are `@Serializable`.
+
+### VisibilityPolicy & RenderDetail
+
+Controls how a node appears at different zoom levels. Stored per-node (`visibilityPolicy` field, nullable — falls back to type-based defaults in `LodResolver`).
+
+```kotlin
+@Serializable
+data class VisibilityPolicy(
+    val referenceScale: Float,       // camera zoom at which node is "meant to be viewed"
+    val minRelativeZoom: Float,      // below → belowRangeMode
+    val maxRelativeZoom: Float,      // above → aboveRangeMode
+    val belowRangeMode: RenderDetail,
+    val aboveRangeMode: RenderDetail,
+)
+
+@Serializable
+enum class RenderDetail { Hidden, Stub, Preview, Full, Simplified }
+```
+
+LOD resolution is performed by `LodResolver` (`core/math/LodResolver.kt`) — see [rendering.md §4b](rendering.md#4b-level-of-detail-resolution-lod) for the algorithm.
+
+### MediaType
+
+enum class MediaType {
+    Image,          // raster photo/image
+    Video,          // video clip
+    Text,           // text block
+
+    // future
+    Audio,          // audio clip
+    Sticker,        // static sticker/illustration
+    AnimatedPhoto,  // Live Photo / animated GIF
+    VectorShape,    // SVG or vector primitive
+}
+
+
+`Image, Video, Text are MVP variants. The rest are planned post-MVP extensions.
 
 ### AlbumMeta
 

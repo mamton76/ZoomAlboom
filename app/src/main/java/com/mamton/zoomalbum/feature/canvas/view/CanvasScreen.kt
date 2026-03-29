@@ -53,8 +53,8 @@ fun CanvasScreen(
                 transformOrigin = TransformOrigin(0f, 0f)
             },
         ) {
-            for (node in state.visibleNodes) {
-                CanvasNodeRenderer(node)
+            for ((node, detail) in state.visibleNodes) {
+                CanvasNodeRenderer(node, detail)
             }
         }
 

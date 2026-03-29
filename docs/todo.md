@@ -108,6 +108,15 @@ Gap between current implementation and target architecture.
 - [x] Brute-force AABB (`ViewportCuller` in `core/math/SpatialIndex.kt`)
 - [ ] Spatial index (grid or R-tree) for >2k nodes
 
+### 4.6 Level-of-Detail (LOD)
+- [x] `VisibilityPolicy` data class + `RenderDetail` enum (`domain/model/VisibilityPolicy.kt`)
+- [x] `visibilityPolicy` field on `CanvasNode` (optional, per-node override)
+- [x] `LodResolver` object (`core/math/LodResolver.kt`) — screen-size cull + semantic zoom filtering
+- [x] Default policies for Frame and Media node types
+- [x] Debug logging in `LodResolver` (tag: `LodResolver`)
+- [ ] Wire `LodResolver` into rendering pipeline (skip/downgrade nodes based on `RenderDetail`)
+- [ ] Persist `visibilityPolicy` in scene graph JSON
+
 ---
 
 ## 5. UI Architecture — Canvas-First Refactor

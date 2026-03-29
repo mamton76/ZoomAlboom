@@ -23,6 +23,9 @@ fun CanvasTopBar(
     visibleNodeCount: Int = 0,
     totalNodeCount: Int = 0,
     camera: Camera = Camera(),
+    lodFullCount: Int = 0,
+    lodStubCount: Int = 0,
+    lodSimplifiedCount: Int = 0,
     onNavigateBack: () -> Unit,
     onOpenFrameList: () -> Unit,
     onOpenPanelConfig: () -> Unit,
@@ -43,6 +46,12 @@ fun CanvasTopBar(
                     text = "zoom: ${"%.2f".format(camera.scale)}x" +
                         "  rot: ${"%.1f".format(camera.rotation)}\u00B0" +
                         "  xy: ${"%.0f".format(camera.cx)}, ${"%.0f".format(camera.cy)}",
+                    fontSize = 11.sp,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(horizontal = 5.dp),
+                )
+                Text(
+                    text = "LOD: ${lodFullCount}F ${lodStubCount}S ${lodSimplifiedCount}X",
                     fontSize = 11.sp,
                     color = TextSecondary,
                     modifier = Modifier.padding(horizontal = 5.dp),

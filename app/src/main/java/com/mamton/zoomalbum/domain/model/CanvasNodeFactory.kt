@@ -50,6 +50,7 @@ object CanvasNodeFactory {
                 zIndex = nextZIndex,
             ),
             color = PALETTE[Random.nextInt(PALETTE.size)],
+            visibilityPolicy = VisibilityPolicy(referenceScale = camera.scale),
         )
     }
 

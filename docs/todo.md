@@ -251,7 +251,40 @@ Items completed — kept here to track what exists.
 
 ---
 
-## 10. Future (Post-MVP)
+## 10. Canvas Engine Extraction (`:canvas-engine` module)
+
+Extract the canvas rendering / navigation / interaction system as a reusable library for AI Diary integration (Timeline, Milestone, Map visualization modes).
+
+### Phase 1 — Extract as Gradle module within this repo
+- [ ] Create `:canvas-engine` module with its own `build.gradle.kts`
+- [ ] Move `core/math/` → engine module: `Camera`, `TransformUtils`, `BoundingBox`, `ViewportCuller`, `LodResolver`, `ResizeHandle`
+- [ ] Define generic `CanvasNode` interface in engine (replace sealed `Frame | Media` with open contract: `id`, `transform`, `visibilityPolicy`)
+- [ ] Move gesture detectors → engine: `NodeInteractionGestureDetector`, `TapAndLongPressGestureDetector`, `InfiniteCanvasGestureDetector`
+- [ ] Move rendering pipeline → engine: `CanvasScreen` (parameterized node renderer), `SelectionOverlay`, `SelectionDebugPanel`
+- [ ] Move selection/interaction state → engine: `CanvasAction` (generic), `CanvasState`, action dispatch logic
+- [ ] Keep `CanvasViewModel` in app — wraps engine state with app-specific persistence (Room, scene graph serialization)
+- [ ] ZoomAlboom's `Frame` and `Media` implement the engine's `CanvasNode` interface
+
+### Phase 2 — Stabilize API
+- [ ] Define engine's public API surface (node interface, gesture callbacks, rendering slots)
+- [ ] Abstract away app-specific callbacks (delete/duplicate become generic action slots)
+- [ ] Engine exposes `@Composable CanvasEngine(...)` entry point with configuration lambdas
+
+### Phase 3 — Standalone library
+- [ ] Promote to separate repo / published artifact
+- [ ] AI Diary depends on `canvas-engine` artifact
+- [ ] ZoomAlboom depends on same artifact
+
+### What stays in ZoomAlboom (not extracted)
+- Frame / Media domain models (implement engine's generic interface)
+- Album persistence (Room, scene graph JSON, FileStorageHelper)
+- IDE panel system (CanvasScaffold, IdeOverlayScreen, panels)
+- Project management (AlbumListScreen, ProjectsViewModel)
+- Design system (colors, theme — or extract separately)
+
+---
+
+## 11. Future (Post-MVP)
 
 See [future-ideas.md](product/future-ideas.md) for the full list.
 

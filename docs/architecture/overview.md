@@ -186,4 +186,6 @@ See [project-memory.md](../product/project-memory.md) for the full decisions log
 - **Persistence Evolution:** Current SQLite + JSON is local-only. Future consideration: CRDT or Protobuf for real-time cloud collaboration.
 - **Media Validation:** On album open, check `media_library` source URIs and substitute placeholders for missing files.
 
+- **Canvas Engine Extraction:** The canvas rendering / navigation / interaction system should be extracted as a reusable `:canvas-engine` Gradle module, then promoted to a standalone library. AI Diary needs the same infinite zoomable canvas for its visualization modes (Timeline, Milestone, Map). The engine boundary: generic `CanvasNode` interface, gesture detectors, rendering pipeline, selection/interaction state. App-specific concerns (Frame/Media models, persistence, IDE panels) stay in the app module. See [todo.md § 10](../todo.md#10-canvas-engine-extraction-canvas-engine-module).
+
 Planned features (post-MVP): cinematic transition editor, smart tags, layers, audio/live photos, crop. See [future-ideas.md](../product/future-ideas.md) and [future-features/](future-features/) for architecture concepts.

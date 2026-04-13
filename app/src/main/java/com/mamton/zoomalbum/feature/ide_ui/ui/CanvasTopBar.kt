@@ -37,7 +37,9 @@ fun CanvasTopBar(
                     text = albumName,
                     modifier = Modifier.padding(horizontal = 5.dp))
                 Text(
-                    text = "visible: $visibleNodeCount / $totalNodeCount",
+                    text = "visible: $visibleNodeCount / $totalNodeCount"
+                            //+ "  LOD: ${lodFullCount}F ${lodStubCount}S ${lodSimplifiedCount}X"
+                            ,
                     fontSize = 11.sp,
                     color = TextSecondary,
                     modifier = Modifier.padding(horizontal = 5.dp),
@@ -46,12 +48,6 @@ fun CanvasTopBar(
                     text = "zoom: ${"%.2f".format(camera.scale)}x" +
                         "  rot: ${"%.1f".format(camera.rotation)}\u00B0" +
                         "  xy: ${"%.0f".format(camera.cx)}, ${"%.0f".format(camera.cy)}",
-                    fontSize = 11.sp,
-                    color = TextSecondary,
-                    modifier = Modifier.padding(horizontal = 5.dp),
-                )
-                Text(
-                    text = "LOD: ${lodFullCount}F ${lodStubCount}S ${lodSimplifiedCount}X",
                     fontSize = 11.sp,
                     color = TextSecondary,
                     modifier = Modifier.padding(horizontal = 5.dp),

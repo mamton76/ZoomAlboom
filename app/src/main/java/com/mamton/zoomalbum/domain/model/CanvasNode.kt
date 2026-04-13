@@ -31,3 +31,9 @@ sealed class CanvasNode {
 
 @Serializable
 enum class MediaType { IMAGE, VIDEO, AUDIO }
+
+/** Returns a copy of this node with the given [transform], preserving all other fields. */
+fun CanvasNode.withTransform(transform: Transform): CanvasNode = when (this) {
+    is CanvasNode.Frame -> copy(transform = transform)
+    is CanvasNode.Media -> copy(transform = transform)
+}

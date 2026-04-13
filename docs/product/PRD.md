@@ -278,6 +278,55 @@ These are likely future directions, but not required for initial release. See [f
 
 ---
 
+## 10b. AI Diary Integration — Visualization Modes
+
+ZoomAlboom serves as the **visualization and exploration layer** for [AI Diary](../product/vision.md), which handles capture and structuring of personal entries. AI Diary has three verticals — **Life Diary**, **Baby Diary**, and **Travel Diary** — each producing structured entries with different metadata (topics, emotions, people, milestones, locations, etc.). ZoomAlboom provides default canvas layouts optimized for each vertical while preserving full creative freedom.
+
+### Visualization Modes
+
+#### 1. Timeline Mode (default for Life Diary)
+
+Chronological horizontal or vertical layout. Entries are placed along a time axis.
+
+- **AI-generated clusters** group related entries (e.g. "your photography phase", "that stressful month at work").
+- **Zoom out** → months and years as overview.
+- **Zoom in** → individual entries with full detail.
+- **Frames auto-generated** for time periods (week, month, year).
+
+#### 2. Milestone Mode (default for Baby Diary)
+
+Visual milestone map — key developmental moments as prominent nodes on the canvas.
+
+- A timeline runs underneath, but **milestones** (first smile, first word, first steps, first day at school) are elevated as large visual anchors with photos.
+- Periods between milestones show daily observations at lower zoom levels.
+- Supports a **"growth journey" narrative** — zooming out shows the whole arc from birth to current age.
+
+#### 3. Map Mode (default for Travel Diary)
+
+Geographic layout — entries positioned on a spatial canvas that mirrors real-world geography.
+
+- Each **trip is a frame** containing its locations.
+- Photos, notes, and highlights clustered around place markers.
+- **Zoom out** → all trips as dots on an abstract world view.
+- **Zoom in** → single trip with daily route and stops.
+- Multiple trips to the same region **layer on top of each other**.
+
+### Architectural Principles
+
+- **Starting layouts, not rigid templates.** Users can always rearrange, mix, and customize.
+- **Cross-mode entries.** The same entry can appear in different modes (a travel entry during baby's first trip appears in both Map and Milestone modes).
+- **Seamless mode switching.** Same data, different spatial arrangement — switching modes re-layouts the canvas without losing content.
+- **AI mode suggestions.** AI can suggest which mode works best based on entry content and metadata.
+- **Future: AI auto-layout.** When entries arrive from AI Diary, ZoomAlboom places them on canvas automatically based on the selected mode.
+
+### Sharing
+
+ZoomAlboom canvases should be exportable as **shareable visual stories** — a read-only zoomable view that can be shared via link with family, friends, or publicly.
+
+This is the "LiveJournal post" equivalent: the artifact you create from your memories and share with others. The diary captures; the canvas arranges; the shared view lets others explore.
+
+---
+
 ## 11. Functional Requirements
 
 ### 11.1 Album lifecycle

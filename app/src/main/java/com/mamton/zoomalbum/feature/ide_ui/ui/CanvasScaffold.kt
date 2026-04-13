@@ -15,12 +15,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
 import com.mamton.zoomalbum.domain.model.RenderDetail
 import com.mamton.zoomalbum.feature.canvas.view.CanvasScreen
+import com.mamton.zoomalbum.feature.canvas.view.SelectionDebugPanel
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.AddContentBottomSheet
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.FrameListBottomSheet
@@ -41,9 +43,9 @@ fun CanvasScaffold(
     var showAddSheet by remember { mutableStateOf(false) }
     var showFrameList by remember { mutableStateOf(false) }
     var showPanelConfig by remember { mutableStateOf(false) }
+    var overlapPickerNodes by remember { mutableStateOf<List<CanvasNode>>(emptyList()) }
 
-    // Stub: no node selection yet
-    val selectedNodeId: String? = null
+    val selectedNodeIds = canvasState.selectedNodeIds
 
     Scaffold(
         topBar = {
@@ -76,12 +78,38 @@ fun CanvasScaffold(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            CanvasScreen()
+            CanvasScreen(
+                onShowOverlapPicker = { nodes -> overlapPickerNodes = nodes },
+            )
             IdeOverlayScreen()
 
+            // Debug panel — shows info about selected nodes
+            if (selectedNodeIds.isNotEmpty()) {
+                val selectedNodes = canvasState.visibleNodes
+                    .filter { it.node.id in selectedNodeIds }
+                    .map { it.node }
+                SelectionDebugPanel(
+                    selectedNodes = selectedNodes,
+                    camera = canvasState.camera,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(8.dp),
+                )
+            }
+
             ContextualActionBar(
-                selectedNodeId = selectedNodeId,
+                hasSelection = selectedNodeIds.isNotEmpty(),
                 modifier = Modifier.align(Alignment.BottomCenter),
+                onAction = { label ->
+                    when (label) {
+                        "Delete" -> canvasViewModel.onAction(
+                            com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.DeleteSelection,
+                        )
+                        "Duplicate" -> canvasViewModel.onAction(
+                            com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.DuplicateSelection,
+                        )
+                    }
+                },
             )
         }
     }
@@ -132,6 +160,20 @@ fun CanvasScaffold(
             state = ideState,
             onAction = ideViewModel::onAction,
             onDismiss = { showPanelConfig = false },
+        )
+    }
+
+    // Overlap picker dialog
+    if (overlapPickerNodes.isNotEmpty()) {
+        OverlapPickerDialog(
+            nodes = overlapPickerNodes,
+            onSelectNode = { nodeId ->
+                canvasViewModel.onAction(
+                    com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.SelectNode(nodeId),
+                )
+                overlapPickerNodes = emptyList()
+            },
+            onDismiss = { overlapPickerNodes = emptyList() },
         )
     }
 }

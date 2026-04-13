@@ -107,10 +107,16 @@ Snapshot-based: each command captures `before`/`after` node state (not a sealed 
 - [ ] Missing media placeholder (when `status == MISSING`)
 
 ### 4.2 Node interaction
-- [ ] Node selection (tap to select, bounding box highlight)
-- [ ] Node drag/move (update `Transform`, record `CanvasCommand.Move`)
-- [ ] Node resize
-- [ ] Multi-select
+- [x] Node selection (tap to select, cyan border + corner handles + rotation handle)
+- [x] Node drag/move (update `Transform` via `CanvasAction.MoveSelection`)
+- [x] Node resize (corner handle drag, proportional)
+- [x] Node rotation (rotation handle + two-finger on selected node)
+- [x] Multi-select (rectangle selection via long-press+drag, group move/resize/rotate)
+- [x] Overlap picker (long-press on overlapping nodes shows selection dialog)
+- [x] Contextual action bar (Delete, Duplicate wired; Edit stub)
+- [x] Selection debug panel (shows node transform details)
+- [x] Deselect on camera gesture (pan/zoom clears selection)
+- [ ] Undo integration (record `CanvasCommand` on move/resize/rotate — depends on §2)
 
 ### 4.3 Dynamic containment
 - [ ] Calculate `containsNodeIds` on node move (AABB intersection with frames)

@@ -19,8 +19,6 @@ import androidx.compose.ui.unit.sp
 private data class ActionItem(val icon: String, val label: String)
 
 private val actions = listOf(
-    ActionItem("\u2725", "Move"),      // ✥
-    ActionItem("\u2922", "Resize"),    // ⤢
     ActionItem("\u2715", "Delete"),    // ✕
     ActionItem("\u2398", "Duplicate"), // ⎘
     ActionItem("\u270E", "Edit"),      // ✎
@@ -28,12 +26,12 @@ private val actions = listOf(
 
 @Composable
 fun ContextualActionBar(
-    selectedNodeId: String?,
+    hasSelection: Boolean,
     modifier: Modifier = Modifier,
     onAction: (String) -> Unit = {},
 ) {
     AnimatedVisibility(
-        visible = selectedNodeId != null,
+        visible = hasSelection,
         modifier = modifier,
         enter = slideInVertically { it },
         exit = slideOutVertically { it },

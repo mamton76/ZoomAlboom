@@ -92,7 +92,7 @@ fun CanvasScaffold(
                     selectedNodes = selectedNodes,
                     camera = canvasState.camera,
                     modifier = Modifier
-                        .align(Alignment.BottomStart)
+                        .align(Alignment.TopStart)
                         .padding(8.dp),
                 )
             }

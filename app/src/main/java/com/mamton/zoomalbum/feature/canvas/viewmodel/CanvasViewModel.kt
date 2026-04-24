@@ -53,7 +53,16 @@ sealed interface CanvasAction : Intent {
     // Selection
     data class SelectNode(val nodeId: String) : CanvasAction
     data class ToggleNodeSelection(val nodeId: String) : CanvasAction
-    data class SelectNodesInRect(val worldRect: BoundingBox) : CanvasAction
+    /**
+     * Rectangle selection result.
+     *
+     * @param additive if true, union with the current selection (keeps previously
+     *        selected nodes). If false (default), replaces the selection.
+     */
+    data class SelectNodesInRect(
+        val worldRect: BoundingBox,
+        val additive: Boolean = false,
+    ) : CanvasAction
     data object DeselectAll : CanvasAction
 
     // Group operations — apply to ALL selected nodes
@@ -181,10 +190,15 @@ class CanvasViewModel @Inject constructor(
             }
 
             is CanvasAction.SelectNodesInRect -> {
-                val ids = _allNodes.value
+                val rectHits = _allNodes.value
                     .filter { TransformUtils.toBoundingBox(it.transform).intersects(action.worldRect) }
                     .map { it.id }
                     .toSet()
+                val ids = if (action.additive) {
+                    _state.value.selectedNodeIds + rectHits
+                } else {
+                    rectHits
+                }
                 _state.update { it.copy(selectedNodeIds = ids, selectionRect = null) }
                 recomputeGroupTransform(ids)
             }

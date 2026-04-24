@@ -121,23 +121,32 @@ fun CanvasScreen(
             // Layer 2: tap + double-tap + long-press+drag — single Main pass handler
             .tapAndLongPressGestures(
                 onTap = { offset ->
+                    // Tap = replace-style selection. Hit → {node}; miss → clear.
+                    // To add/remove individual nodes, use long-press (toggle).
                     val hit = viewModel.hitTest(offset.x, offset.y)
                     if (hit != null) {
-                        // Tap selected node → deselect it
-                        // Tap unselected node → add to selection
-                        viewModel.onAction(CanvasAction.ToggleNodeSelection(hit.id))
+                        viewModel.onAction(CanvasAction.SelectNode(hit.id))
                     } else {
                         viewModel.onAction(CanvasAction.DeselectAll)
                     }
                 },
                 onDoubleTap = { viewModel.reset() },
                 onLongPress = { screenX, screenY ->
+                    // Long-press routing:
+                    //   >1 hits → overlap picker dialog (consume)
+                    //   1 hit   → toggle that node in selection (consume; no rect drag)
+                    //   0 hits  → fall through to rect-select drag
                     val hits = viewModel.hitTestAll(screenX, screenY)
-                    if (hits.size > 1) {
-                        onShowOverlapPicker(hits)
-                        true
-                    } else {
-                        false // start rectangle selection
+                    when {
+                        hits.size > 1 -> {
+                            onShowOverlapPicker(hits)
+                            true
+                        }
+                        hits.size == 1 -> {
+                            viewModel.onAction(CanvasAction.ToggleNodeSelection(hits[0].id))
+                            true
+                        }
+                        else -> false
                     }
                 },
                 onDragStart = { screenX, screenY ->
@@ -168,7 +177,11 @@ fun CanvasScreen(
                 onDragEnd = {
                     val rect = state.selectionRect
                     if (rect != null) {
-                        viewModel.onAction(CanvasAction.SelectNodesInRect(rect))
+                        // Additive iff selection was non-empty when the rect started.
+                        // Rect-select doesn't mutate selectedNodeIds during drag,
+                        // so reading it at onDragEnd reflects the pre-drag state.
+                        val additive = state.selectedNodeIds.isNotEmpty()
+                        viewModel.onAction(CanvasAction.SelectNodesInRect(rect, additive = additive))
                     }
                 },
             )

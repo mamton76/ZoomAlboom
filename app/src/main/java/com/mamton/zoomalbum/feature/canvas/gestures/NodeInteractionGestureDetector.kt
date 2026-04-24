@@ -13,7 +13,7 @@ import com.mamton.zoomalbum.core.math.ResizeHandle
  * Gesture layer for interacting with selected canvas nodes.
  *
  * Placed **outermost** in the modifier chain so it sees pointer events at
- * [PointerEventPass.Initial] before [detectTapGestures] and
+ * [PointerEventPass.Initial] before [tapAndLongPressGestures] and
  * [infiniteCanvasGestures] (which run at [PointerEventPass.Main]).
  *
  * When the pointer lands on a resize handle, rotation handle, or the
@@ -23,7 +23,7 @@ import com.mamton.zoomalbum.core.math.ResizeHandle
  * tap and canvas gesture layers.
  *
  * Long-press (overlap picker, rectangle selection) is handled separately
- * via [detectTapGestures.onLongPress] in the tap layer — NOT here.
+ * via [tapAndLongPressGestures.onLongPress] in the tap layer — NOT here.
  * Mixing long-press detection with Initial-pass event reading breaks
  * tap detection in lower layers.
  */
@@ -65,14 +65,36 @@ fun Modifier.nodeInteractionGestures(
             return@awaitEachGesture
         }
 
-        // Priority 3: selected node body → move
+        // Priority 3: selected node body → deferred-consume move.
+        //
+        // Do NOT consume DOWN immediately. If we did, tap/long-press on an
+        // already-selected node would never reach the Main pass — the user
+        // could not tap to collapse a multi-selection, and could not
+        // long-press to toggle a node out of the selection. Instead, watch
+        // for movement beyond touchSlop: once the pointer actually drags,
+        // we commit to a move gesture (consume + enter dragLoop). Until
+        // then, events flow through to the Main pass unchanged.
         if (hitTestBody(downX, downY)) {
-            down.consume()
-            dragLoop(
-                onDelta = { dx, dy -> onDrag(dx, dy) },
-                onEnd = onDragEnd,
-            )
-            return@awaitEachGesture
+            val slopSq = viewConfiguration.touchSlop * viewConfiguration.touchSlop
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val change = event.changes.firstOrNull() ?: return@awaitEachGesture
+                if (change.changedToUp() || change.isConsumed) {
+                    // Released without moving, or another layer consumed —
+                    // let Main pass handle tap/long-press.
+                    return@awaitEachGesture
+                }
+                val dx = change.position.x - downX
+                val dy = change.position.y - downY
+                if (dx * dx + dy * dy > slopSq) {
+                    change.consume()
+                    dragLoop(
+                        onDelta = { mdx, mdy -> onDrag(mdx, mdy) },
+                        onEnd = onDragEnd,
+                    )
+                    return@awaitEachGesture
+                }
+            }
         }
 
         // Not on anything interactive → pass through immediately

@@ -36,12 +36,23 @@ fun Modifier.tapAndLongPressGestures(
         down.consume()
         val startPos = down.position
 
-        // Phase 1: Wait for long-press timeout OR pointer lift/movement.
+        // Phase 1: wait for long-press timeout OR pointer lift/movement.
+        //
+        // If the pointer lifts within the timeout (= tap candidate), we have
+        // to remember we already saw the UP — Phase 2's waitForUp() awaits
+        // the NEXT pointer event and would otherwise hang until the user
+        // taps again, delivering the prior tap one gesture late.
+        var sawUp = false
         val longPressReached = withTimeoutOrNull(LONG_PRESS_MS) {
             while (true) {
                 val event = awaitPointerEvent()
                 val change = event.changes.firstOrNull() ?: return@withTimeoutOrNull false
-                if (change.changedToUp() || change.isConsumed) return@withTimeoutOrNull false
+                if (change.changedToUp()) {
+                    change.consume()
+                    sawUp = true
+                    return@withTimeoutOrNull false
+                }
+                if (change.isConsumed) return@withTimeoutOrNull false
                 val delta = change.position - startPos
                 if (delta.x * delta.x + delta.y * delta.y > slopSq) {
                     return@withTimeoutOrNull false
@@ -73,9 +84,12 @@ fun Modifier.tapAndLongPressGestures(
             return@awaitEachGesture
         }
 
-        // Phase 2: Not a long-press. Wait for pointer up (it's a tap or drag).
-        val up = waitForUp()
-        if (up == null) return@awaitEachGesture // dragged away or cancelled
+        // Phase 2: not a long-press. If Phase 1 already observed UP, we're
+        // good to go. Otherwise the pointer is either still down or the
+        // gesture was cancelled by another layer consuming events.
+        if (!sawUp) {
+            waitForUp() ?: return@awaitEachGesture
+        }
 
         // Phase 3: First tap detected. Wait for possible second tap (double-tap).
         val secondDown = withTimeoutOrNull(DOUBLE_TAP_MS) {
@@ -112,8 +126,13 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.wai
 private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.consumeUntilAllUp() {
     while (true) {
         val event = awaitPointerEvent()
+        // IMPORTANT: check allUp BEFORE consuming. `changedToUp()` returns
+        // false for consumed changes, so calling consume() first would make
+        // the condition never match and the loop would hang forever,
+        // preventing awaitEachGesture from looping to the next gesture.
+        val allUp = event.changes.all { it.changedToUp() }
         event.changes.forEach { it.consume() }
-        if (event.changes.all { it.changedToUp() }) break
+        if (allUp) break
     }
 }
 

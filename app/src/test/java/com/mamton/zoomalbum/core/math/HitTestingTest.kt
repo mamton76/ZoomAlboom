@@ -148,6 +148,81 @@ class HitTestingTest {
         assertEquals(350f, bb.bottom, eps)
     }
 
+    // ── screenAlignedGroupTransform ──────────────────────────────────
+
+    @Test
+    fun `screenAlignedGroupTransform with zero camera rotation matches AABB`() {
+        // When cameraRotation = 0, the screen-aligned frame coincides with
+        // world space. The result must match the plain selectionBoundingBox,
+        // and rotation must be 0.
+        val nodes = listOf(
+            CanvasNode.Frame(id = "a", transform = Transform(cx = 0f, cy = 0f, w = 100f, h = 100f)),
+            CanvasNode.Frame(id = "b", transform = Transform(cx = 200f, cy = 300f, w = 100f, h = 100f)),
+        )
+        val gt = TransformUtils.screenAlignedGroupTransform(nodes, cameraRotation = 0f)
+        assertEquals(100f, gt.cx, eps)
+        assertEquals(150f, gt.cy, eps)
+        assertEquals(300f, gt.w, eps)
+        assertEquals(400f, gt.h, eps)
+        assertEquals(0f, gt.rotation, eps)
+    }
+
+    @Test
+    fun `screenAlignedGroupTransform with 90 degree camera rotation swaps w and h`() {
+        // Rotating the viewing frame by 90 means the horizontal extent of the
+        // world projects onto the vertical screen axis and vice versa — so a
+        // world-space 300×400 span becomes a 400×300 screen-aligned rect.
+        // Rotation = -cameraRotation so it appears axis-aligned on screen.
+        val nodes = listOf(
+            CanvasNode.Frame(id = "a", transform = Transform(cx = 0f, cy = 0f, w = 100f, h = 100f)),
+            CanvasNode.Frame(id = "b", transform = Transform(cx = 200f, cy = 300f, w = 100f, h = 100f)),
+        )
+        val gt = TransformUtils.screenAlignedGroupTransform(nodes, cameraRotation = 90f)
+        assertEquals(100f, gt.cx, eps)
+        assertEquals(150f, gt.cy, eps)
+        assertEquals(400f, gt.w, eps)
+        assertEquals(300f, gt.h, eps)
+        assertEquals(-90f, gt.rotation, eps)
+    }
+
+    @Test
+    fun `screenAlignedGroupTransform encloses node's rotated corners`() {
+        // A 100×100 node rotated 45° has world corners on the axes at
+        // distance 100·sqrt(2)/2 ≈ 70.71 from the center. The screen-aligned
+        // rect (cameraRotation = 0) must span the full diagonal: ~141.42.
+        val nodes = listOf(
+            CanvasNode.Frame(
+                id = "a",
+                transform = Transform(cx = 0f, cy = 0f, w = 100f, h = 100f, rotation = 45f),
+            ),
+        )
+        val gt = TransformUtils.screenAlignedGroupTransform(nodes, cameraRotation = 0f)
+        val diag = 100f * kotlin.math.sqrt(2f)
+        assertEquals(0f, gt.cx, eps)
+        assertEquals(0f, gt.cy, eps)
+        assertEquals(diag, gt.w, 0.5f)
+        assertEquals(diag, gt.h, 0.5f)
+        assertEquals(0f, gt.rotation, eps)
+    }
+
+    @Test
+    fun `screenAlignedGroupTransform rotation always equals negative camera rotation`() {
+        // The screen-alignment invariant: gt.rotation = -cameraRotation so
+        // that after the camera graphicsLayer applies +cameraRotation, the
+        // rect shows up axis-aligned on screen (§9 in coordinates.md).
+        val nodes = listOf(
+            CanvasNode.Frame(id = "a", transform = Transform(cx = 0f, cy = 0f, w = 50f, h = 50f)),
+            CanvasNode.Frame(id = "b", transform = Transform(cx = 100f, cy = 100f, w = 50f, h = 50f)),
+        )
+        for (camRot in floatArrayOf(-135f, -45f, 0f, 30f, 90f, 180f)) {
+            val gt = TransformUtils.screenAlignedGroupTransform(nodes, cameraRotation = camRot)
+            assertEquals(
+                "rotation invariant broken at cameraRotation=$camRot",
+                -camRot, gt.rotation, eps,
+            )
+        }
+    }
+
     // ── groupCenter ──────────────────────────────────────────────────
 
     @Test

@@ -15,6 +15,7 @@ Source-of-truth docs:
 - `docs/architecture/data-model.md`
 - `docs/architecture/modules.md`
 - `docs/architecture/rendering.md`
+- `docs/architecture/coordinates.md` — coordinate spaces, camera math, selection invariants
 - `docs/architecture/navigation.md`
 - - `docs/architecture/decisions.md` (if present)
 - `docs/architecture/conventions.md`

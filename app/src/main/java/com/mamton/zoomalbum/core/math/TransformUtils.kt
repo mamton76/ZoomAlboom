@@ -159,6 +159,63 @@ object TransformUtils {
         return BoundingBox(left, top, right, bottom)
     }
 
+    /**
+     * Group bounding rectangle oriented to align with the screen axes at the
+     * time of computation, given the current camera rotation.
+     *
+     * Returns a [Transform] in world space whose `rotation = -cameraRotation`,
+     * so rendering through the camera graphicsLayer produces a rectangle with
+     * sides parallel to the screen edges. The rect considers each node's own
+     * rotation when projecting its 4 corners.
+     *
+     * After formation, the rect is pinned to the world — it rotates with the
+     * world when the camera rotates further. Add/remove from selection should
+     * trigger recomputation.
+     */
+    fun screenAlignedGroupTransform(
+        nodes: List<CanvasNode>,
+        cameraRotation: Float,
+    ): Transform {
+        require(nodes.isNotEmpty()) { "Cannot compute group transform for empty list" }
+        var left = Float.MAX_VALUE
+        var top = Float.MAX_VALUE
+        var right = -Float.MAX_VALUE
+        var bottom = -Float.MAX_VALUE
+        for (node in nodes) {
+            val t = node.transform
+            val halfW = t.renderW / 2f
+            val halfH = t.renderH / 2f
+            val localCorners = arrayOf(
+                -halfW to -halfH,
+                halfW to -halfH,
+                -halfW to halfH,
+                halfW to halfH,
+            )
+            for ((lx, ly) in localCorners) {
+                val (wx, wy) = rotateVector(lx, ly, t.rotation)
+                val worldX = t.cx + wx
+                val worldY = t.cy + wy
+                // Project to screen-aligned frame (world rotated by +cameraRotation)
+                val (fx, fy) = rotateVector(worldX, worldY, cameraRotation)
+                left = min(left, fx)
+                top = min(top, fy)
+                right = max(right, fx)
+                bottom = max(bottom, fy)
+            }
+        }
+        val frameCx = (left + right) / 2f
+        val frameCy = (top + bottom) / 2f
+        // Rotate center back to world
+        val (worldCx, worldCy) = rotateVector(frameCx, frameCy, -cameraRotation)
+        return Transform(
+            cx = worldCx,
+            cy = worldCy,
+            w = right - left,
+            h = bottom - top,
+            rotation = -cameraRotation,
+        )
+    }
+
     /** Average center of all nodes. */
     fun groupCenter(nodes: List<CanvasNode>): Pair<Float, Float> {
         require(nodes.isNotEmpty()) { "Cannot compute center for empty list" }

@@ -30,7 +30,13 @@ fun CanvasScreen(
     onShowOverlapPicker: (List<CanvasNode>) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val cam = state.camera
+
+    // NOTE: do NOT cache `state.camera` into a local `val` — gesture modifiers
+    // keep their pointerInput blocks running across recompositions (keyed on
+    // `selectedNodeIds` or `Unit`), so a local snapshot would become stale
+    // after zoom/pan/rotate and make resize/rotate feel frozen at the old
+    // scale. Always read `state.camera` directly — the State<T> delegate
+    // reads the current value on each access.
 
     // Tracks previous angle (degrees) for atan2-based rotation handle.
     // [0] = previous angle, [1] = initialized flag (0 = no, 1 = yes)
@@ -59,20 +65,8 @@ fun CanvasScreen(
                     viewModel.onAction(CanvasAction.MoveSelection(wdx, wdy))
                 },
                 onResizeDrag = { handle, dx, dy ->
-                    val ids = state.selectedNodeIds
-                    val selected = state.visibleNodes
-                        .filter { it.node.id in ids }
-                        .map { it.node }
-                    if (selected.isEmpty()) return@nodeInteractionGestures
-                    val t = if (selected.size == 1) {
-                        selected.first().transform
-                    } else {
-                        val bbox = TransformUtils.selectionBoundingBox(selected)
-                        com.mamton.zoomalbum.domain.model.Transform(
-                            cx = bbox.centerX, cy = bbox.centerY,
-                            w = bbox.width, h = bbox.height,
-                        )
-                    }
+                    // Use effective selection transform — independent of viewport culling.
+                    val t = viewModel.selectionTransform() ?: return@nodeInteractionGestures
                     val halfW = t.renderW / 2f
                     val halfH = t.renderH / 2f
                     val (cornerX, cornerY) = when (handle) {
@@ -83,7 +77,7 @@ fun CanvasScreen(
                     }
                     val diagonalLen = kotlin.math.sqrt(cornerX * cornerX + cornerY * cornerY)
                     if (diagonalLen < 0.001f) return@nodeInteractionGestures
-                    val (worldDx, worldDy) = TransformUtils.screenDeltaToWorld(dx, dy, cam)
+                    val (worldDx, worldDy) = TransformUtils.screenDeltaToWorld(dx, dy, state.camera)
                     val (localDx, localDy) = TransformUtils.rotateVector(worldDx, worldDy, -t.rotation)
                     val dirX = cornerX / diagonalLen
                     val dirY = cornerY / diagonalLen
@@ -92,18 +86,11 @@ fun CanvasScreen(
                     viewModel.onAction(CanvasAction.ResizeSelection(scaleFactor))
                 },
                 onRotationDragPosition = { screenX, screenY ->
-                    // Compute selection center in screen space
-                    val ids = state.selectedNodeIds
-                    val selected = state.visibleNodes
-                        .filter { it.node.id in ids }
-                        .map { it.node }
-                    if (selected.isEmpty()) return@nodeInteractionGestures
-                    val (wcx, wcy) = if (selected.size == 1) {
-                        selected.first().transform.cx to selected.first().transform.cy
-                    } else {
-                        TransformUtils.groupCenter(selected)
-                    }
-                    val (scx, scy) = TransformUtils.worldToScreen(wcx, wcy, cam)
+                    // Pivot = selection transform center (single node or group rect center).
+                    // Must match the ViewModel's RotateSelection pivot exactly; otherwise
+                    // angle deltas won't correspond to the user's gesture.
+                    val t = viewModel.selectionTransform() ?: return@nodeInteractionGestures
+                    val (scx, scy) = TransformUtils.worldToScreen(t.cx, t.cy, state.camera)
 
                     // atan2 angle from center to current drag position
                     val currentAngle = Math.toDegrees(
@@ -154,7 +141,7 @@ fun CanvasScreen(
                     }
                 },
                 onDragStart = { screenX, screenY ->
-                    val (wx, wy) = TransformUtils.screenToWorld(screenX, screenY, cam)
+                    val (wx, wy) = TransformUtils.screenToWorld(screenX, screenY, state.camera)
                     rectStartWorld[0] = wx
                     rectStartWorld[1] = wy
                     viewModel.onAction(
@@ -164,7 +151,7 @@ fun CanvasScreen(
                     )
                 },
                 onDragUpdate = { screenX, screenY ->
-                    val (wx, wy) = TransformUtils.screenToWorld(screenX, screenY, cam)
+                    val (wx, wy) = TransformUtils.screenToWorld(screenX, screenY, state.camera)
                     val startX = rectStartWorld[0]
                     val startY = rectStartWorld[1]
                     viewModel.onAction(
@@ -205,11 +192,12 @@ fun CanvasScreen(
         // the GPU performs the transform on the entire layer.
         Box(
             modifier = Modifier.graphicsLayer {
-                translationX = cam.cx
-                translationY = cam.cy
-                scaleX = cam.scale
-                scaleY = cam.scale
-                rotationZ = cam.rotation
+                val c = state.camera
+                translationX = c.cx
+                translationY = c.cy
+                scaleX = c.scale
+                scaleY = c.scale
+                rotationZ = c.rotation
                 transformOrigin = TransformOrigin(0f, 0f)
             },
         ) {
@@ -224,7 +212,7 @@ fun CanvasScreen(
             if (selectedNodes.isNotEmpty()) {
                 SelectionOverlay(
                     selectedNodes = selectedNodes,
-                    cameraScale = cam.scale,
+                    cameraScale = state.camera.scale,
                     rotationHandleEnabled = true, // TODO: wire to InteractionSettings
                     groupTransform = state.groupSelectionTransform,
                 )

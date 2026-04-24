@@ -69,7 +69,7 @@ Canvas and IDE have **separate ViewModels** to prevent cross-recomposition.
 
 ## Canvas Rendering Pipeline
 
-See [rendering.md](rendering.md) for full detail.
+See [rendering.md](rendering.md) for full detail. Coordinate conventions, camera math, and selection invariants are documented separately in [coordinates.md](coordinates.md).
 
 1. `InfiniteCanvasGestureDetector` emits `(centroid, pan, zoom, rotation)`.
 2. `CanvasViewModel.onGesture()` updates `Camera` state (centroid-anchored zoom/rotation).

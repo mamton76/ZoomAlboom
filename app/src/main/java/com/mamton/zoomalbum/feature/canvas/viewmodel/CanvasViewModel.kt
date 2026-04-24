@@ -227,7 +227,15 @@ class CanvasViewModel @Inject constructor(
                 val ids = _state.value.selectedNodeIds
                 val selected = _allNodes.value.filter { it.id in ids }
                 if (selected.isEmpty()) return
-                val (gcx, gcy) = TransformUtils.groupCenter(selected)
+
+                // Pivot = group rect center (stable rigid-body pivot).
+                // Fall back to node centroid only when no rect exists (single node).
+                val gt = _state.value.groupSelectionTransform
+                val (gcx, gcy) = if (gt != null) {
+                    gt.cx to gt.cy
+                } else {
+                    TransformUtils.groupCenter(selected)
+                }
                 val factor = action.scaleFactor.coerceIn(0.01f, 100f)
 
                 _allNodes.update { nodes ->
@@ -246,6 +254,17 @@ class CanvasViewModel @Inject constructor(
                     val newCy = gcy + (t.cy - gcy) * factor
                     val newScale = (t.scale * factor).coerceIn(0.01f, 1000f)
                     t.copy(cx = newCx, cy = newCy, scale = newScale)
+                }
+                // Rigid-body scale: rect grows/shrinks with the nodes
+                if (gt != null) {
+                    _state.update {
+                        it.copy(
+                            groupSelectionTransform = gt.copy(
+                                w = gt.w * factor,
+                                h = gt.h * factor,
+                            ),
+                        )
+                    }
                 }
             }
 
@@ -338,8 +357,10 @@ class CanvasViewModel @Inject constructor(
             }
 
             is CanvasAction.FinishInteraction -> {
+                // Do NOT recompute group rect here — it would snap back to
+                // screen-aligned. The rect is kept in sync during Move/Resize/Rotate
+                // and only recomputed on selection membership changes.
                 recalculateVisibleNodes()
-                recomputeGroupTransform(_state.value.selectedNodeIds)
             }
 
             is CanvasAction.UpdateSelectionRect -> {
@@ -370,53 +391,50 @@ class CanvasViewModel @Inject constructor(
             .map { it.node }
     }
 
+    /**
+     * Effective transform for the current selection:
+     * - Multi-select: group rect ([CanvasState.groupSelectionTransform]).
+     * - Single-select: that node's transform (looked up in [_allNodes], not
+     *   visibleNodes — selection must behave consistently even when nodes are
+     *   culled out of the viewport).
+     * - Empty selection: null.
+     */
+    fun selectionTransform(): com.mamton.zoomalbum.domain.model.Transform? {
+        val ids = _state.value.selectedNodeIds
+        return when {
+            ids.isEmpty() -> null
+            ids.size == 1 -> _allNodes.value.firstOrNull { it.id == ids.first() }?.transform
+            else -> _state.value.groupSelectionTransform
+        }
+    }
+
     /** True if the screen point is on ANY currently selected node. */
     fun isOnSelectedNode(screenX: Float, screenY: Float): Boolean {
         val ids = _state.value.selectedNodeIds
         if (ids.isEmpty()) return false
         val cam = _state.value.camera
         val (wx, wy) = TransformUtils.screenToWorld(screenX, screenY, cam)
-        return _state.value.visibleNodes.any { vn ->
-            vn.node.id in ids && TransformUtils.pointInNode(wx, wy, vn.node.transform)
+        return _allNodes.value.any { node ->
+            node.id in ids && TransformUtils.pointInNode(wx, wy, node.transform)
         }
     }
 
     /** Returns the resize handle at the given screen point, or null. */
     fun hitTestHandle(screenX: Float, screenY: Float): ResizeHandle? {
-        val ids = _state.value.selectedNodeIds
-        if (ids.isEmpty()) return null
+        val t = selectionTransform() ?: return null
         val cam = _state.value.camera
         val (wx, wy) = TransformUtils.screenToWorld(screenX, screenY, cam)
         val handleWorldRadius = HANDLE_TOUCH_RADIUS_PX / cam.scale
-
-        val selected = _state.value.visibleNodes.filter { it.node.id in ids }.map { it.node }
-        if (selected.isEmpty()) return null
-
-        val t = if (selected.size == 1) {
-            selected.first().transform
-        } else {
-            _state.value.groupSelectionTransform ?: return null
-        }
         return TransformUtils.hitTestHandle(wx, wy, t, handleWorldRadius)
     }
 
     /** True if the screen point is on the rotation handle. */
     fun hitTestRotationHandle(screenX: Float, screenY: Float): Boolean {
-        val ids = _state.value.selectedNodeIds
-        if (ids.isEmpty()) return false
+        val t = selectionTransform() ?: return false
         val cam = _state.value.camera
         val (wx, wy) = TransformUtils.screenToWorld(screenX, screenY, cam)
         val handleWorldRadius = HANDLE_TOUCH_RADIUS_PX / cam.scale
         val handleOffset = ROTATION_HANDLE_OFFSET_PX / cam.scale
-
-        val selected = _state.value.visibleNodes.filter { it.node.id in ids }.map { it.node }
-        if (selected.isEmpty()) return false
-
-        val t = if (selected.size == 1) {
-            selected.first().transform
-        } else {
-            _state.value.groupSelectionTransform ?: return false
-        }
         return TransformUtils.hitTestRotationHandle(wx, wy, t, handleWorldRadius, handleOffset)
     }
 
@@ -475,9 +493,12 @@ class CanvasViewModel @Inject constructor(
     }
 
     /**
-     * Recomputes [groupSelectionTransform] from the current selected nodes.
-     * Called when selection changes (add/remove/rect-select). The rotation
-     * is reset to 0 — it accumulates during handle drag.
+     * Recomputes [CanvasState.groupSelectionTransform] from the current selected nodes.
+     * Called when selection changes (add/remove/rect-select).
+     *
+     * The rect is screen-aligned at formation time (rotation = -camera.rotation),
+     * pinned to world afterward. During handle-drag (rotate/resize) the rect
+     * is mutated in place — NOT recomputed here.
      */
     private fun recomputeGroupTransform(selectedIds: Set<String>) {
         if (selectedIds.size < 2) {
@@ -489,18 +510,9 @@ class CanvasViewModel @Inject constructor(
             _state.update { it.copy(groupSelectionTransform = null) }
             return
         }
-        val bbox = TransformUtils.selectionBoundingBox(selected)
-        _state.update {
-            it.copy(
-                groupSelectionTransform = com.mamton.zoomalbum.domain.model.Transform(
-                    cx = bbox.centerX,
-                    cy = bbox.centerY,
-                    w = bbox.width,
-                    h = bbox.height,
-                    rotation = 0f,
-                ),
-            )
-        }
+        val cameraRotation = _state.value.camera.rotation
+        val gt = TransformUtils.screenAlignedGroupTransform(selected, cameraRotation)
+        _state.update { it.copy(groupSelectionTransform = gt) }
     }
 
     private fun loadAlbum() {

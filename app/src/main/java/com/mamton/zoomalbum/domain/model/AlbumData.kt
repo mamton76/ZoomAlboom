@@ -1,6 +1,3 @@
-// Copyright 2026 Yandex LLC. All rights reserved.
-
-
 package com.mamton.zoomalbum.domain.model
 
 

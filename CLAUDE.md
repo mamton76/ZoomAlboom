@@ -16,13 +16,14 @@ Source-of-truth docs:
 - `docs/architecture/modules.md`
 - `docs/architecture/rendering.md`
 - `docs/architecture/coordinates.md` — coordinate spaces, camera math, selection invariants
+- `docs/architecture/selection.md` — selection state, gesture mapping, gesture stack
 - `docs/architecture/navigation.md`
 - - `docs/architecture/decisions.md` (if present)
 - `docs/architecture/conventions.md`
 
 Working memory / discovered implementation notes:
 
-- `memory/MEMORY.md`
+- `memory/MEMORY.md` — index of per-topic files in `memory/` (framework gotchas, subsystem notes not yet in `docs/architecture/`).
 
 ## How to work in this repo
 
@@ -31,7 +32,7 @@ Working memory / discovered implementation notes:
 - Keep domain models independent from Compose/UI concerns.
 - Prefer short targeted edits over broad rewrites.
 - If architecture changes, update the relevant docs in `docs/architecture/` and 'docs/todo.md'
-- Put discovered implementation facts and gotchas into `memory/MEMORY.md`, not into architecture docs.
+- Put discovered implementation facts and gotchas into `memory/` (a new file per topic, linked from `memory/MEMORY.md`), not into architecture docs. When a fact stabilizes, graduate it into `docs/architecture/` and delete the memory file.
 
 ## Commands
 

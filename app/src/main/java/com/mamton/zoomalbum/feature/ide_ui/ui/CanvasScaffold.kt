@@ -1,5 +1,8 @@
 package com.mamton.zoomalbum.feature.ide_ui.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -39,6 +42,13 @@ fun CanvasScaffold(
     val ideState by ideViewModel.state.collectAsStateWithLifecycle()
 
     val frames by canvasViewModel.frames.collectAsStateWithLifecycle()
+
+    val photoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        canvasViewModel.addMedia(uri)
+    }
 
     var showAddSheet by remember { mutableStateOf(false) }
     var showFrameList by remember { mutableStateOf(false) }
@@ -133,6 +143,13 @@ fun CanvasScaffold(
                             camera = camera,
                         )
                     }
+                    "Photo" -> {
+                        showAddSheet = false
+                        photoPicker.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                        null
+                    }
                     else -> null
                 }
                 node?.let { canvasViewModel.addNode(it) }
@@ -177,3 +194,4 @@ fun CanvasScaffold(
         )
     }
 }
+

@@ -54,5 +54,54 @@ object CanvasNodeFactory {
         )
     }
 
-    // Future: createMedia(), createText(), createSticker()
+    /**
+     * Creates a media node centered in the viewport, sized to preserve [imageWidth]×[imageHeight]
+     * aspect ratio and fit within 80% of the visible world area.
+     *
+     * [imageWidth]/[imageHeight] are the image's native pixel dimensions. Pass 0/0 to fall back
+     * to a 4:3 portrait default.
+     *
+     * Like [createFrame], dimensions use screen pixels / camera.scale so the node appears
+     * at a consistent physical size regardless of zoom level at creation time.
+     */
+    fun createMedia(
+        uri: String,
+        imageWidth: Int,
+        imageHeight: Int,
+        screenWidth: Float,
+        screenHeight: Float,
+        viewport: BoundingBox,
+        nextZIndex: Float,
+        camera: Camera,
+    ): CanvasNode.Media {
+        val visibleWorldW = screenWidth / camera.scale
+        val visibleWorldH = screenHeight / camera.scale
+        val maxW = visibleWorldW * 0.8f
+        val maxH = visibleWorldH * 0.8f
+
+        val (mediaW, mediaH) = if (imageWidth > 0 && imageHeight > 0) {
+            val scaleW = maxW / imageWidth
+            val scaleH = maxH / imageHeight
+            val fit = minOf(scaleW, scaleH)
+            imageWidth * fit to imageHeight * fit
+        } else {
+            // Fallback when dimensions are unavailable
+            val w = visibleWorldW * 0.6f
+            w to (w * 4f / 3f).coerceAtMost(maxH)
+        }
+
+        return CanvasNode.Media(
+            id = "media_${System.currentTimeMillis()}",
+            transform = Transform(
+                cx = viewport.centerX,
+                cy = viewport.centerY,
+                w = mediaW,
+                h = mediaH,
+                rotation = -camera.rotation,
+                zIndex = nextZIndex,
+            ),
+            mediaRefId = uri,
+            mediaType = MediaType.IMAGE,
+        )
+    }
 }

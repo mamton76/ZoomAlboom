@@ -10,10 +10,14 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.core.graphics.toColorInt
+import coil3.compose.rememberAsyncImagePainter
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.RenderDetail
-import androidx.core.graphics.toColorInt
 
 /**
  * Renders a single [CanvasNode] inside the camera-transformed container.
@@ -26,7 +30,7 @@ import androidx.core.graphics.toColorInt
 fun CanvasNodeRenderer(node: CanvasNode, detail: RenderDetail) {
     when (node) {
         is CanvasNode.Frame -> FrameRenderer(node, detail)
-        is CanvasNode.Media -> { /* Stage 2 — Coil image loading */ }
+        is CanvasNode.Media -> MediaRenderer(node, detail)
     }
 }
 
@@ -136,6 +140,89 @@ private fun StubRenderer(
                 val topLeft = Offset(-renderW / 2f, -renderH / 2f)
                 val nodeSize = Size(renderW, renderH)
                 drawRect(color = color, topLeft = topLeft, size = nodeSize)
+            },
+    )
+}
+
+// ── Media renderers ──────────────────────────────────────────────────────────
+
+@Composable
+private fun MediaRenderer(media: CanvasNode.Media, detail: RenderDetail) {
+    val t = media.transform
+    when (detail) {
+        RenderDetail.Hidden -> return
+        RenderDetail.Stub, RenderDetail.Preview ->
+            MediaPlaceholder(t.cx, t.cy, t.rotation, t.renderW, t.renderH, filled = false)
+        RenderDetail.Simplified ->
+            MediaPlaceholder(t.cx, t.cy, t.rotation, t.renderW, t.renderH, filled = true)
+        RenderDetail.Full ->
+            FullMediaRenderer(t.cx, t.cy, t.rotation, t.renderW, t.renderH, media.mediaRefId)
+    }
+}
+
+@Composable
+private fun FullMediaRenderer(
+    cx: Float, cy: Float, rotation: Float,
+    renderW: Float, renderH: Float, uri: String,
+) {
+    // Same zero-size Spacer + drawBehind pattern as FrameRenderer so that
+    // draw-phase pixels and graphicsLayer translations are in the same coordinate
+    // space at any camera zoom level.
+    val painter = rememberAsyncImagePainter(
+        model = uri,
+        contentScale = ContentScale.Crop,
+    )
+    Spacer(
+        modifier = Modifier
+            .graphicsLayer {
+                translationX = cx
+                translationY = cy
+                rotationZ = rotation
+                transformOrigin = TransformOrigin(0f, 0f)
+                clip = false
+            }
+            .drawBehind {
+                clipRect(
+                    left = -renderW / 2f,
+                    top = -renderH / 2f,
+                    right = renderW / 2f,
+                    bottom = renderH / 2f,
+                ) {
+                    translate(left = -renderW / 2f, top = -renderH / 2f) {
+                        with(painter) { draw(Size(renderW, renderH)) }
+                    }
+                }
+            },
+    )
+}
+
+@Composable
+private fun MediaPlaceholder(
+    cx: Float, cy: Float, rotation: Float,
+    renderW: Float, renderH: Float, filled: Boolean,
+) {
+    val color = Color(0xFF888888)
+    Spacer(
+        modifier = Modifier
+            .graphicsLayer {
+                translationX = cx
+                translationY = cy
+                rotationZ = rotation
+                transformOrigin = TransformOrigin(0f, 0f)
+                clip = false
+            }
+            .drawBehind {
+                val topLeft = Offset(-renderW / 2f, -renderH / 2f)
+                val nodeSize = Size(renderW, renderH)
+                if (filled) {
+                    drawRect(color = color.copy(alpha = 0.3f), topLeft = topLeft, size = nodeSize)
+                }
+                drawRect(
+                    color = color.copy(alpha = 0.6f),
+                    topLeft = topLeft,
+                    size = nodeSize,
+                    style = Stroke(width = 1.5f),
+                )
             },
     )
 }

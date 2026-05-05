@@ -101,7 +101,7 @@ Snapshot-based: each command captures `before`/`after` node state (not a sealed 
 
 ### 4.1 Media rendering
 - [x] `CanvasNode.Frame` rendering via `graphicsLayer` + `drawBehind` (no Compose Constraints limits)
-- [ ] `CanvasNode.Media` rendering with Coil 3 (currently stub / placeholder only)
+- [x] `CanvasNode.Media` rendering with Coil 3 (currently stub / placeholder only)
 - [ ] Downsampling at low zoom levels (OOM prevention)
 - [ ] High-res loading on zoom-in
 - [ ] Missing media placeholder (when `status == MISSING`)
@@ -128,11 +128,12 @@ Snapshot-based: each command captures `before`/`after` node state (not a sealed 
 - [ ] Show placeholder for missing media on canvas
 
 ### 4.7 Media adding & editing
-- [ ] Photo picker integration (Android photo picker / `ACTION_PICK`)
-- [ ] Register picked media in `media_library` table (copy to app storage or keep content URI)
-- [ ] Create `CanvasNode.Media` from picked photo (viewport-centered placement, like frames)
-- [ ] Wire "Photo" action in FAB / AddContentBottomSheet to photo picker flow
-- [ ] Basic media editing: move, resize, delete (depends on §4.2 Node interaction)
+- [x] Photo picker integration (Android photo picker / `ACTION_PICK`)
+- [x] Copy picked photo to app-private storage (`filesDir/media/<albumId>/`) for persistence across restarts
+- [x] Create `CanvasNode.Media` from picked photo (viewport-centered, aspect-ratio-preserving, EXIF-corrected)
+- [x] Wire "Photo" action in FAB / AddContentBottomSheet to photo picker flow
+- [x] Basic media editing: move, resize, delete (via unified node interaction — same as frames)
+- [ ] Add media from device gallery (file manager / Files app, not just photo picker)
 - [ ] Media property editing (label/tags via contextual UI, depends on §5 Object selected mode)
 - [ ] Video picker + thumbnail extraction for video nodes
 - [ ] Text node creation (inline text input → `CanvasNode.Media` with `MediaType.TEXT`)

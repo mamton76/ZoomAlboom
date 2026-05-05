@@ -47,6 +47,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(libs.androidx.exifinterface)
     // Compose BOM
     val composeBom = platform(libs.androidx.compose.bom)
     implementation(composeBom)

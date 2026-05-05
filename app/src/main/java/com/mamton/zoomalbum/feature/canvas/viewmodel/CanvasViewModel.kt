@@ -1,5 +1,8 @@
 package com.mamton.zoomalbum.feature.canvas.viewmodel
 
+import android.content.Context
+import android.graphics.BitmapFactory
+import android.net.Uri
 import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -12,10 +15,12 @@ import com.mamton.zoomalbum.core.math.TransformUtils
 import com.mamton.zoomalbum.core.math.ViewportCuller
 import com.mamton.zoomalbum.core.mvi.Intent
 import com.mamton.zoomalbum.domain.model.CanvasNode
+import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
 import com.mamton.zoomalbum.domain.model.RenderDetail
 import com.mamton.zoomalbum.domain.model.withTransform
 import com.mamton.zoomalbum.domain.repository.MediaRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +31,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import javax.inject.Inject
 
 // ── State ─────────────────────────────────────────────────────────────
@@ -82,6 +89,7 @@ sealed interface CanvasAction : Intent {
 // ── ViewModel ─────────────────────────────────────────────────────────
 @HiltViewModel
 class CanvasViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val mediaRepository: MediaRepository,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
@@ -158,8 +166,40 @@ class CanvasViewModel @Inject constructor(
 
     fun addNode(node: CanvasNode) {
         _allNodes.update { it + node }
-        _state.update { it.copy(totalNodeCount = _allNodes.value.size) }
+        _state.update {
+            it.copy(
+                totalNodeCount = _allNodes.value.size,
+                selectedNodeIds = setOf(node.id),
+                groupSelectionTransform = null,
+            )
+        }
         recalculateVisibleNodes()
+    }
+
+    /**
+     * Copies [sourceUri] to app-private storage and adds a [CanvasNode.Media] node.
+     * Must be called from any thread — does IO work internally.
+     */
+    fun addMedia(sourceUri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val (imgW, imgH) = decodeImageDimensions(sourceUri)
+            val localPath = copyToAppStorage(sourceUri) ?: return@launch
+            val viewport = currentViewport()
+            val camera = currentCamera()
+            val zIndex = nextZIndex()
+            val (sw, sh) = screenSize()
+            val node = CanvasNodeFactory.createMedia(
+                uri = localPath,
+                imageWidth = imgW,
+                imageHeight = imgH,
+                screenWidth = sw,
+                screenHeight = sh,
+                viewport = viewport,
+                nextZIndex = zIndex,
+                camera = camera,
+            )
+            withContext(Dispatchers.Main) { addNode(node) }
+        }
     }
 
     fun removeNode(nodeId: String) {
@@ -481,6 +521,49 @@ class CanvasViewModel @Inject constructor(
                     // Best-effort save on exit
                 }
             }
+        }
+    }
+
+    // ── Media import helpers ──────────────────────────────────────────
+
+    private fun decodeImageDimensions(uri: Uri): Pair<Int, Int> {
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        try {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, opts)
+            }
+        } catch (_: Exception) {}
+        var w = opts.outWidth
+        var h = opts.outHeight
+        try {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                val exif = androidx.exifinterface.media.ExifInterface(stream)
+                val orientation = exif.getAttributeInt(
+                    androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL,
+                )
+                if (orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 ||
+                    orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 ||
+                    orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_TRANSPOSE ||
+                    orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_TRANSVERSE
+                ) {
+                    val tmp = w; w = h; h = tmp
+                }
+            }
+        } catch (_: Exception) {}
+        return w to h
+    }
+
+    private fun copyToAppStorage(uri: Uri): String? {
+        return try {
+            val dir = File(context.filesDir, "media/$albumId").also { it.mkdirs() }
+            val dest = File(dir, "img_${System.currentTimeMillis()}.jpg")
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                dest.outputStream().use { output -> input.copyTo(output) }
+            }
+            dest.absolutePath
+        } catch (_: Exception) {
+            null
         }
     }
 

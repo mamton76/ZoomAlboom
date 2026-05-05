@@ -1,4 +1,4 @@
-# Dependency gotchas
+le# Dependency gotchas
 
 Compose BOM `2026.02.01` + AGP `9.0.1` specifics that have caught us:
 

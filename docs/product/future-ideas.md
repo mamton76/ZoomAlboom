@@ -9,7 +9,8 @@
 - **Timeline mode** — temporal dimension for chronological navigation
 
 ## Canvas & Editing
-- **Layers** — globally hide/show groups of objects (beyond frame-based grouping)
+- **Layers (full)** — type layers + user-defined layers ship as MVP-adjacent work (see [todo § 13](../todo.md#13-layers-visibility-groups)); post-MVP extensions: multi-membership, per-layer locking, per-layer effects
+- **Present mode** — read-only viewing for shared/published albums (see [todo § 12.6](../todo.md#126-future))
 - **Crop / masking** — mask media through internal bounding box editing
 - **Text / sticker enhancements** — richer text editing, sticker library
 

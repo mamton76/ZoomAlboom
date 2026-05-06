@@ -286,12 +286,181 @@ Extract the canvas rendering / navigation / interaction system as a reusable lib
 
 ---
 
-## 11. Future (Post-MVP)
+## 12. Canvas Interaction Modes (Edit / View)
+
+Two global modes that change gesture meaning. Layered on top of the existing canvas-first contextual modes (Navigate / Add content / Object selected, see [PRD § 12.6](product/PRD.md#126-canvas-first-chrome)) — modes gate *which* contextual modes are reachable.
+
+### 12.1 Model
+- [ ] `enum class CanvasInteractionMode { Edit, View }` in `domain/model/`
+- [ ] `mode: CanvasInteractionMode` on `CanvasState` (default `Edit`)
+- [ ] `CanvasAction.SetMode(mode)`
+- [ ] Entering View clears selection
+
+### 12.2 View mode behavior
+- [ ] Tap on any node → `FocusNode(id)` — animated camera fit using `Transform.toCamera()`
+- [ ] Long-press / rect-select drag → no-op
+- [ ] Pan / pinch-zoom / rotate → unchanged (always active)
+- [ ] No selection overlays, no handles, no contextual action bar, no toolbars
+
+### 12.3 Gesture stack changes
+See [selection.md § 5](architecture/selection.md#5-gesture-stack):
+- [ ] Layer 1 (`nodeInteractionGestures`): early-return when `mode != Edit`
+- [ ] Layer 2 (`tapAndLongPressGestures`): branch on mode (Edit dispatches existing actions; View dispatches `FocusNode` / no-ops)
+- [ ] Layer 3 (`infiniteCanvasGestures`): unchanged
+
+### 12.4 UI
+- [ ] Toggle in `CanvasTopBar` (Edit ⇄ View) — explicit button
+- [ ] Edit-only chrome (toolbar, action bar, layer popover) hidden in View
+
+### 12.5 Persistence
+- [ ] `mode` saved to `ide_workspaces` (UI state)
+
+### 12.6 Future
+- A "Present" mode for shared/published albums (read-only, no album-list overflow). Out of MVP — see [open-questions.md § 5](architecture/open-questions.md).
+
+---
+
+## 13. Layers (Visibility Groups)
+
+Two-tier model: **type layers** (fixed, derived from node class) + **user-defined layers** (variable, explicit membership). A node is visible iff both layer flags are on.
+
+### 13.1 Type layers (MVP)
+- [ ] `data class TypeLayerVisibility(media: Boolean = true, frames: Boolean = true, guidelines: Boolean = true)`
+- [ ] `typeLayerVisibility: TypeLayerVisibility` on `CanvasState`
+- [ ] `CanvasAction.ToggleTypeLayer(LayerKind)`
+- [ ] Renderer + hit-test gate on type-layer visibility
+- [ ] Fixed draw order: Media → Frames → Guidelines (bottom → top)
+
+### 13.2 User-defined layers (post-§13.1)
+- [ ] `data class UserLayer(id: String, name: String, visible: Boolean = true)`
+- [ ] `userLayers: List<UserLayer>` on `CanvasState`
+- [ ] `userLayerId: String?` on `CanvasNode` (single-membership; nullable)
+- [ ] CRUD actions: `CreateUserLayer`, `RenameUserLayer`, `DeleteUserLayer`, `ToggleUserLayerVisibility`, `AssignSelectionToLayer`
+- [ ] Visibility = AND of type layer + user layer
+
+### 13.3 UI
+- [ ] Layer popover from `CanvasTopBar` — type layers + user layers with checkbox
+- [ ] Visible in Edit mode only
+
+### 13.4 Persistence
+- [ ] Type layer visibility → `ide_workspaces` (UI state)
+- [ ] User layer identity (id, name, ordering) → scene JSON `editor` block (album content)
+- [ ] User layer visibility flags → `ide_workspaces` keyed by layer id (toggle doesn't dirty scene)
+- [ ] `CanvasNode.userLayerId` → scene JSON node field
+
+> Open: should user-defined layers allow multi-membership (tag-style)? See [open-questions.md § 6](architecture/open-questions.md).
+
+---
+
+## 14. Guidelines + Snapping
+
+Guidelines are **editor metadata, not `CanvasNode`**. They belong to the Guidelines type layer (§13.1).
+
+### 14.1 Guideline model
+- [ ] `data class Guideline(id: String, orientation: Vertical|Horizontal, position: Float, isLocked: Boolean = false)`
+- [ ] Position in world units. Vertical: `x = position`. Horizontal: `y = position`.
+- [ ] `guidelines: List<Guideline>` on `CanvasState`
+
+### 14.2 Guideline CRUD
+- [ ] `CreateGuideline`, `MoveGuideline`, `DeleteGuideline`, `LockGuideline`
+- [ ] Drag a guideline = `MoveGuideline` (new gesture target — extends gesture stack)
+
+### 14.3 Guideline rendering
+- [ ] Drawn inside the camera `graphicsLayer` (world-anchored)
+- [ ] Stroke width = `2dp / camera.scale` (constant on screen)
+- [ ] Visible only when Guidelines type layer is visible AND mode == Edit
+
+### 14.4 Snapping
+- [ ] `snappingEnabled: Boolean` on `CanvasState`
+- [ ] `activeSnapLines: List<SnapLine>` on `CanvasState` (transient, populated during drag/resize)
+- [ ] Pure `core/math/Snapping.kt`
+- [ ] Tolerance in **screen pixels** (default ~8 px), converted via `screenDeltaToWorld(tolerancePx, 0)`
+- [ ] Snap targets: guidelines, non-selected node edges, non-selected node centers, frame edges
+- [ ] Dragged candidates: rect edges + center
+- [ ] Don't snap to nodes inside the moving selection
+- [ ] Apply in ViewModel reducer for `MoveSelection` first, then `ResizeSelection`
+
+### 14.5 Persistence
+- [ ] `guidelines` → scene JSON `editor` block (album content)
+- [ ] `snappingEnabled` → `ide_workspaces` (UI state)
+
+> **Order:** §14.1–14.3 (guidelines without snap) ships before §14.4 (snapping).
+
+---
+
+## 15. Context Menu
+
+Distinct from `ContextualActionBar` — the action bar is persistent on selection; the context menu is transient on long-press.
+
+### 15.1 Edit mode
+- [ ] Long-press on a node → context menu popover at touch point
+- [ ] Initial actions: Delete, Duplicate, Edit, Move to Layer (post §13.2), Bring Forward / Send Backward
+- [ ] Long-press on empty space → context menu with Add Photo / Add Frame / Add Text / Paste / Add Guideline
+
+### 15.2 View mode
+- [ ] Long-press on media → viewer menu (Open / Share / Info)
+- [ ] Long-press on frame → frame menu (Focus / Open as Album View)
+
+### 15.3 Conflict with current long-press semantics
+- Today long-press = toggle selection or rect-select start ([selection.md § 2](architecture/selection.md#2-gesture-mapping)). Context menu replaces single-node long-press; rect-select start still fires on empty space + drag.
+
+---
+
+## 16. Multi-Photo Import + Auto Grid Placement
+
+Extends [§4.7 Media adding & editing](#47-media-adding--editing) (single-photo picker is done).
+
+### 16.1 Multi-select picker
+- [ ] Switch to `PickMultipleVisualMedia` Activity Result contract
+- [ ] Cap (~50; varies by device — confirm)
+- [ ] Copy each picked file to `filesDir/media/<albumId>/`
+
+### 16.2 Pure grid placement
+- [ ] `core/math/GridPlacement.kt` — pure function, not a use case class
+- [ ] `fun placeInGrid(targetBounds: BoundingBox, items: List<AspectRatio>, padding: Float, gap: Float): List<Transform>`
+- [ ] Algorithm: `columns = ceil(sqrt(n))`, fit each item in its cell preserving aspect ratio, center within cell
+- [ ] Returns transforms in world units; caller wraps with `1/camera.scale` per `CanvasNodeFactory` contract
+
+### 16.3 Target resolution
+- [ ] If exactly one selected node is a `Frame` → use frame AABB
+- [ ] Else → use viewport via `TransformUtils.cameraViewport`
+- [ ] Rotated frame: AABB only (rotated-local layout deferred)
+
+### 16.4 Action wiring
+- [ ] `CanvasAction.AddMediaBatch(uris: List<Uri>)`, `SelectNodesByIds(ids: List<String>)`
+- [ ] After add, select the new batch
+- [ ] One `Compound` undo entry per batch (depends on §2)
+
+---
+
+## 17. Group Align / Distribute
+
+### 17.1 Pure functions
+- [ ] `core/math/AlignDistribute.kt`
+- [ ] `alignLeft / alignCenter / alignRight / alignTop / alignMiddle / alignBottom(transforms): List<Transform>`
+- [ ] `distributeHorizontally / distributeVertically(transforms): List<Transform>`
+- [ ] Use `renderW / renderH` (not raw `w/h`); AABB for rotated nodes (MVP)
+- [ ] Preserve `scale`, `rotation`, `w`, `h` — only `cx/cy` change
+
+### 17.2 Action wiring
+- [ ] `CanvasAction.AlignSelection(edge: AlignEdge)`, `DistributeSelection(axis: Axis)`
+- [ ] Align requires 2+ selected; Distribute requires 3+
+- [ ] One `Compound` undo entry per command
+- [ ] `groupSelectionTransform` re-anchors at end (membership unchanged, bounds change)
+
+### 17.3 UI
+- [ ] Layout toolbar in `CanvasTopBar` (Edit mode only)
+- [ ] Buttons disabled when selection size insufficient
+
+---
+
+## 18. Future (Post-MVP)
 
 See [future-ideas.md](product/future-ideas.md) for the full list.
 
 - [ ] Smart tags — tap tag to teleport to frame
-- [ ] Layers — global show/hide groups
+- [ ] User-defined layers full feature parity (multi-membership? layer locking? per-layer effects?)
+- [ ] Present mode (read-only viewing for shared albums)
 - [ ] Audio / Live Photos support
 - [ ] Crop — media masking via bounding box editing
 - [ ] Cloud sync — CRDT or Protobuf for real-time collaboration

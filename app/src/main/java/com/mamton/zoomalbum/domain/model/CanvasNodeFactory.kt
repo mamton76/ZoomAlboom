@@ -24,6 +24,11 @@ object CanvasNodeFactory {
      *
      * viewport is only used for cx/cy (the world point at the screen center).
      * rotation = -camera.rotation so the frame appears axis-aligned on screen.
+     *
+     * Scaling convention: same as [createMedia] — `transform.scale = 1 / camera.scale` and
+     * `w/h = targetRender / scale = targetRender * camera.scale`. Visual is
+     * `renderW = w*scale = targetRender`. The `1/camera.scale` factor lives in `scale`,
+     * making `w/h` camera-independent ("canonical render size at scale=1").
      */
     fun createFrame(
         screenWidth: Float,
@@ -36,16 +41,18 @@ object CanvasNodeFactory {
         val visibleWorldW = screenWidth / camera.scale
         val visibleWorldH = screenHeight / camera.scale
 
-        val frameW = visibleWorldW * 0.8f
-        val frameH = visibleWorldH * 0.8f
+        val targetRenderW = visibleWorldW * 0.8f
+        val targetRenderH = visibleWorldH * 0.8f
+        val initialScale = 1f / camera.scale
 
         return CanvasNode.Frame(
             id = "frame_${System.currentTimeMillis()}",
             transform = Transform(
                 cx = viewport.centerX,
                 cy = viewport.centerY,
-                w = frameW,
-                h = frameH,
+                w = targetRenderW / initialScale,
+                h = targetRenderH / initialScale,
+                scale = initialScale,
                 rotation = -camera.rotation,
                 zIndex = nextZIndex,
             ),
@@ -58,11 +65,15 @@ object CanvasNodeFactory {
      * Creates a media node centered in the viewport, sized to preserve [imageWidth]×[imageHeight]
      * aspect ratio and fit within 80% of the visible world area.
      *
-     * [imageWidth]/[imageHeight] are the image's native pixel dimensions. Pass 0/0 to fall back
-     * to a 4:3 portrait default.
+     * [imageWidth]/[imageHeight] are the image's native pixel dimensions (after EXIF rotation).
+     * Pass 0/0 to fall back to a 4:3 portrait default; the node will store 0 as "unknown" intrinsic
+     * size and LOD will fall back to render-size-only decisions.
      *
-     * Like [createFrame], dimensions use screen pixels / camera.scale so the node appears
-     * at a consistent physical size regardless of zoom level at creation time.
+     * Scaling convention: `transform.scale = 1 / camera.scale` at creation;
+     * `w/h = targetRender / scale = targetRender * camera.scale`. The `1/camera.scale` factor
+     * (inherent in `targetRender`, since the viewport in world units shrinks as we zoom in)
+     * lives in `scale`, leaving `w/h` camera-independent — they represent the canonical render
+     * size at `scale = 1`. Visual: `renderW = w * scale = targetRender`.
      */
     fun createMedia(
         uri: String,
@@ -79,29 +90,34 @@ object CanvasNodeFactory {
         val maxW = visibleWorldW * 0.8f
         val maxH = visibleWorldH * 0.8f
 
-        val (mediaW, mediaH) = if (imageWidth > 0 && imageHeight > 0) {
+        // Target rendered size in world units (preserves aspect ratio, fits 80% of viewport).
+        val (targetRenderW, targetRenderH) = if (imageWidth > 0 && imageHeight > 0) {
             val scaleW = maxW / imageWidth
             val scaleH = maxH / imageHeight
             val fit = minOf(scaleW, scaleH)
             imageWidth * fit to imageHeight * fit
         } else {
-            // Fallback when dimensions are unavailable
             val w = visibleWorldW * 0.6f
             w to (w * 4f / 3f).coerceAtMost(maxH)
         }
 
+        val initialScale = 1f / camera.scale
         return CanvasNode.Media(
             id = "media_${System.currentTimeMillis()}",
             transform = Transform(
                 cx = viewport.centerX,
                 cy = viewport.centerY,
-                w = mediaW,
-                h = mediaH,
+                w = targetRenderW / initialScale,
+                h = targetRenderH / initialScale,
+                scale = initialScale,
                 rotation = -camera.rotation,
                 zIndex = nextZIndex,
             ),
             mediaRefId = uri,
             mediaType = MediaType.IMAGE,
+            intrinsicPixelWidth = imageWidth.coerceAtLeast(0),
+            intrinsicPixelHeight = imageHeight.coerceAtLeast(0),
+            visibilityPolicy = VisibilityPolicy(referenceScale = camera.scale),
         )
     }
 }

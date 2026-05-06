@@ -6,11 +6,17 @@ import kotlinx.serialization.Serializable
  * Spatial placement and size of a canvas node in world coordinates.
  *
  * (cx, cy) = center of the node in world space.
- * w, h     = base width/height in world units (actual size, NOT normalized).
- * scale    = user-applied scale multiplier (default 1.0; used for pinch-to-resize on node).
- *            Render size = w * scale × h * scale.
+ * w, h     = base width/height in world units. NOT native pixel size and NOT immutable —
+ *            may be rebased while preserving renderW × renderH (see docs/architecture/data-model.md).
+ * scale    = current multiplier over w/h. Resize gestures mutate this, NOT w/h.
+ *            At creation: scale = 1/camera.scale (both Frame and Media); w/h = targetRender * camera.scale.
+ *            This puts the camera-zoom factor in `scale` and leaves `w/h` camera-independent —
+ *            i.e., `w/h` are the canonical render size at scale=1.
  * rotation = node rotation in degrees.
  * zIndex   = draw order.
+ *
+ * Render invariant: every consumer (rendering, AABB, hit-test, culling, selection) MUST
+ * read renderW/renderH, never raw w/h.
  */
 @Serializable
 data class Transform(

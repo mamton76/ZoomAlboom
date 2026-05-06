@@ -102,7 +102,8 @@ Snapshot-based: each command captures `before`/`after` node state (not a sealed 
 ### 4.1 Media rendering
 - [x] `CanvasNode.Frame` rendering via `graphicsLayer` + `drawBehind` (no Compose Constraints limits)
 - [x] `CanvasNode.Media` rendering with Coil 3 (currently stub / placeholder only)
-- [ ] Downsampling at low zoom levels (OOM prevention)
+- [x] `Media.intrinsicPixelWidth/Height` captured at creation (LOD source-px metadata)
+- [ ] Downsampling at low zoom levels (OOM prevention) — use `intrinsicPixelWidth / (renderW * camera.scale)`
 - [ ] High-res loading on zoom-in
 - [ ] Missing media placeholder (when `status == MISSING`)
 

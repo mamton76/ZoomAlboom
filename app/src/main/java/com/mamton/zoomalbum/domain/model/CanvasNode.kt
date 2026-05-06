@@ -15,6 +15,10 @@ sealed class CanvasNode {
         val mediaRefId: String,
         val mediaType: MediaType = MediaType.IMAGE,
         val tags: List<String> = emptyList(),
+        // Native source pixel dimensions (after EXIF rotation). 0 = unknown.
+        // Used by LOD to compute source-px-per-screen-px; not used for layout.
+        val intrinsicPixelWidth: Int = 0,
+        val intrinsicPixelHeight: Int = 0,
         override val visibilityPolicy: VisibilityPolicy? = null,
     ) : CanvasNode()
 

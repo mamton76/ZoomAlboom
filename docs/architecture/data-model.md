@@ -32,10 +32,37 @@ data class Transform(
 
 **Coordinate contract:**
 - `cx`/`cy` = center of the node in world space (not top-left corner).
-- `w`/`h` = actual world-unit base dimensions (not normalized).
-- `scale` = user-applied multiplier (default 1.0); used for pinch-to-resize on a node.
-- Render size = `renderW × renderH = w*scale × h*scale`.
+- `w`/`h` = base world-unit dimensions. **Not** native pixel size, **not** immutable intrinsic dimensions, **not** final rendered size. They may be rebased later (see Rebasing below) as long as the visual `renderW × renderH` is preserved.
+- `scale` = current multiplier over `w/h`. Resize gestures mutate `scale`, **not** `w/h`.
+- **Render invariant:** `renderW × renderH = w*scale × h*scale`. Every consumer (rendering, AABB, hit-test, viewport culling, selection bounds, group rect math) MUST read `renderW/renderH`, never raw `w/h`.
 - **Do NOT conflate `Transform.scale` with `Camera.scale`** — they have different semantics (see Camera below).
+
+**Creation conventions (`CanvasNodeFactory`):**
+Unified across node types: `transform.scale = 1 / camera.scale` at creation, `w/h = targetRender * camera.scale`.
+
+| Node | `targetRenderW × targetRenderH` (world units) |
+|------|------------------------------------------------|
+| `Frame` | `(screenWidth/camera.scale × 0.8) × (screenHeight/camera.scale × 0.8)` |
+| `Media` | aspect-preserving fit of `imageWidth × imageHeight` into 80% of viewport |
+
+The `targetRender` formulas inherently contain a `1/camera.scale` factor (the world-unit viewport shrinks as we zoom in). Putting `1/camera.scale` into `scale` and multiplying `w/h` by `camera.scale` cancels that factor out of `w/h` — so **`w/h` are camera-independent**, representing the canonical render size at `scale = 1`. Two frames created at different zoom levels end up with identical `w/h` (e.g. `screenW × 0.8`).
+
+Visual: `renderW = w * scale = targetRender` regardless of split. Pleasant default: at `camera.scale = 1`, `scale = 1`.
+
+Both factories also set `VisibilityPolicy(referenceScale = camera.scale)` so LOD knows the zoom at which the node is "meant to be viewed."
+
+**Rebasing (future capability):**
+Two operations should be supported when grouping, frame transforms, or LOD stabilization needs a renormalized transform — neither changes the visual:
+```
+normalizeTransform():     // bake scale into w/h
+  w = renderW; h = renderH; scale = 1
+
+rebaseScale(newScale):    // change scale, recompute w/h to preserve render
+  w = renderW / newScale
+  h = renderH / newScale
+  scale = newScale
+```
+Use cases: rebase against camera scale or a parent frame's scale, clean up extreme `scale` values after long resize sessions, post-group transformations, or LOD-stable comparisons.
 
 ### Camera
 
@@ -75,7 +102,9 @@ fun Transform.toCamera(screenWidth: Float, screenHeight: Float, fillFraction: Fl
 | Variant | Extra fields | Purpose |
 |---------|-------------|---------|
 | `Frame` | `label`, `color` (hex string), `containsNodeIds` (dynamically calculated) | Navigation area / logical grouping |
-| `Media` | `mediaRefId` (FK to `media_library`), `mediaType`, `tags` | Any media asset (image, video, text; future: audio, sticker, animated photo, vector shape) |
+| `Media` | `mediaRefId` (FK to `media_library`), `mediaType`, `tags`, `intrinsicPixelWidth/Height` | Any media asset (image, video, text; future: audio, sticker, animated photo, vector shape) |
+
+`Media.intrinsicPixelWidth/Height` are the source's native pixel dimensions (after EXIF rotation). They are **media metadata**, not layout — kept separate from `Transform.w/h` per the scaling contract above. LOD uses them to compute `sourcePxPerScreenPx = intrinsicPixelWidth / (renderW * camera.scale)` for downsampling decisions. `0` = unknown (LOD falls back to render-size-only). When `media_library` ships, intrinsic dims will also live there as the source of truth; the field on `Media` is a per-instance cache.
 
 Both share `id: String`, `transform: Transform`, `visibilityPolicy: VisibilityPolicy?`. Both are `@Serializable`.
 

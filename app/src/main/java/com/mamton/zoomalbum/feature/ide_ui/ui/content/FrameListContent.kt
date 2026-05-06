@@ -107,10 +107,10 @@ private fun FrameListItem(
             modifier = Modifier.weight(1f),
         )
 
-        // Frame transform
+        // Frame transform — render dims, not base; aspect from rendered size
         Text(
             text = "center: ${"%.0f".format(transform.cx)},${"%.0f".format(transform.cy)} " +
-                    "wh: ${"%.0f".format(transform.w)},${"%.0f".format(transform.h)}=${"%.2f".format(transform.w/transform.h)}} " +
+                    "wh: ${"%.0f".format(transform.renderW)},${"%.0f".format(transform.renderH)}=${"%.2f".format(transform.renderW/transform.renderH)} " +
                     "rot: ${"%.0f".format(transform.rotation)}",
             style = MaterialTheme.typography.bodyMedium,
         )

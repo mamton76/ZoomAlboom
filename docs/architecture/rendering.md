@@ -121,13 +121,18 @@ Nodes use **`graphicsLayer`** for position and rotation (GPU-only, no Compose Co
 
 ### 7. Node Creation
 
-`CanvasNodeFactory` creates nodes positioned relative to the current viewport:
+`CanvasNodeFactory` creates nodes positioned relative to the current viewport. Both `createFrame` and `createMedia` follow the same scaling convention:
 
-- **`Transform.cx`, `cy`** = `viewport.centerX`, `viewport.centerY` — frame is simply centered in the viewport.
-- **`Transform.w`, `h`** = `viewport.width * 0.8`, `viewport.height * 0.8` — actual world-unit dimensions, ~80% of viewport.
-- **`Transform.scale`** = 1.0 (default; user can pinch-resize later).
-- **`Transform.rotation`** = `-camera.rotation` so the frame appears axis-aligned on screen.
+- **`Transform.cx`, `cy`** = `viewport.centerX`, `viewport.centerY` — node is centered in the viewport.
+- **`Transform.scale`** = `1 / camera.scale` at creation. Subsequent pinch-resize multiplies this; `w/h` stays put.
+- **`Transform.w`, `h`** = `targetRender * camera.scale`, so `renderW = w*scale = targetRender`.
+  - Frame: `targetRender = (screenW/camera.scale × 0.8) × (screenH/camera.scale × 0.8)`.
+  - Media: aspect-preserving fit of `imageWidth × imageHeight` into 80% of viewport.
+- **`Transform.rotation`** = `-camera.rotation` so the node appears axis-aligned on screen.
+- **`VisibilityPolicy(referenceScale = camera.scale)`** is set so LOD knows the zoom at which the node is "meant to be viewed."
 - No trigonometric compensation needed — center-based placement makes this trivial.
+
+Why `scale = 1/camera.scale` (not `1`, not `camera.scale`): the `targetRender` formulas inherently contain a `1/camera.scale` factor. Putting that factor in `scale` cancels it out of `w/h`, leaving `w/h` camera-independent — they represent the canonical render size at `scale = 1`. Two frames created at different zoom levels end up with identical `w/h`. See [data-model.md § Transform](data-model.md#transform) for the rebasing primitives.
 
 ### 8. HUD / TopBar
 

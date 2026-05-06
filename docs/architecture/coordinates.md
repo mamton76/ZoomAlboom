@@ -85,9 +85,9 @@ With screen Y pointing **down**, `rotateVector(..., +30°)` appears as a **clock
 data class Transform(
     val cx: Float,      // world-space CENTER x (not top-left)
     val cy: Float,      // world-space CENTER y
-    val w: Float,       // base width in world units
-    val h: Float,       // base height in world units
-    val scale: Float,   // user scale multiplier (pinch-resize on node)
+    val w: Float,       // base width in world units (rebasable; not native pixels)
+    val h: Float,       // base height in world units (rebasable; not native pixels)
+    val scale: Float,   // current multiplier; resize mutates this. At creation = 1/camera.scale.
     val rotation: Float,// degrees
     val zIndex: Float,
 ) {

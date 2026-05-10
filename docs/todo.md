@@ -61,26 +61,27 @@ Gap between current implementation and target architecture.
 Snapshot-based: each command captures `before`/`after` node state (not a sealed class per mutation type). Automatically covers any current or future mutation without new command classes.
 
 ### 2.1 Core model
-- [ ] `CanvasCommand` data class — `nodeId`, `before: CanvasNode?` (null = add), `after: CanvasNode?` (null = delete)
-- [ ] `UndoEntry` sealed interface — `Single(command)` / `Compound(commands: List)` for atomic multi-node operations
-- [ ] `CommandHistory` class — undo/redo `Deque<UndoEntry>`, capped at ~50-100 entries
+- [x] `CanvasCommand` — snapshot-based `before`/`after: List<CanvasNode>?` (list-shape unifies single/multi ops)
+- [x] `CommandKind` — `@Serializable` enum: ADD, REMOVE, DELETE, DUPLICATE, MOVE, RESIZE, ROTATE
+- [x] `InteractionKind` — gesture-side enum MOVE/RESIZE/ROTATE, maps to `CommandKind` at commit
+- [x] `CommandHistory` — two `ArrayDeque<CanvasCommand>`, capped at 50; `push/undo/redo/snapshot/restore`
+- [x] `HistorySnapshot` — serializable wrapper for persistence
 
 ### 2.2 Gesture grouping
-- [ ] `onGestureStart` → snapshot node state as `before`
-- [ ] Gesture updates apply transforms directly (no intermediate commands)
-- [ ] `onGestureEnd` → create one `CanvasCommand(before=snapshot, after=currentState)`, push to history
-- [ ] Multi-node operations (e.g. delete frame + unparent children) → `Compound` entry
+- [x] `BeginInteraction(kind)` action → snapshots selected nodes as `before`
+- [x] Gesture updates (MoveSelection/ResizeSelection/RotateSelection) mutate state directly
+- [x] `FinishInteraction` → commits one `CanvasCommand`; skips push if `before == after` (no-op guard)
+- [x] Second finger during node gesture cancels node interaction and hands off to canvas layer
 
 ### 2.3 Persistence
-- [ ] `@Serializable` on `CanvasCommand` and `UndoEntry`
-- [ ] Autosave history to `filesDir/history_{albumId}.json` on each mutation
-- [ ] Load history on album open, cap at ~50-100 entries
+- [x] `CanvasCommand` and `HistorySnapshot` are `@Serializable`
+- [x] `HistorySerializer` — serialize/deserialize `HistorySnapshot` (mirrors `SceneGraphSerializer`)
+- [x] History saved to `filesDir/history_{albumId}.json` on `ViewModel.onCleared()`
+- [x] History loaded on album open; **not** process-death-safe (save is onCleared-only)
 
 ### 2.4 Integration
-- [ ] Integrate into `CanvasViewModel` — all mutations go through commands
-- [ ] Undo/redo UI buttons in TopBar
-
-> **Timing:** implement after §4.2 (node interaction) — undo is most useful once move/resize/delete exists.
+- [x] All mutations in `CanvasViewModel` push `CanvasCommand`: addNode, removeNode, DeleteSelection, DuplicateSelection, BeginInteraction/FinishInteraction
+- [x] Undo/redo TopBar buttons (↶ ↷); enabled state driven by `canUndo`/`canRedo` flows
 
 ---
 
@@ -111,13 +112,13 @@ Snapshot-based: each command captures `before`/`after` node state (not a sealed 
 - [x] Node selection (tap to select, cyan border + corner handles + rotation handle)
 - [x] Node drag/move (update `Transform` via `CanvasAction.MoveSelection`)
 - [x] Node resize (corner handle drag, proportional)
-- [x] Node rotation (rotation handle + two-finger on selected node)
+- [x] Node rotation (rotation handle drag)
 - [x] Multi-select (rectangle selection via long-press+drag, group move/resize/rotate)
 - [x] Overlap picker (long-press on overlapping nodes shows selection dialog)
 - [x] Contextual action bar (Delete, Duplicate wired; Edit stub)
 - [x] Selection debug panel (shows node transform details)
 - [x] Deselect on camera gesture (pan/zoom clears selection)
-- [ ] Undo integration (record `CanvasCommand` on move/resize/rotate — depends on §2)
+- [x] Undo integration (snapshot-based `CanvasCommand` on move/resize/rotate/add/delete/duplicate — §2 done)
 
 ### 4.3 Dynamic containment
 - [ ] Calculate `containsNodeIds` on node move (AABB intersection with frames)
@@ -239,9 +240,10 @@ Items completed — kept here to track what exists.
 - [x] Clean Architecture packages: `app/`, `core/`, `domain/`, `data/`, `feature/`
 - [x] Hilt DI: `AppModule` (DatabaseModule + RepositoryModule)
 - [x] Room v1: `AppDatabase`, `AlbumEntity`, `AlbumDao`
-- [x] File I/O: `FileStorageHelper` (scene_{albumId}.json)
+- [x] File I/O: `FileStorageHelper` (scene_{albumId}.json, history_{albumId}.json)
+- [x] Undo/redo: `CommandHistory`, `HistorySerializer`, `HistorySnapshot`, `CanvasCommand`, `CommandKind`, `InteractionKind`
 - [x] Scene graph serialization: `SceneGraphSerializer` (kotlinx-serialization)
-- [x] Repositories: `ProjectRepository` + `MediaRepository` (interfaces + impls)
+- [x] Repositories: `ProjectRepository` + `MediaRepository` + `HistoryRepository` (interfaces + impls)
 - [x] Use cases: `CalculateViewportIntersectionsUseCase`, `SaveSceneGraphUseCase`
 - [x] MVI contracts: `State`, `Intent`, `Effect` marker interfaces
 - [x] Math utilities: `TransformUtils`, `BoundingBox`, `ViewportCuller`

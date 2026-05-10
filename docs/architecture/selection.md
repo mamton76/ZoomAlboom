@@ -112,4 +112,4 @@ Two-or-more-finger camera pan / pinch-zoom / rotate. Single-finger events pass t
 
 - **Overlap picker dispatches `SelectNode` (replace), not toggle.** Long-press on a stack of nodes shows the picker and replaces selection with the chosen one — there's no path to toggle a single overlapping node into an existing multi-selection. Revisit when the picker UX is reworked.
 - **Single-tap result has a ~300 ms delay** because Phase 3 of `tapAndLongPressGestures` waits `DOUBLE_TAP_MS` to disambiguate from double-tap. Inherent to the gesture design; could be tuned if it becomes a complaint.
-- **No undo integration yet.** Selection mutations are not commands. When undo lands ([todo § 2](../todo.md#2-undoredo)), every group operation will need to capture before/after snapshots.
+- **Selection mutations are not undoable.** `SelectNode`, `ToggleNodeSelection`, `DeselectAll`, `SelectNodesInRect` do not push `CanvasCommand` entries. Only structural mutations (move, resize, rotate, add, delete, duplicate) are undoable.

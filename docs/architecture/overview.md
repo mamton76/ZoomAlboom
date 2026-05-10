@@ -94,9 +94,9 @@ See [data-model.md](data-model.md) for schema details.
 | IDE workspace state | Room (`ide_workspaces` table) | SQL + JSON blob | planned |
 | Media registry | Room (`media_library` table) | SQL | planned |
 | Scene graphs | `filesDir/scene_{albumId}.json` | JSON (kotlinx-serialization) | implemented (format changing) |
-| Undo/Redo history | `filesDir/history_{albumId}.json` | JSON (command pattern) | planned |
+| Undo/Redo history | `filesDir/history_{albumId}.json` | JSON (kotlinx-serialization) | implemented |
 
-Canvas mutations go through `CanvasCommand` (sealed interface: `Move`, `AddNode`, `RemoveNode`). Commands are stored in a `Deque` in memory and autosaved to disk. See [data-model.md § Undo/Redo](data-model.md#undoredo-model-command-pattern).
+Canvas mutations go through `CanvasCommand` (snapshot-based: `before`/`after` as `List<CanvasNode>?`). Commands are stored in two `ArrayDeque`s (undo + redo, capped at 50) inside `CommandHistory` and saved to disk on `ViewModel.onCleared()`. See [data-model.md § Undo/Redo](data-model.md#undoredo-model-snapshot-based).
 
 ## IDE Overlay
 

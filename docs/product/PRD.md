@@ -112,7 +112,7 @@ People who want to document:
 - a process or archive
 
 ### 6.2 Secondary user segments
-- teachers or parents making educational albums
+- teachers or parents making educational albums (or thier groups-classes histories)
 - home cooks building visual recipe collections
 - travelers creating route-based memory maps
 - users who think visually and dislike rigid linear album structures
@@ -210,6 +210,16 @@ The meaning of the album comes not only from the media itself, but also from:
 - scale
 - transitions between areas
 
+### 8.6 Visual atmosphere
+The canvas background sets the emotional tone of the entire album or of individual frames.  
+A dark, textured background can feel intimate and archival. A bright linen background can feel warm and handcrafted. A grid or cork board can feel like a project space.
+
+Backgrounds operate at two levels:
+- **Album background** — covers the entire infinite canvas. Can be a solid color, image, or tiling texture. Can be fixed to the screen (static behind everything, not affected by panning or zooming) or anchored to the world (moves and scales with the canvas, creating a sense of infinite surface).
+- **Frame background** — individual frames can have their own color fill, making each section feel like a distinct page, board, or chapter within the album.
+
+Background is a style property of the album or frame, not a canvas object — it cannot be selected, moved, or layered like media items.
+
 ---
 
 ## 9. MVP Scope
@@ -222,6 +232,10 @@ The meaning of the album comes not only from the media itself, but also from:
 - support panning
 - support zooming
 - support rotation
+- set album background: solid color or texture/image
+- choose background anchor: screen-fixed (does not move with canvas) or world-anchored (moves and scales with the canvas)
+- choose tile mode for textured backgrounds: none, stretch, cover, repeat, and variants
+- set background opacity
 
 #### Frames
 - create frames
@@ -230,6 +244,7 @@ The meaning of the album comes not only from the media itself, but also from:
 - visually distinguish frames from general content
 - navigate/focus into frames
 - animated frame transitions — smooth camera interpolation (linear/bezier) between frames
+- set frame background fill color and opacity
 
 #### Media items
 - add photo item
@@ -366,6 +381,17 @@ This is the "LiveJournal post" equivalent: the artifact you create from your mem
 - Album state should survive app restart
 - Missing media references should be handled gracefully
 - Data model should support future extension
+
+### 11.7 Backgrounds
+- User can set an album-level background: none, solid color, or texture/image
+- User can choose whether the album background is screen-fixed or world-anchored (moves with canvas pan/zoom)
+- User can set the tile mode for a textured background: none, stretch, cover, contain, repeat, repeatX, repeatY
+- User can set the position and size of the background tile grid (anchor point and tile dimensions in canvas space)
+- User can set background opacity
+- User can set a fill color and opacity on individual frames
+- Frame fill is clipped to frame bounds
+- Background settings are persisted with the album
+- Post-MVP: frame texture backgrounds, per-layer backgrounds
 
 ---
 

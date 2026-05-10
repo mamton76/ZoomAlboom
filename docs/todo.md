@@ -456,6 +456,48 @@ Extends [§4.7 Media adding & editing](#47-media-adding--editing) (single-photo 
 
 ---
 
+## 19. Album and Frame Backgrounds
+
+Backgrounds are **not** `CanvasNode` objects — they are render-layer style properties stored in the scene graph root (album background) or on `CanvasNode.Frame` (frame background). Requires §1.3 (JSON root wrapper) to be implemented together.
+
+See [data-model.md § AlbumBackground & FrameBackground](architecture/data-model.md#albumbackground--framebackground) for types and rendering order.
+
+### 19.1 Domain model
+- [ ] `BackgroundType` enum: `None`, `SolidColor`, `Texture`
+- [ ] `TileMode` enum: `None`, `Stretch`, `Cover`, `Contain`, `Repeat`, `RepeatX`, `RepeatY`
+- [ ] `AnchorMode` enum: `CameraLocked`, `WorldLocked` (FrameLocked post-MVP)
+- [ ] `AlbumBackground` — type, color, textureRefId, opacity, tileMode, anchorMode, tileOriginX/Y, tileWidth/Height
+- [ ] `FrameBackground` — color (nullable = transparent), opacity
+- [ ] Add `background: FrameBackground?` field to `CanvasNode.Frame`
+
+### 19.2 Scene graph (requires §1.3 first)
+- [ ] `SceneGraph` root wrapper: `albumId`, `viewport`, `background: AlbumBackground`, `nodes`
+- [ ] Migration reader: try root object, fall back to bare `List<CanvasNode>` for old files
+- [ ] `SceneGraphSerializer` updated to encode/decode root wrapper
+- [ ] `albumBackground` added to `CanvasState`
+- [ ] `CanvasAction.SetAlbumBackground(background: AlbumBackground)`
+
+### 19.3 Rendering
+- [ ] `AlbumBackgroundRenderer` composable
+  - Camera-locked: drawn outside (before) the camera `graphicsLayer` Box — screen-fixed, no transform
+  - World-locked solid color: inside the `graphicsLayer` Box before nodes, sized to visible world rect from camera state
+  - World-locked tiled texture: `drawBehind` inside `graphicsLayer`, loop `drawImage` tiles over visible world rect using `tileOriginX/Y` and `tileWidth/Height` to anchor the grid
+- [ ] Frame background rendering inside `CanvasNodeRenderer` for Frame, drawn before frame border
+- [ ] Frame background clipped to frame bounds
+
+### 19.4 MVP scope
+- Album: solid color + texture/image; camera-locked + world-locked; all tile modes
+- Frame: color fill + opacity only (no texture for MVP)
+- No undo for background changes (MVP)
+
+### 19.5 Post-MVP
+- [ ] Frame texture backgrounds (tiled or stretched image fill)
+- [ ] `AnchorMode.FrameLocked` — background local to a frame, transformed with it
+- [ ] User layer backgrounds
+- [ ] Background editing UI (color picker, texture picker, tile controls)
+
+---
+
 ## 18. Future (Post-MVP)
 
 See [future-ideas.md](product/future-ideas.md) for the full list.

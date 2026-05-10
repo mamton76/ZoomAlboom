@@ -101,12 +101,66 @@ fun Transform.toCamera(screenWidth: Float, screenHeight: Float, fillFraction: Fl
 
 | Variant | Extra fields | Purpose |
 |---------|-------------|---------|
-| `Frame` | `label`, `color` (hex string), `containsNodeIds` (dynamically calculated) | Navigation area / logical grouping |
+| `Frame` | `label`, `color` (hex string), `containsNodeIds` (dynamically calculated), `background: FrameBackground?` | Navigation area / logical grouping |
 | `Media` | `mediaRefId` (FK to `media_library`), `mediaType`, `tags`, `intrinsicPixelWidth/Height` | Any media asset (image, video, text; future: audio, sticker, animated photo, vector shape) |
 
 `Media.intrinsicPixelWidth/Height` are the source's native pixel dimensions (after EXIF rotation). They are **media metadata**, not layout — kept separate from `Transform.w/h` per the scaling contract above. LOD uses them to compute `sourcePxPerScreenPx = intrinsicPixelWidth / (renderW * camera.scale)` for downsampling decisions. `0` = unknown (LOD falls back to render-size-only). When `media_library` ships, intrinsic dims will also live there as the source of truth; the field on `Media` is a per-instance cache.
 
 Both share `id: String`, `transform: Transform`, `visibilityPolicy: VisibilityPolicy?`. Both are `@Serializable`.
+
+### AlbumBackground & FrameBackground
+
+Backgrounds are **not** `CanvasNode` objects. They are render-layer style properties stored alongside (not inside) the nodes list in the scene graph.
+
+```kotlin
+@Serializable
+enum class BackgroundType { None, SolidColor, Texture }
+
+@Serializable
+enum class TileMode { None, Stretch, Cover, Contain, Repeat, RepeatX, RepeatY }
+
+@Serializable
+enum class AnchorMode {
+    CameraLocked,  // fixed to viewport/screen — does not move with canvas pan/zoom/rotation
+    WorldLocked,   // anchored in world coordinates — moves and scales with the camera
+    // FrameLocked — future: local to a specific frame, clipped to frame bounds
+}
+
+@Serializable
+data class AlbumBackground(
+    val type: BackgroundType = BackgroundType.None,
+    val color: String = "#000000",           // hex color (used when type == SolidColor)
+    val textureRefId: String? = null,        // FK to media_library (used when type == Texture)
+    val opacity: Float = 1f,
+    val tileMode: TileMode = TileMode.None,
+    val anchorMode: AnchorMode = AnchorMode.CameraLocked,
+    val tileOriginX: Float = 0f,            // world X of the tile grid anchor
+    val tileOriginY: Float = 0f,            // world Y of the tile grid anchor
+    val tileWidth: Float = 200f,            // tile width in world units
+    val tileHeight: Float = 200f,           // tile height in world units
+)
+
+@Serializable
+data class FrameBackground(
+    val color: String? = null,  // null = transparent / no fill
+    val opacity: Float = 1f,
+    // texture support planned post-MVP
+)
+```
+
+**Rendering order:**
+1. Camera-locked album background — drawn outside the camera `graphicsLayer` (screen-fixed, no transform)
+2. World-locked album background — drawn inside the camera `graphicsLayer`, before all nodes
+3. Frame backgrounds — drawn inside each frame's own rendering, clipped to frame bounds
+4. Canvas nodes by `zIndex`
+5. Selection overlays, guidelines, snapping indicators
+6. IDE UI overlay
+
+**Tile algorithm (world-locked, tileMode = Repeat/RepeatX/RepeatY):**
+Find the first tile column/row whose origin ≤ visible world edge:
+`firstCol = floor((worldLeft - tileOriginX) / tileWidth)`, then loop until past `worldRight`. Same for rows. Draw each tile with `drawImage` (texture) or `drawRect` (solid color). `tileOriginX/Y` control the phase of the grid so the user can shift the pattern without changing tile size.
+
+**Persistence:** `albumBackground` lives in the scene graph root object (requires §1.3 JSON wrapper — implemented together). `FrameBackground` is a field on `CanvasNode.Frame` in the nodes array.
 
 ### VisibilityPolicy & RenderDetail
 
@@ -201,12 +255,19 @@ Registry of all media used in an album. Allows finding all usages of a single fi
 
 **Location:** `filesDir/scene_{albumId}.json`
 
-> **Current implementation:** `SceneGraphSerializer` emits a bare `List<CanvasNode>` (flat JSON array), not the wrapped format below. The root object with `albumId` and `viewport` is the **target** format — see todo §1.3.
+> **Current implementation:** `SceneGraphSerializer` emits a bare `List<CanvasNode>` (flat JSON array), not the wrapped format below. The root object with `albumId`, `viewport`, and `background` is the **target** format — see todo §1.3 and §19.
 
 ```json
 {
   "albumId": 123,
   "viewport": { "cx": 0, "cy": 0, "scale": 1.0 },
+  "background": {
+    "type": "SolidColor",
+    "color": "#1A1A2E",
+    "opacity": 1.0,
+    "anchorMode": "CameraLocked",
+    "tileMode": "None"
+  },
   "nodes": [
     {
       "id": "node_1",

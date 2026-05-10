@@ -17,7 +17,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mamton.zoomalbum.core.designsystem.CanvasDark
 import com.mamton.zoomalbum.core.math.TransformUtils
 import com.mamton.zoomalbum.domain.model.CanvasNode
-import com.mamton.zoomalbum.domain.undo.InteractionKind
 import com.mamton.zoomalbum.feature.canvas.gestures.infiniteCanvasGestures
 import com.mamton.zoomalbum.feature.canvas.gestures.nodeInteractionGestures
 import com.mamton.zoomalbum.feature.canvas.gestures.tapAndLongPressGestures
@@ -45,13 +44,6 @@ fun CanvasScreen(
 
     // Mutable ref for rectangle selection start point (world coords).
     val rectStartWorld = remember { floatArrayOf(0f, 0f) }
-
-    // Tracks whether the in-flight two-finger gesture has routed rotation to
-    // a selected node. Set on the first frame the routing condition triggers;
-    // reset when the canvas gesture ends. Used to fire one BeginInteraction /
-    // FinishInteraction pair per node-rotation gesture (and avoid firing on
-    // pure pan/zoom).
-    val inNodeRotation = remember { booleanArrayOf(false) }
 
     Box(
         modifier = Modifier
@@ -86,7 +78,11 @@ fun CanvasScreen(
                     val diagonalLen = kotlin.math.sqrt(cornerX * cornerX + cornerY * cornerY)
                     if (diagonalLen < 0.001f) return@nodeInteractionGestures
                     val (worldDx, worldDy) = TransformUtils.screenDeltaToWorld(dx, dy, state.camera)
-                    val (localDx, localDy) = TransformUtils.rotateVector(worldDx, worldDy, -t.rotation)
+                    val (localDx, localDy) = TransformUtils.rotateVector(
+                        worldDx,
+                        worldDy,
+                        -t.rotation
+                    )
                     val dirX = cornerX / diagonalLen
                     val dirY = cornerY / diagonalLen
                     val projection = localDx * dirX + localDy * dirY
@@ -153,10 +149,12 @@ fun CanvasScreen(
                             onShowOverlapPicker(hits)
                             true
                         }
+
                         hits.size == 1 -> {
                             viewModel.onAction(CanvasAction.ToggleNodeSelection(hits[0].id))
                             true
                         }
+
                         else -> false
                     }
                 },
@@ -192,39 +190,18 @@ fun CanvasScreen(
                         // Rect-select doesn't mutate selectedNodeIds during drag,
                         // so reading it at onDragEnd reflects the pre-drag state.
                         val additive = state.selectedNodeIds.isNotEmpty()
-                        viewModel.onAction(CanvasAction.SelectNodesInRect(rect, additive = additive))
+                        viewModel.onAction(
+                            CanvasAction.SelectNodesInRect(
+                                rect,
+                                additive = additive
+                            )
+                        )
                     }
                 },
             )
-            // Layer 3: canvas pan/zoom/rotate — Main pass
-            // When two-finger centroid is on a selected node and rotation is non-zero,
-            // route rotation to the node instead of the camera.
-            .infiniteCanvasGestures(
-                onGestureBegin = { /* no-op: routing decision is per-frame */ },
-                onGestureEnd = {
-                    // Close out the node-rotation gesture if one was active.
-                    if (inNodeRotation[0]) {
-                        viewModel.onAction(CanvasAction.FinishInteraction)
-                        inNodeRotation[0] = false
-                    }
-                },
-            ) { centroid, pan, zoom, rotation ->
-                if (state.selectedNodeIds.isNotEmpty()
-                    && rotation != 0f
-                    && viewModel.isOnSelectedNode(centroid.x, centroid.y)
-                ) {
-                    if (!inNodeRotation[0]) {
-                        // First frame routing rotation to a selected node — must
-                        // fire BeginInteraction BEFORE the RotateSelection action
-                        // so the snapshot captures pre-rotation state.
-                        viewModel.onAction(CanvasAction.BeginInteraction(InteractionKind.ROTATE))
-                        inNodeRotation[0] = true
-                    }
-                    viewModel.onAction(CanvasAction.RotateSelection(rotation))
-                    viewModel.onGesture(centroid, pan, zoom, rotationDelta = 0f)
-                } else {
-                    viewModel.onGesture(centroid, pan, zoom, rotation)
-                }
+            // Layer 3: canvas pan/zoom/rotate — Main pass handler
+            .infiniteCanvasGestures { centroid, pan, zoom, rotation ->
+                viewModel.onGesture(centroid, pan, zoom, rotation)
             },
     ) {
         // The single graphicsLayer on this inner Box handles ALL pan/zoom.

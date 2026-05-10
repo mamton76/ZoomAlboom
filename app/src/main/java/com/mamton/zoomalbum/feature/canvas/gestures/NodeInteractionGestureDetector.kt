@@ -3,6 +3,7 @@ package com.mamton.zoomalbum.feature.canvas.gestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
@@ -24,7 +25,7 @@ import com.mamton.zoomalbum.domain.undo.InteractionKind
  * tap and canvas gesture layers.
  *
  * Long-press (overlap picker, rectangle selection) is handled separately
- * via [tapAndLongPressGestures.onLongPress] in the tap layer — NOT here.
+ * via `tapAndLongPressGestures` in the tap layer — NOT here.
  * Mixing long-press detection with Initial-pass event reading breaks
  * tap detection in lower layers.
  */
@@ -84,6 +85,8 @@ fun Modifier.nodeInteractionGestures(
             val slopSq = viewConfiguration.touchSlop * viewConfiguration.touchSlop
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Initial)
+                // Second finger arrived → two-finger canvas gesture; let it through.
+                if (event.changes.size > 1) return@awaitEachGesture
                 val change = event.changes.firstOrNull() ?: return@awaitEachGesture
                 if (change.changedToUp() || change.isConsumed) {
                     // Released without moving, or another layer consumed —
@@ -112,12 +115,18 @@ fun Modifier.nodeInteractionGestures(
 /**
  * Drag loop emitting movement deltas until all pointers lift.
  */
-private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.dragLoop(
+private suspend fun AwaitPointerEventScope.dragLoop(
     onDelta: (dx: Float, dy: Float) -> Unit,
     onEnd: () -> Unit,
 ) {
     while (true) {
         val event = awaitPointerEvent(PointerEventPass.Initial)
+        if (event.changes.size > 1) {
+            // Second finger arrived mid-drag → cancel node interaction so the
+            // two-finger canvas gesture can take over.
+            onEnd()
+            break
+        }
         val change = event.changes.firstOrNull() ?: break
         if (change.changedToUp()) {
             change.consume()
@@ -136,12 +145,16 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.dra
  * Drag loop emitting absolute screen positions until all pointers lift.
  * Used for rotation handle where atan2 needs position, not delta.
  */
-private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.positionLoop(
+private suspend fun AwaitPointerEventScope.positionLoop(
     onPosition: (screenX: Float, screenY: Float) -> Unit,
     onEnd: () -> Unit,
 ) {
     while (true) {
         val event = awaitPointerEvent(PointerEventPass.Initial)
+        if (event.changes.size > 1) {
+            onEnd()
+            break
+        }
         val change = event.changes.firstOrNull() ?: break
         if (change.changedToUp()) {
             change.consume()

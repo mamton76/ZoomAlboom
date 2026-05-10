@@ -18,7 +18,13 @@ import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
 import com.mamton.zoomalbum.domain.model.RenderDetail
 import com.mamton.zoomalbum.domain.model.withTransform
+import com.mamton.zoomalbum.domain.repository.HistoryRepository
 import com.mamton.zoomalbum.domain.repository.MediaRepository
+import com.mamton.zoomalbum.domain.undo.CanvasCommand
+import com.mamton.zoomalbum.domain.undo.CommandHistory
+import com.mamton.zoomalbum.domain.undo.CommandKind
+import com.mamton.zoomalbum.domain.undo.InteractionKind
+import com.mamton.zoomalbum.domain.undo.toCommandKind
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -80,7 +86,12 @@ sealed interface CanvasAction : Intent {
     // Lifecycle
     data object DeleteSelection : CanvasAction
     data object DuplicateSelection : CanvasAction
+    data class BeginInteraction(val kind: InteractionKind) : CanvasAction
     data object FinishInteraction : CanvasAction
+
+    // Undo/Redo
+    data object Undo : CanvasAction
+    data object Redo : CanvasAction
 
     // Rectangle selection preview
     data class UpdateSelectionRect(val worldRect: BoundingBox?) : CanvasAction
@@ -91,12 +102,22 @@ sealed interface CanvasAction : Intent {
 class CanvasViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val mediaRepository: MediaRepository,
+    private val historyRepository: HistoryRepository,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
     private val albumId: Long = savedStateHandle.get<Long>("albumId") ?: 0L
 
     private val _allNodes = MutableStateFlow<List<CanvasNode>>(emptyList())
+
+    // Undo/Redo
+    private val history = CommandHistory()
+    private var pendingSnapshot: List<CanvasNode>? = null
+    private var pendingKind: InteractionKind? = null
+    private val _canUndo = MutableStateFlow(false)
+    val canUndo: StateFlow<Boolean> = _canUndo.asStateFlow()
+    private val _canRedo = MutableStateFlow(false)
+    val canRedo: StateFlow<Boolean> = _canRedo.asStateFlow()
 
     val frames: StateFlow<List<CanvasNode.Frame>> = _allNodes
         .map { nodes -> nodes.filterIsInstance<CanvasNode.Frame>() }
@@ -173,6 +194,14 @@ class CanvasViewModel @Inject constructor(
                 groupSelectionTransform = null,
             )
         }
+        commit(
+            CanvasCommand(
+                before = null,
+                after = listOf(node),
+                kind = CommandKind.ADD,
+                timestampMs = System.currentTimeMillis(),
+            ),
+        )
         recalculateVisibleNodes()
     }
 
@@ -203,8 +232,21 @@ class CanvasViewModel @Inject constructor(
     }
 
     fun removeNode(nodeId: String) {
+        val current = _allNodes.value
+        val idx = current.indexOfFirst { it.id == nodeId }
+        if (idx < 0) return
+        val removed = current[idx]
         _allNodes.update { nodes -> nodes.filter { it.id != nodeId } }
         _state.update { it.copy(totalNodeCount = _allNodes.value.size) }
+        commit(
+            CanvasCommand(
+                before = listOf(removed),
+                after = null,
+                beforeIndices = listOf(idx),
+                kind = CommandKind.REMOVE,
+                timestampMs = System.currentTimeMillis(),
+            ),
+        )
         recalculateVisibleNodes()
     }
 
@@ -373,6 +415,12 @@ class CanvasViewModel @Inject constructor(
 
             is CanvasAction.DeleteSelection -> {
                 val ids = _state.value.selectedNodeIds
+                if (ids.isEmpty()) return
+                val current = _allNodes.value
+                val removedWithIdx = current.withIndex()
+                    .filter { it.value.id in ids }
+                    .map { it.index to it.value }
+                if (removedWithIdx.isEmpty()) return
                 _allNodes.update { nodes -> nodes.filter { it.id !in ids } }
                 _state.update {
                     it.copy(
@@ -380,6 +428,15 @@ class CanvasViewModel @Inject constructor(
                         totalNodeCount = _allNodes.value.size,
                     )
                 }
+                commit(
+                    CanvasCommand(
+                        before = removedWithIdx.map { it.second },
+                        after = null,
+                        beforeIndices = removedWithIdx.map { it.first },
+                        kind = CommandKind.DELETE,
+                        timestampMs = System.currentTimeMillis(),
+                    ),
+                )
                 recalculateVisibleNodes()
             }
 
@@ -407,14 +464,48 @@ class CanvasViewModel @Inject constructor(
                         totalNodeCount = _allNodes.value.size,
                     )
                 }
+                commit(
+                    CanvasCommand(
+                        before = null,
+                        after = copies,
+                        kind = CommandKind.DUPLICATE,
+                        timestampMs = System.currentTimeMillis(),
+                    ),
+                )
                 recalculateVisibleNodes()
             }
 
+            is CanvasAction.BeginInteraction -> {
+                // Idempotent: both gesture detectors fire one Begin per gesture, but
+                // be defensive — if a snapshot is already pending, keep it.
+                if (pendingSnapshot != null) return
+                val ids = _state.value.selectedNodeIds
+                if (ids.isEmpty()) return
+                pendingSnapshot = _allNodes.value.filter { it.id in ids }
+                pendingKind = action.kind
+            }
+
             is CanvasAction.FinishInteraction -> {
+                commitPendingInteraction()
                 // Do NOT recompute group rect here — it would snap back to
                 // screen-aligned. The rect is kept in sync during Move/Resize/Rotate
                 // and only recomputed on selection membership changes.
                 recalculateVisibleNodes()
+            }
+
+            is CanvasAction.Undo -> {
+                // Defensive: if a gesture is in flight, commit it first so undo
+                // operates on a consistent state. Gesture detectors should consume
+                // pointer events before reaching this branch.
+                commitPendingInteraction()
+                history.undo()?.let { applyCommand(it, reverse = true) }
+                refreshHistoryFlags()
+            }
+
+            is CanvasAction.Redo -> {
+                commitPendingInteraction()
+                history.redo()?.let { applyCommand(it, reverse = false) }
+                refreshHistoryFlags()
             }
 
             is CanvasAction.UpdateSelectionRect -> {
@@ -511,12 +602,16 @@ class CanvasViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         val nodes = _allNodes.value
-        if (albumId != 0L && nodes.isNotEmpty()) {
+        val historySnapshot = history.snapshot()
+        if (albumId != 0L) {
             // Fire-and-forget save — ViewModel scope is cancelled but we use
             // a non-cancellable context for the final save.
             kotlinx.coroutines.MainScope().launch(Dispatchers.IO) {
                 try {
-                    mediaRepository.saveSceneGraph(albumId, nodes)
+                    if (nodes.isNotEmpty()) {
+                        mediaRepository.saveSceneGraph(albumId, nodes)
+                    }
+                    historyRepository.save(albumId, historySnapshot)
                 } catch (_: Exception) {
                     // Best-effort save on exit
                 }
@@ -626,6 +721,12 @@ class CanvasViewModel @Inject constructor(
                     isLoading = false,
                 )
             }
+            if (albumId != 0L) {
+                runCatching { historyRepository.load(albumId) }
+                    .getOrNull()
+                    ?.let { history.restore(it) }
+            }
+            refreshHistoryFlags()
             recalculateVisibleNodes()
         }
     }
@@ -649,6 +750,108 @@ class CanvasViewModel @Inject constructor(
             }
             _state.update { it.copy(visibleNodes = resolved) }
         }
+    }
+
+    // ── Undo/Redo internals ───────────────────────────────────────────
+
+    private fun commit(command: CanvasCommand) {
+        history.push(command)
+        refreshHistoryFlags()
+    }
+
+    private fun refreshHistoryFlags() {
+        _canUndo.value = history.canUndo
+        _canRedo.value = history.canRedo
+    }
+
+    /**
+     * Commits the in-flight gesture snapshot, if any. Called on FinishInteraction
+     * and defensively on Undo/Redo. Skips the push if the gesture was a no-op
+     * (before == after — e.g. user pressed a handle and lifted without moving).
+     */
+    private fun commitPendingInteraction() {
+        val before = pendingSnapshot ?: return
+        val kind = pendingKind ?: InteractionKind.MOVE  // shouldn't happen; safe default
+        // Order `after` to match `before`'s id ordering — positional pairing.
+        val byId: Map<String, CanvasNode> = _allNodes.value.associateBy { it.id }
+        val after = before.mapNotNull { byId[it.id] }
+        pendingSnapshot = null
+        pendingKind = null
+        if (after.size != before.size) return  // some ids vanished — drop the snapshot
+        val noop = before.zip(after).all { (b, a) -> b == a }
+        if (noop) return
+        commit(
+            CanvasCommand(
+                before = before,
+                after = after,
+                kind = kind.toCommandKind(),
+                timestampMs = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    /**
+     * Applies [cmd] to `_allNodes` and refreshes derived state. When [reverse]
+     * is true, applies the inverse direction (used for Undo). List order is
+     * preserved across all three command shapes; for restored deletes,
+     * [CanvasCommand.beforeIndices] is used to re-insert at the original positions.
+     */
+    private fun applyCommand(cmd: CanvasCommand, reverse: Boolean) {
+        val from = if (reverse) cmd.after else cmd.before
+        val to = if (reverse) cmd.before else cmd.after
+
+        _allNodes.update { current ->
+            when {
+                // Mutation (forward or reverse): replace by id in-place. Order preserved.
+                from != null && to != null -> {
+                    val byId = to.associateBy { it.id }
+                    current.map { byId[it.id] ?: it }
+                }
+                // Pure delete (forward of DELETE/REMOVE, OR reverse of ADD/DUPLICATE).
+                from != null && to == null -> {
+                    val ids = from.map { it.id }.toSet()
+                    current.filter { it.id !in ids }
+                }
+                // Pure insert (forward of ADD/DUPLICATE, OR reverse of DELETE/REMOVE).
+                from == null && to != null -> {
+                    val restoreWithIndices =
+                        reverse && cmd.before != null && cmd.beforeIndices != null
+                    if (restoreWithIndices) {
+                        // Re-insert deleted nodes at their original positions.
+                        val mutable = current.toMutableList()
+                        cmd.before!!.zip(cmd.beforeIndices!!)
+                            .sortedBy { (_, idx) -> idx }
+                            .forEach { (node, idx) ->
+                                mutable.add(idx.coerceAtMost(mutable.size), node)
+                            }
+                        mutable.toList()
+                    } else {
+                        // ADD/DUPLICATE forward — append (matches original behavior).
+                        current + to
+                    }
+                }
+                else -> current
+            }
+        }
+
+        // Selection policy:
+        //   pure insert    → select inserted nodes
+        //   pure delete    → clear selection
+        //   mutation       → select mutated nodes
+        val newSel: Set<String> = when {
+            to != null && from == null -> to.map { it.id }.toSet()
+            to == null && from != null -> emptySet()
+            else -> to!!.map { it.id }.toSet()
+        }
+        _state.update {
+            it.copy(
+                selectedNodeIds = newSel,
+                totalNodeCount = _allNodes.value.size,
+                groupSelectionTransform = null,
+            )
+        }
+        recomputeGroupTransform(newSel)
+        recalculateVisibleNodes()
     }
 
     companion object {

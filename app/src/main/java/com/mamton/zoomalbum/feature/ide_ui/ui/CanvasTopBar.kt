@@ -26,6 +26,8 @@ fun CanvasTopBar(
     lodFullCount: Int = 0,
     lodStubCount: Int = 0,
     lodSimplifiedCount: Int = 0,
+    onUndo: (() -> Unit)? = null,
+    onRedo: (() -> Unit)? = null,
     onNavigateBack: () -> Unit,
     onOpenFrameList: () -> Unit,
     onOpenPanelConfig: () -> Unit,
@@ -58,6 +60,8 @@ fun CanvasTopBar(
             IconButton(onClick = onNavigateBack) { Text("\u2190") }
         },
         actions = {
+            IconButton(onClick = onUndo ?: {}, enabled = onUndo != null) { Text("↶") } // undo
+            IconButton(onClick = onRedo ?: {}, enabled = onRedo != null) { Text("↷") } // redo
             IconButton(onClick = onOpenFrameList) { Text("\u2630") } // ☰ hamburger
             IconButton(onClick = onOpenPanelConfig) { Text("\u2699") } // ⚙ gear
         },

@@ -20,8 +20,15 @@ import kotlin.math.abs
  * Single-finger drags are ignored — they pass through to lower gesture
  * layers (tap-to-select, node drag, etc.). Only when a second finger
  * touches down does this detector activate.
+ *
+ * [onGestureBegin] fires when the second finger arrives (gesture activates).
+ * [onGestureEnd] fires when the gesture deactivates (drops below 2 fingers).
+ * These are useful for callers that need explicit gesture lifecycle (e.g.
+ * snapshotting state for undo). Both default to no-op.
  */
 fun Modifier.infiniteCanvasGestures(
+    onGestureBegin: () -> Unit = {},
+    onGestureEnd: () -> Unit = {},
     onGesture: (centroid: Offset, pan: Offset, zoom: Float, rotation: Float) -> Unit,
 ): Modifier = this.pointerInput(Unit) {
     awaitEachGesture {
@@ -42,32 +49,38 @@ fun Modifier.infiniteCanvasGestures(
             // Don't consume single-finger events — let them pass through
         }
 
-        // Two or more fingers are down — enter transform tracking loop
-        do {
-            val event = awaitPointerEvent()
-            val pressed = event.changes.filter { it.pressed }
-            if (pressed.size < 2) {
-                // Dropped below 2 fingers — stop tracking
-                // Consume remaining changes to avoid stale state
-                event.changes.forEach { if (it.positionChanged()) it.consume() }
-                break
-            }
+        // Two or more fingers are down — gesture activates.
+        onGestureBegin()
+        try {
+            // Enter transform tracking loop
+            do {
+                val event = awaitPointerEvent()
+                val pressed = event.changes.filter { it.pressed }
+                if (pressed.size < 2) {
+                    // Dropped below 2 fingers — stop tracking
+                    // Consume remaining changes to avoid stale state
+                    event.changes.forEach { if (it.positionChanged()) it.consume() }
+                    break
+                }
 
-            val centroid = event.calculateCentroid(useCurrent = true)
-            val pan = event.calculatePan()
-            val zoom = event.calculateZoom()
-            val rotation = event.calculateRotation()
+                val centroid = event.calculateCentroid(useCurrent = true)
+                val pan = event.calculatePan()
+                val zoom = event.calculateZoom()
+                val rotation = event.calculateRotation()
 
-            val centroidSize = event.calculateCentroidSize(useCurrent = false)
-            val hasMovement = pan != Offset.Zero
-                || abs(zoom - 1f) > 0.001f
-                || abs(rotation) > 0.01f
-                || centroidSize > viewConfiguration.touchSlop
+                val centroidSize = event.calculateCentroidSize(useCurrent = false)
+                val hasMovement = pan != Offset.Zero
+                    || abs(zoom - 1f) > 0.001f
+                    || abs(rotation) > 0.01f
+                    || centroidSize > viewConfiguration.touchSlop
 
-            if (hasMovement) {
-                onGesture(centroid, pan, zoom, rotation)
-                event.changes.forEach { if (it.positionChanged()) it.consume() }
-            }
-        } while (true)
+                if (hasMovement) {
+                    onGesture(centroid, pan, zoom, rotation)
+                    event.changes.forEach { if (it.positionChanged()) it.consume() }
+                }
+            } while (true)
+        } finally {
+            onGestureEnd()
+        }
     }
 }

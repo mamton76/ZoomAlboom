@@ -8,6 +8,7 @@ import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import com.mamton.zoomalbum.core.math.ResizeHandle
+import com.mamton.zoomalbum.domain.undo.InteractionKind
 
 /**
  * Gesture layer for interacting with selected canvas nodes.
@@ -35,6 +36,7 @@ fun Modifier.nodeInteractionGestures(
     onDrag: (screenDx: Float, screenDy: Float) -> Unit,
     onResizeDrag: (handle: ResizeHandle, screenDx: Float, screenDy: Float) -> Unit,
     onRotationDragPosition: (screenX: Float, screenY: Float) -> Unit,
+    onDragBegin: (kind: InteractionKind) -> Unit,
     onDragEnd: () -> Unit,
 ): Modifier = this.pointerInput(selectedNodeIds) {
     if (selectedNodeIds.isEmpty()) return@pointerInput
@@ -48,6 +50,9 @@ fun Modifier.nodeInteractionGestures(
         val handle = hitTestHandle(downX, downY)
         if (handle != null) {
             down.consume()
+            // Begin must precede the first delta — dragLoop awaits the next
+            // event before firing onDelta, so this ordering is guaranteed.
+            onDragBegin(InteractionKind.RESIZE)
             dragLoop(
                 onDelta = { dx, dy -> onResizeDrag(handle, dx, dy) },
                 onEnd = onDragEnd,
@@ -58,6 +63,7 @@ fun Modifier.nodeInteractionGestures(
         // Priority 2: rotation handle — emit absolute screen positions
         if (hitTestRotationHandle(downX, downY)) {
             down.consume()
+            onDragBegin(InteractionKind.ROTATE)
             positionLoop(
                 onPosition = { x, y -> onRotationDragPosition(x, y) },
                 onEnd = onDragEnd,
@@ -88,6 +94,7 @@ fun Modifier.nodeInteractionGestures(
                 val dy = change.position.y - downY
                 if (dx * dx + dy * dy > slopSq) {
                     change.consume()
+                    onDragBegin(InteractionKind.MOVE)
                     dragLoop(
                         onDelta = { mdx, mdy -> onDrag(mdx, mdy) },
                         onEnd = onDragEnd,

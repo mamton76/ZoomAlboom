@@ -11,6 +11,9 @@ class FileStorageHelper @Inject constructor(
     private fun sceneFile(albumId: Long): File =
         File(context.filesDir, "scene_$albumId.json")
 
+    private fun historyFile(albumId: Long): File =
+        File(context.filesDir, "history_$albumId.json")
+
     fun read(albumId: Long): String? {
         val file = sceneFile(albumId)
         return if (file.exists()) file.readText() else null
@@ -18,5 +21,14 @@ class FileStorageHelper @Inject constructor(
 
     fun write(albumId: Long, content: String) {
         sceneFile(albumId).writeText(content)
+    }
+
+    fun readHistory(albumId: Long): String? {
+        val file = historyFile(albumId)
+        return if (file.exists()) file.readText() else null
+    }
+
+    fun writeHistory(albumId: Long, content: String) {
+        historyFile(albumId).writeText(content)
     }
 }

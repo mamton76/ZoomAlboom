@@ -236,31 +236,49 @@ Key points:
 
 ## Undo/Redo Model (Snapshot-Based)
 
-`Deque<UndoEntry>`, capped at ~50-100 entries. Persisted to `filesDir/history_{albumId}.json` on each mutation, loaded on album open.
+Two `ArrayDeque<CanvasCommand>` (undo + redo) inside `CommandHistory`, capped at 50 entries. Persisted to `filesDir/history_{albumId}.json` on `ViewModel.onCleared()` (alongside scene graph save), loaded on album open.
 
 ```kotlin
+@Serializable
+enum class CommandKind { ADD, REMOVE, DELETE, DUPLICATE, MOVE, RESIZE, ROTATE }
+
+@Serializable
 data class CanvasCommand(
-    val nodeId: String,
-    val before: CanvasNode?,  // null = node didn't exist (this was an add)
-    val after: CanvasNode?,   // null = node was removed (this was a delete)
+    val before: List<CanvasNode>?,        // null = pure insert
+    val after: List<CanvasNode>?,         // null = pure delete
+    val beforeIndices: List<Int>? = null, // positions of `before` at capture (used for delete restore)
+    val kind: CommandKind,
+    val timestampMs: Long,
 )
 
-sealed interface UndoEntry {
-    data class Single(val command: CanvasCommand) : UndoEntry
-    data class Compound(val commands: List<CanvasCommand>) : UndoEntry
-}
+@Serializable
+data class HistorySnapshot(
+    val version: Int = 1,
+    val undo: List<CanvasCommand> = emptyList(),
+    val redo: List<CanvasCommand> = emptyList(),
+)
 ```
 
-Snapshot-based: captures full node state before/after, so any mutation (transform, property edit, add, delete) is covered without new command types.
+The list-shape of `before`/`after` collapses single- and multi-node operations into one command type — no separate `Single | Compound` variants needed. Every undoable user action emits exactly one `CanvasCommand`.
+
+**Invariants:**
+- `before == null && after != null` → insert (ADD, DUPLICATE).
+- `before != null && after == null` → delete (REMOVE, DELETE). `beforeIndices` records original positions so undo restores list ordering.
+- `before != null && after != null` → mutate (MOVE, RESIZE, ROTATE). Same length, same ids, paired positionally.
+- At least one side non-null.
 
 **Grouping:**
-- **Drag/resize gestures** — snapshot on gesture start, commit one `Single` command on gesture end. No intermediate commands.
-- **Multi-node operations** (e.g. delete frame + unparent children) — wrapped in `Compound` and undo/redo atomically.
+- **Drag / resize / rotate gestures** — `BeginInteraction(kind)` from the gesture detector snapshots selected nodes' state into `pendingSnapshot`; per-frame `MoveSelection`/`ResizeSelection`/`RotateSelection` actions mutate `_allNodes` as today; `FinishInteraction` (or canvas `onGestureEnd` for two-finger node rotation) emits one `CanvasCommand` with `before = pendingSnapshot` and `after = current selected slice in matching id order`. No-op gestures (where `before == after`) are dropped.
+- **Discrete mutations** (`addNode`, `removeNode`, `DeleteSelection`, `DuplicateSelection`) commit immediately with their kind.
 
 **Mechanics:**
-- `undo()` — pop from undo stack, restore `before` state for each command, push entry to redo stack.
-- `redo()` — pop from redo stack, apply `after` state, push to undo stack.
-- Any new command clears the redo stack.
+- `commit(cmd)` — push to undo, clear redo, refresh `canUndo`/`canRedo` flows.
+- `Undo` action — defensively commits any pending interaction first, then pops undo and applies in reverse direction.
+- `Redo` action — symmetric.
+- `applyCommand(cmd, reverse)` preserves list order: mutations replace by id in-place; deletes filter by id; pure inserts append; restored deletes re-insert at `beforeIndices`.
+- Selection policy after apply: pure insert → select inserted; pure delete → clear; mutation → select mutated.
+
+**Persistence limitation:** History saves on `onCleared()` only — survives normal app close/reopen but not process death. Same caveat applies to the scene graph; a debounced post-commit autosave for both is a separate concern.
 
 ## Repository Interfaces
 
@@ -291,4 +309,4 @@ Implementations in `data/repository/`, bound via Hilt `@Binds`.
 | `ide_workspaces` table | not present | new table |
 | `media_library` table | not present | new table |
 | Scene graph `viewport` | not saved | saved in JSON root |
-| Undo/Redo | not present | Snapshot-based `UndoEntry` deque, persisted to `history_{albumId}.json` |
+| Undo/Redo | not present | Snapshot-based list-shape `CanvasCommand` deque (cap 50), persisted to `history_{albumId}.json` on `onCleared()` |

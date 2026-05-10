@@ -42,6 +42,8 @@ fun CanvasScaffold(
     val ideState by ideViewModel.state.collectAsStateWithLifecycle()
 
     val frames by canvasViewModel.frames.collectAsStateWithLifecycle()
+    val canUndo by canvasViewModel.canUndo.collectAsStateWithLifecycle()
+    val canRedo by canvasViewModel.canRedo.collectAsStateWithLifecycle()
 
     val photoPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -68,6 +70,20 @@ fun CanvasScaffold(
                 lodFullCount = lodCounts[RenderDetail.Full] ?: 0,
                 lodStubCount = lodCounts[RenderDetail.Stub] ?: 0,
                 lodSimplifiedCount = lodCounts[RenderDetail.Simplified] ?: 0,
+                onUndo = if (canUndo) {
+                    {
+                        canvasViewModel.onAction(
+                            com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.Undo,
+                        )
+                    }
+                } else null,
+                onRedo = if (canRedo) {
+                    {
+                        canvasViewModel.onAction(
+                            com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.Redo,
+                        )
+                    }
+                } else null,
                 onNavigateBack = onNavigateBack,
                 onOpenFrameList = { showFrameList = true },
                 onOpenPanelConfig = { showPanelConfig = true },

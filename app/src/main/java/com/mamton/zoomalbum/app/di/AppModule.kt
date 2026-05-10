@@ -4,8 +4,10 @@ import android.content.Context
 import androidx.room.Room
 import com.mamton.zoomalbum.data.local.room.AlbumDao
 import com.mamton.zoomalbum.data.local.room.AppDatabase
+import com.mamton.zoomalbum.data.repository.HistoryRepositoryImpl
 import com.mamton.zoomalbum.data.repository.MediaRepositoryImpl
 import com.mamton.zoomalbum.data.repository.ProjectRepositoryImpl
+import com.mamton.zoomalbum.domain.repository.HistoryRepository
 import com.mamton.zoomalbum.domain.repository.MediaRepository
 import com.mamton.zoomalbum.domain.repository.ProjectRepository
 import dagger.Binds
@@ -40,4 +42,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindMediaRepository(impl: MediaRepositoryImpl): MediaRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindHistoryRepository(impl: HistoryRepositoryImpl): HistoryRepository
 }

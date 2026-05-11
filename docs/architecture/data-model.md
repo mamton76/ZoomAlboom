@@ -268,7 +268,7 @@ The scene graph is serialized as a `SceneGraph` root object wrapping `albumId`, 
   "albumId": 123,
   "camera": { "cx": 0, "cy": 0, "scale": 1.0, "rotation": 0 },
   // "background": { ... },  // planned — see §19
-  // "profile":    { ... },  // planned — see §22 (presentation-profile.md)
+  // "profile":    { ... },  // optional, omitted when null — see §22 (presentation-profile.md)
   "nodes": [
     {
       "id": "node_1",

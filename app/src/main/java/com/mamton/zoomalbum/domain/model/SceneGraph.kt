@@ -8,4 +8,5 @@ data class SceneGraph(
     val albumId: Long = 0L,
     val camera: Camera = Camera(),
     val nodes: List<CanvasNode> = emptyList(),
+    val profile: AlbumPresentationProfile? = null,
 )

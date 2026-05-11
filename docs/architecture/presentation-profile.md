@@ -28,7 +28,7 @@ data class AlbumPresentationProfile(
     val aspectRatio: AspectRatio,
     val orientation: Orientation,
     val defaultFitMode: FrameFitMode = FrameFitMode.CONTAIN,
-    val defaultOutsideMode: OutsideFrameMode = OutsideFrameMode.BLURRED_BACKDROP,
+    val defaultOutsideMode: OutsideFrameMode = OutsideFrameMode.ALBUM_BACKGROUND,
     val safeAreaInset: Float = 0.1f, // fractional inset on the shorter axis
 )
 

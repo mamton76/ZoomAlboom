@@ -87,14 +87,16 @@ Three modifiers stacked on the outermost canvas `Box`. Order is significant — 
 
 ### Layer 1 — `nodeInteractionGestures` (Initial pass)
 
-Active only when `selectedNodeIds` is non-empty (early-returns otherwise). Priority order on DOWN:
+Active only when `selectedNodeIds` is non-empty (early-returns otherwise). All three interactive zones use **deferred-consume**: do NOT consume DOWN, poll events at Initial pass, and only consume when the pointer moves beyond `touchSlop`. If the pointer lifts (or another layer consumes) before slop is exceeded, exit without consuming so the Main pass can handle tap/long-press.
 
-1. **Resize handle hit** → `down.consume()` immediately, enter `dragLoop` → `onResizeDrag`.
-2. **Rotation handle hit** → `down.consume()` immediately, enter `positionLoop` → `onRotationDragPosition`.
-3. **Selected node body hit** → **deferred-consume**: do NOT consume DOWN. Poll events at Initial pass; if pointer moves beyond `touchSlop`, consume + `dragLoop` → `onDrag`. If pointer lifts or another layer consumes first, exit without consuming so Main pass can handle tap/long-press.
+Priority order on DOWN:
+
+1. **Resize handle hit** → deferred-consume; on slop → `dragLoop` → `onResizeDrag`.
+2. **Rotation handle hit** → deferred-consume; on slop → `positionLoop` → `onRotationDragPosition`.
+3. **Selected node body hit** → deferred-consume; on slop → `dragLoop` → `onDrag`.
 4. **No hit** → fall through (no consumption).
 
-The deferred-consume rule for body hits is what enables tap-on-selected (collapse multi-select) and long-press-on-selected (toggle out of selection). Without it, the Initial pass would swallow every press on a selected node and reroute it as a move drag.
+The deferred-consume rule is what enables tap-on-selected (collapse multi-select) and long-press-on-selected (toggle out of selection). It also matters for handles specifically: the handle touch radius (48 px) often extends over a node's body, so an immediate-consume on a handle hit would silently swallow taps that the user intends as "select this one node from the group."
 
 ### Layer 2 — `tapAndLongPressGestures` (Main pass)
 

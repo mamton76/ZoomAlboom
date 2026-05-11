@@ -46,7 +46,7 @@ object CanvasNodeFactory {
         val initialScale = 1f / camera.scale
 
         return CanvasNode.Frame(
-            id = "frame_${System.currentTimeMillis()}",
+            id = "frame_${System.currentTimeMillis()}_${Random.nextInt(Int.MAX_VALUE).toString(36)}",
             transform = Transform(
                 cx = viewport.centerX,
                 cy = viewport.centerY,
@@ -103,7 +103,7 @@ object CanvasNodeFactory {
 
         val initialScale = 1f / camera.scale
         return CanvasNode.Media(
-            id = "media_${System.currentTimeMillis()}",
+            id = "media_${System.currentTimeMillis()}_${Random.nextInt(Int.MAX_VALUE).toString(36)}",
             transform = Transform(
                 cx = viewport.centerX,
                 cy = viewport.centerY,

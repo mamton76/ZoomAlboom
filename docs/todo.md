@@ -15,7 +15,7 @@ Gap between current implementation and target architecture.
 
 Work from foundation toward features. Do not jump to widgets, export, or appearance editor before the scene graph and media foundation are stable.
 
-1. **Scene graph root wrapper** (§1.3) — `albumId`, `camera`, `albumBackground`, `nodes`, editor metadata.
+1. **Scene graph root wrapper** (§1.3) — `albumId`, `camera`, `nodes`, `profile` (§22), `albumBackground` (§19), editor metadata (§13/§14).
 2. **Save/restore camera position** (§1.3) — on album open/close.
 3. **Minimal media library** (§1.4–1.5) — `media_library` table: id, album_id, sourceUri, mediaType, status, intrinsic dimensions.
 4. **Media validation + missing placeholder** (§4.4) — check `sourceUri` on album open, show placeholder for `MISSING`.
@@ -689,16 +689,16 @@ See [architecture/presentation-profile.md](architecture/presentation-profile.md)
 **Depends on §1.3** (scene graph root wrapper) — the profile lives in the JSON root alongside `albumBackground`.
 
 ### 22.1 Domain model
-- [ ] `AlbumPresentationProfile` — aspectRatio, orientation, defaultFitMode, defaultOutsideMode, safeAreaInset
-- [ ] `AspectRatio` sealed class — R_16_9, R_9_16, R_4_3, R_3_4, Square, Free, Custom(w, h)
-- [ ] `Orientation` enum — Landscape, Portrait
-- [ ] `FrameFitMode` enum — CONTAIN (MVP default), COVER, STRETCH
-- [ ] `OutsideFrameMode` enum — ALBUM_BACKGROUND, SOLID_FILL, BLURRED_BACKDROP (last is post-MVP)
-- [ ] All `@Serializable`
+- [x] `AlbumPresentationProfile` — aspectRatio, orientation, defaultFitMode, defaultOutsideMode, safeAreaInset
+- [x] `AspectRatio` sealed class — R_16_9, R_9_16, R_4_3, R_3_4, Square, Free, Custom(w, h)
+- [x] `Orientation` enum — Landscape, Portrait
+- [x] `FrameFitMode` enum — CONTAIN (MVP default), COVER, STRETCH
+- [x] `OutsideFrameMode` enum — ALBUM_BACKGROUND, SOLID_FILL, BLURRED_BACKDROP (last is post-MVP)
+- [x] All `@Serializable`
 
 ### 22.2 Scene graph integration
-- [ ] Add `profile: AlbumPresentationProfile?` field to `SceneGraph` root (nullable for back-compat)
-- [ ] `SceneGraphSerializer` reads/writes profile (`ignoreUnknownKeys` covers old files)
+- [x] Add `profile: AlbumPresentationProfile?` field to `SceneGraph` root (nullable for back-compat)
+- [x] `SceneGraphSerializer` reads/writes profile (`ignoreUnknownKeys` covers old files)
 
 ### 22.3 Camera math
 - [ ] Parameterize `Transform.toCamera()` by `FrameFitMode` + `safeAreaInset`

@@ -47,52 +47,63 @@ fun Modifier.nodeInteractionGestures(
         val downX = down.position.x
         val downY = down.position.y
 
+        // All three interactive zones use deferred-consume: wait for movement
+        // beyond touchSlop before committing to a drag. Until then, events
+        // flow through to the Main pass so taps can reach tap/long-press
+        // handlers — needed for tap-to-collapse on multi-selection and
+        // long-press-to-toggle on selected nodes.
+        val slopSq = viewConfiguration.touchSlop * viewConfiguration.touchSlop
+
         // Priority 1: resize handle
         val handle = hitTestHandle(downX, downY)
         if (handle != null) {
-            down.consume()
-            // Begin must precede the first delta — dragLoop awaits the next
-            // event before firing onDelta, so this ordering is guaranteed.
-            onDragBegin(InteractionKind.RESIZE)
-            dragLoop(
-                onDelta = { dx, dy -> onResizeDrag(handle, dx, dy) },
-                onEnd = onDragEnd,
-            )
-            return@awaitEachGesture
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                if (event.changes.size > 1) return@awaitEachGesture
+                val change = event.changes.firstOrNull() ?: return@awaitEachGesture
+                if (change.changedToUp() || change.isConsumed) return@awaitEachGesture
+                val dx = change.position.x - downX
+                val dy = change.position.y - downY
+                if (dx * dx + dy * dy > slopSq) {
+                    change.consume()
+                    onDragBegin(InteractionKind.RESIZE)
+                    dragLoop(
+                        onDelta = { mdx, mdy -> onResizeDrag(handle, mdx, mdy) },
+                        onEnd = onDragEnd,
+                    )
+                    return@awaitEachGesture
+                }
+            }
         }
 
         // Priority 2: rotation handle — emit absolute screen positions
         if (hitTestRotationHandle(downX, downY)) {
-            down.consume()
-            onDragBegin(InteractionKind.ROTATE)
-            positionLoop(
-                onPosition = { x, y -> onRotationDragPosition(x, y) },
-                onEnd = onDragEnd,
-            )
-            return@awaitEachGesture
-        }
-
-        // Priority 3: selected node body → deferred-consume move.
-        //
-        // Do NOT consume DOWN immediately. If we did, tap/long-press on an
-        // already-selected node would never reach the Main pass — the user
-        // could not tap to collapse a multi-selection, and could not
-        // long-press to toggle a node out of the selection. Instead, watch
-        // for movement beyond touchSlop: once the pointer actually drags,
-        // we commit to a move gesture (consume + enter dragLoop). Until
-        // then, events flow through to the Main pass unchanged.
-        if (hitTestBody(downX, downY)) {
-            val slopSq = viewConfiguration.touchSlop * viewConfiguration.touchSlop
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Initial)
-                // Second finger arrived → two-finger canvas gesture; let it through.
                 if (event.changes.size > 1) return@awaitEachGesture
                 val change = event.changes.firstOrNull() ?: return@awaitEachGesture
-                if (change.changedToUp() || change.isConsumed) {
-                    // Released without moving, or another layer consumed —
-                    // let Main pass handle tap/long-press.
+                if (change.changedToUp() || change.isConsumed) return@awaitEachGesture
+                val dx = change.position.x - downX
+                val dy = change.position.y - downY
+                if (dx * dx + dy * dy > slopSq) {
+                    change.consume()
+                    onDragBegin(InteractionKind.ROTATE)
+                    positionLoop(
+                        onPosition = { x, y -> onRotationDragPosition(x, y) },
+                        onEnd = onDragEnd,
+                    )
                     return@awaitEachGesture
                 }
+            }
+        }
+
+        // Priority 3: selected node body
+        if (hitTestBody(downX, downY)) {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                if (event.changes.size > 1) return@awaitEachGesture
+                val change = event.changes.firstOrNull() ?: return@awaitEachGesture
+                if (change.changedToUp() || change.isConsumed) return@awaitEachGesture
                 val dx = change.position.x - downX
                 val dy = change.position.y - downY
                 if (dx * dx + dy * dy > slopSq) {

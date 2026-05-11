@@ -14,10 +14,12 @@ import com.mamton.zoomalbum.core.math.ResizeHandle
 import com.mamton.zoomalbum.core.math.TransformUtils
 import com.mamton.zoomalbum.core.math.ViewportCuller
 import com.mamton.zoomalbum.core.mvi.Intent
+import com.mamton.zoomalbum.domain.model.AlbumPresentationProfile
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
-import com.mamton.zoomalbum.domain.model.SceneGraph
 import com.mamton.zoomalbum.domain.model.RenderDetail
+import com.mamton.zoomalbum.domain.model.SceneGraph
+import com.mamton.zoomalbum.domain.model.Transform
 import com.mamton.zoomalbum.domain.model.withTransform
 import com.mamton.zoomalbum.domain.repository.HistoryRepository
 import com.mamton.zoomalbum.domain.repository.MediaRepository
@@ -58,7 +60,8 @@ data class CanvasState(
     val selectedNodeIds: Set<String> = emptySet(),
     val selectionRect: BoundingBox? = null,
     /** Group selection bounding rect — computed on selection change, rotation accumulated. */
-    val groupSelectionTransform: com.mamton.zoomalbum.domain.model.Transform? = null,
+    val groupSelectionTransform: Transform? = null,
+    val profile: AlbumPresentationProfile? = null,
 )
 
 // ── Actions ───────────────────────────────────────────────────────────
@@ -445,11 +448,21 @@ class CanvasViewModel @Inject constructor(
                 val ids = _state.value.selectedNodeIds
                 val sources = _allNodes.value.filter { it.id in ids }
                 if (sources.isEmpty()) return
+                // Diagonal offset constant in screen pixels — visible at any zoom,
+                // rotated to match camera so the shift always reads as down-right on screen.
+                val cam = _state.value.camera
+                val shiftWorld = DUPLICATE_SHIFT_PX / cam.scale
+                val (dx, dy) = TransformUtils.rotateVector(shiftWorld, shiftWorld, -cam.rotation)
+                // Single timestamp + per-copy index — currentTimeMillis() in a tight loop
+                // returns the same value for every copy, and substringBefore("_copy")
+                // strips prior copy suffixes, so sources sharing a base name would
+                // otherwise collapse to identical ids.
+                val ts = System.currentTimeMillis()
                 var z = nextZIndex()
-                val copies = sources.map { node ->
+                val copies = sources.mapIndexed { index, node ->
                     val t = node.transform
-                    val newId = "${node.id.substringBefore("_copy")}_copy_${System.currentTimeMillis()}"
-                    val newTransform = t.copy(cx = t.cx + 50f, cy = t.cy + 50f, zIndex = z)
+                    val newId = "${node.id.substringBefore("_copy")}_copy_${ts}_$index"
+                    val newTransform = t.copy(cx = t.cx + dx, cy = t.cy + dy, zIndex = z)
                     z += 1f
                     node.withTransform(newTransform).let { copy ->
                         when (copy) {
@@ -459,12 +472,16 @@ class CanvasViewModel @Inject constructor(
                     }
                 }
                 _allNodes.update { it + copies }
+                val newIds = copies.map { c -> c.id }.toSet()
                 _state.update {
                     it.copy(
-                        selectedNodeIds = copies.map { c -> c.id }.toSet(),
+                        selectedNodeIds = newIds,
                         totalNodeCount = _allNodes.value.size,
                     )
                 }
+                // Rebuild group rect for the new selection — without this the rect stays
+                // pinned at the originals' old position and handles render in the wrong place.
+                recomputeGroupTransform(newIds)
                 commit(
                     CanvasCommand(
                         before = null,
@@ -604,6 +621,7 @@ class CanvasViewModel @Inject constructor(
         super.onCleared()
         val nodes = _allNodes.value
         val camera = _state.value.camera
+        val profile = _state.value.profile
         val historySnapshot = history.snapshot()
         if (albumId != 0L) {
             // Fire-and-forget save — ViewModel scope is cancelled but we use
@@ -612,7 +630,12 @@ class CanvasViewModel @Inject constructor(
                 try {
                     mediaRepository.saveSceneGraph(
                         albumId,
-                        SceneGraph(albumId = albumId, camera = camera, nodes = nodes),
+                        SceneGraph(
+                            albumId = albumId,
+                            camera = camera,
+                            nodes = nodes,
+                            profile = profile,
+                        ),
                     )
                     historyRepository.save(albumId, historySnapshot)
                 } catch (_: Exception) {
@@ -721,6 +744,7 @@ class CanvasViewModel @Inject constructor(
             _state.update {
                 it.copy(
                     camera = sceneGraph.camera,
+                    profile = sceneGraph.profile,
                     totalNodeCount = sceneGraph.nodes.size,
                     isLoading = false,
                 )
@@ -865,5 +889,7 @@ class CanvasViewModel @Inject constructor(
         const val HANDLE_TOUCH_RADIUS_PX = 48f
         /** Rotation handle offset above node top in screen pixels. */
         const val ROTATION_HANDLE_OFFSET_PX = 40f
+        /** Diagonal offset (screen px) applied to duplicated nodes. */
+        const val DUPLICATE_SHIFT_PX = 40f
     }
 }

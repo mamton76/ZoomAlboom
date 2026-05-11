@@ -41,6 +41,7 @@ com.mamton.zoomalbum/
 **RepositoryModule** (`@InstallIn(SingletonComponent)`, `abstract class`):
 - `bindProjectRepository()` — `ProjectRepositoryImpl` -> `ProjectRepository`.
 - `bindMediaRepository()` — `MediaRepositoryImpl` -> `MediaRepository`.
+- `bindHistoryRepository()` — `HistoryRepositoryImpl` -> `HistoryRepository`.
 
 ### Injection in ViewModels
 

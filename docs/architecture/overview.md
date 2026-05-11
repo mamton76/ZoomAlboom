@@ -36,14 +36,15 @@ com.mamton.zoomalbum/
 - **`designsystem/`** — `Color.kt` (dark-first palette), `Theme.kt` (Material 3 `ZoomAlbumTheme`).
 
 ### domain/
-- **Models:** `Transform`, `CanvasNode` (sealed: `Frame` | `Media`), `AlbumMeta`, `AlbumData`, `MediaType` (Image, Video, Text; future: Audio, Sticker, AnimatedPhoto, VectorShape).
-- **Repository interfaces:** `ProjectRepository` (albums CRUD), `MediaRepository` (scene graph load/save).
+- **Models:** `Transform`, `CanvasNode` (sealed: `Frame` | `Media`), `AlbumMeta`, `AlbumData`, `MediaType` (IMAGE, VIDEO, AUDIO, TEXT, STICKER, VECTOR_SHAPE are MVP; ANIMATED_PHOTO is post-MVP).
+- **Repository interfaces:** `ProjectRepository` (albums CRUD), `MediaRepository` (scene graph load/save), `HistoryRepository` (undo history load/save).
+- **Undo/Redo:** `domain/undo/` — `CanvasCommand`, `CommandKind`, `CommandHistory`, `HistorySnapshot`, `InteractionKind`.
 - **Use cases:** `CalculateViewportIntersectionsUseCase`, `SaveSceneGraphUseCase`.
 
 ### data/
 - **Room:** `AppDatabase` (v1), `AlbumEntity`, `AlbumDao` (observe, insert, delete).
-- **File I/O:** `FileStorageHelper` (reads/writes `scene_$albumId.json`), `SceneGraphSerializer` (kotlinx-serialization JSON).
-- **Repo impls:** `ProjectRepositoryImpl`, `MediaRepositoryImpl`.
+- **File I/O:** `FileStorageHelper` (reads/writes `scene_$albumId.json`, `history_$albumId.json`), `SceneGraphSerializer`, `HistorySerializer` (kotlinx-serialization JSON).
+- **Repo impls:** `ProjectRepositoryImpl`, `MediaRepositoryImpl`, `HistoryRepositoryImpl`.
 
 ### feature/
 | Feature | Responsibility |
@@ -78,9 +79,9 @@ Selection state, gestures, and the gesture stack in [selection.md](selection.md)
 3. `ViewportCuller` filters visible nodes on `Dispatchers.Default`.
 4. `CanvasScreen` applies **one `graphicsLayer`** (translate + scale + rotate, origin `(0,0)`) to an inner `Box`.
 5. `CanvasNodeRenderer` draws each visible node via per-node `graphicsLayer`:
-   - `translationX = t.cx - renderW/2` (center → top-left offset)
-   - `transformOrigin = TransformOrigin(0.5f, 0.5f)` (rotation around visual center)
-   - `drawBehind` paints fill/border at `Size(renderW, renderH)`. No `Modifier.size()` — avoids Compose Constraints limits.
+   - `translationX = t.cx, translationY = t.cy` — graphicsLayer origin at the node's world-space center
+   - `transformOrigin = TransformOrigin(0f, 0f)` — rotation around the origin, which is the center
+   - `drawBehind` paints fill/border at `topLeft = Offset(-renderW/2, -renderH/2)`, `Size(renderW, renderH)`. No `Modifier.size()` — avoids Compose Constraints limits.
 
 **Key insight:** all pan/zoom/rotation is a single GPU transform — child nodes never recompose during gestures.
 
@@ -107,7 +108,7 @@ See [rendering.md](rendering.md) § IDE Overlay.
 The default UI uses minimal chrome to maximize canvas visibility. Three modes drive the UI surface:
 
 1. **Navigate mode** (default) — canvas takes ~100% of screen. `CanvasTopBar` (album name, node count HUD, zoom/rotation/xy, back, ☰ frame list, ⚙ panel config) and a FAB [+] bottom-right.
-2. **Add content mode** (FAB tap) — `AddContentBottomSheet` slides up with a content type picker (Frame + all `MediaType` variants: Image, Video, Text; future: Audio, Sticker, AnimatedPhoto, VectorShape). Canvas remains visible behind the sheet.
+2. **Add content mode** (FAB tap) — `AddContentBottomSheet` slides up with a content type picker (Frame + media types: Photo, Video, Audio, Text, Sticker, Vector; future: AnimatedPhoto). Canvas remains visible behind the sheet.
 3. **Object selected mode** (node tap) — `ContextualActionBar` appears at the bottom (stub; awaits §4.2 node interaction). Disappears on deselection.
 
 **Bottom sheets** (`AddContentBottomSheet`, `FrameListBottomSheet`) are the primary UI surface for canvas-first users, alongside the opt-in IDE panel system.

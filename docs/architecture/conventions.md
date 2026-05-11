@@ -15,7 +15,8 @@
 
 | Adding... | Location | Example |
 |-----------|----------|---------|
-| Domain model | `domain/model/` | `CanvasCommand.kt` |
+| Domain model | `domain/model/` | `CanvasNode.kt` |
+| Undo/history model | `domain/undo/` | `CanvasCommand.kt` |
 | Repository interface | `domain/repository/` | `MediaLibraryRepository.kt` |
 | Use case | `domain/usecase/` | `SaveSceneGraphUseCase.kt` |
 | Room entity | `data/local/room/` | `MediaLibraryEntity.kt` |

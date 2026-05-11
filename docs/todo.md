@@ -21,6 +21,7 @@ Gap between current implementation and target architecture.
 - [x] `Media.uri` -> `mediaRefId` (FK to `media_library`)
 - [x] Add `tags: List<String>` to `CanvasNode.Media`
 - [x] Add `MediaType.AUDIO` variant
+- [x] Add `MediaType.TEXT`, `STICKER`, `VECTOR_SHAPE` variants (MVP scope)
 - [x] `Transform.x/y` → `cx/cy` (center-based world coords, not top-left)
 - [x] `Transform.w/h` → actual world-unit size (not normalized aspect ratio)
 - [x] `Transform.renderW`/`renderH` computed properties added
@@ -139,6 +140,8 @@ Snapshot-based: each command captures `before`/`after` node state (not a sealed 
 - [ ] Media property editing (label/tags via contextual UI, depends on §5 Object selected mode)
 - [ ] Video picker + thumbnail extraction for video nodes
 - [ ] Text node creation (inline text input → `CanvasNode.Media` with `MediaType.TEXT`)
+- [ ] Sticker picker + place sticker on canvas (`MediaType.STICKER`)
+- [ ] Vector shape placement (`MediaType.VECTOR_SHAPE`)
 
 ### 4.5 Viewport culling upgrade
 - [x] Brute-force AABB (`ViewportCuller` in `core/math/SpatialIndex.kt`)
@@ -150,7 +153,7 @@ Snapshot-based: each command captures `before`/`after` node state (not a sealed 
 - [x] `LodResolver` object (`core/math/LodResolver.kt`) — screen-size cull + semantic zoom filtering
 - [x] Default policies for Frame and Media node types
 - [x] Debug logging in `LodResolver` (tag: `LodResolver`)
-- [ ] Wire `LodResolver` into rendering pipeline (skip/downgrade nodes based on `RenderDetail`)
+- [x] Wire `LodResolver` into rendering pipeline (skip/downgrade nodes based on `RenderDetail`)
 - [ ] Persist `visibilityPolicy` in scene graph JSON
 
 ---
@@ -495,6 +498,168 @@ See [data-model.md § AlbumBackground & FrameBackground](architecture/data-model
 - [ ] `AnchorMode.FrameLocked` — background local to a frame, transformed with it
 - [ ] User layer backgrounds
 - [ ] Background editing UI (color picker, texture picker, tile controls)
+
+---
+
+## 20. Media Appearance (Non-Destructive Editing)
+
+Non-destructive visual styling of media objects. The original source file is never modified.
+
+**Formula:** `source media + MediaAppearance = rendered media object on canvas`
+
+See [data-model.md § MediaAppearance](architecture/data-model.md#mediaappearance) for full type definitions.  
+See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD § 11.8](product/PRD.md#118-media-appearance-non-destructive-editing) for product requirements.
+
+### 20.1 Domain model
+- [ ] `MediaAppearance` — opacity, cornerRadius, crop, border, shadow, colorAdjustments, overlays, frameOverlay, caption
+- [ ] `CropSettings` + `CropMode` enum (Fit, Fill, Manual, Stretch) with focal point
+- [ ] `BorderStyle`, `ShadowStyle`
+- [ ] `MediaColorAdjustments` — brightness, contrast, saturation, temperature, tint, exposure, highlights, shadows, blur, sharpen, vignette
+- [ ] `MediaOverlay` — id, kind, assetUri, opacity, blendMode, fitMode, rotation, scale, offset, isEnabled
+- [ ] `OverlayKind` enum (Texture, Filter, Frame, LightLeak, Dust, Scratches, Vignette, Decoration)
+- [ ] `OverlayBlendMode` enum (Normal, Multiply, Screen, Overlay, SoftLight, Darken, Lighten)
+- [ ] `FrameOverlay` — assetUri, opacity, mode (Stretch/NineSlice), slice insets, content insets
+- [ ] `MediaStylePreset` — id, name, appearance (saved recipe)
+- [ ] Add `appearance: MediaAppearance?` to `CanvasNode.Media` (nullable — null = default rendering)
+- [ ] All types `@Serializable`; `ignoreUnknownKeys` handles old nodes
+
+### 20.2 Rendering pipeline
+- [ ] Per-node rendering order: decode + crop → color adjustments → overlays (in order, with blend modes) → frame overlay → corner radius + border + shadow + opacity
+- [ ] `CropMode.Fit` — letterbox within bounding box
+- [ ] `CropMode.Fill` — crop to fill bounding box; respect focal point
+- [ ] `CropMode.Manual` — pan/zoom inside bounding box (user-controlled)
+- [ ] `CropMode.Stretch` — stretch to bounds ignoring aspect ratio
+- [ ] Raster overlay rendering — `drawImage` with blend mode via `androidx.compose.ui.graphics.BlendMode`
+- [ ] Nine-slice frame rendering — draw 9 regions independently (corners unscaled, edges scaled one axis)
+- [ ] `FrameOverlay.contentInsets` — defines usable content area (e.g. Polaroid caption space)
+- [ ] LOD: skip overlay/filter rendering below a threshold zoom (stub view only)
+
+### 20.3 Style presets
+- [ ] `MediaStylePreset` storage — per-album (scene graph) and/or global (app prefs)
+- [ ] `CanvasAction.SaveAppearanceAsPreset(name: String)`
+- [ ] `CanvasAction.ApplyPreset(presetId: String)` — applies to current selection
+- [ ] `CanvasAction.CopyAppearance` / `PasteAppearance` — clipboard for `MediaAppearance` value
+- [ ] `CanvasAction.ResetAppearance` — sets appearance to null (default rendering)
+- [ ] All appearance mutations are undoable via existing snapshot undo
+
+### 20.4 Rendered derivatives
+- [ ] `CanvasAction.SaveRenderedDerivative` — flatten source + appearance into a new image file
+- [ ] Output settings: format (PNG/JPEG/WebP), quality, resolution strategy (source res or display res ×2)
+- [ ] Store result in `filesDir/media/<albumId>/rendered/`
+- [ ] Register in `media_library` with `origin = RENDERED_DERIVATIVE`, `sourceAssetId`, `recipeHash`
+- [ ] `CanvasAction.CreateRenderedCopyOnCanvas` — new node next to original, references derivative
+- [ ] `CanvasAction.ReplaceWithRenderedImage` — replace node's mediaRefId with derivative id (undoable; preserve transform/zIndex/tags)
+- [ ] `SaveToDeviceGallery` — export rendered image to system gallery
+
+### 20.5 UI
+- [ ] Appearance panel / properties sheet for selected media node
+- [ ] Overlay list with enable/disable toggle, opacity slider, blend mode picker per overlay
+- [ ] Frame overlay picker (browse built-in + user assets)
+- [ ] Color adjustments sliders
+- [ ] Crop mode selector + manual crop handle in canvas
+- [ ] Context menu actions: Copy Appearance, Paste Appearance, Save as Preset, Reset Appearance, Save Edited Image
+
+### MVP scope (from spec)
+Required: opacity, crop (Fit/Fill/Manual), cornerRadius, border, shadow, raster overlays (PNG/WebP) with opacity + blend mode, FrameOverlay (Stretch), copy/paste appearance, save as preset, save rendered derivative as new asset.
+
+Nice to have in MVP: NineSlice frame, basic color adjustments, CreateRenderedCopyOnCanvas, ReplaceWithRenderedImage, ResetAppearance.
+
+### Post-MVP
+- [ ] AI auto-enhance, background removal, old photo restoration, B&W colorization
+- [ ] Animated overlays (Live Photo / Harry Potter newspaper style)
+- [ ] Batch preset application across selection or entire album
+- [ ] Batch rendering
+- [ ] Advanced masks (non-rectangular crop)
+- [ ] Caption styling (`CaptionStyle` field)
+
+---
+
+## 21. Widget System
+
+Canvas-native smart objects with data binding and navigation. Widgets are `CanvasNode.Widget` entries — they participate in selection, drag, resize, LOD, and viewport culling like any other node, but also render structured album data and provide clickable navigation targets.
+
+See [data-model.md § Widget System](architecture/data-model.md#widget-system) for domain types.  
+See [PRD § 8.8](product/PRD.md#88-widget-system) and [PRD § 11.9](product/PRD.md#119-widget-system) for product requirements.
+
+**This is a post-MVP milestone.** MVP infrastructure first, then individual widget types incrementally.
+
+### 21.1 Infrastructure (prerequisite for all widgets)
+- [ ] `CanvasNode.Widget` sealed variant — `widgetType`, `config: WidgetConfig`, `dataSource: WidgetDataSource`, `links: List<WidgetLink>`
+- [ ] `WidgetType` enum (see data-model.md for full list)
+- [ ] `WidgetDataSource` sealed class — AlbumNodes, AlbumTags, AlbumDates, AlbumPlaces, StaticConfig
+- [ ] `WidgetLink` + `NavigationTarget` sealed class — ToFrame, ToNode, ToAlbum, ToFilteredView, ToExternalUri
+- [ ] `WidgetConfig` per-type sealed class; serialized as JSON blob with type discriminator
+- [ ] `CanvasWidgetRenderer<TConfig>` interface — `Render(widget, config, renderDetail, onNavigate)`
+- [ ] Widget renderer registry — maps `WidgetType` to its `CanvasWidgetRenderer`
+- [ ] Widget hit-test: distinguish outer bounds (node selection) from inner element clicks (navigation)
+- [ ] Navigation dispatch from widget element click in View/Present mode → camera transition to target
+- [ ] LOD support: Stub = placeholder rectangle; Preview = simplified; Full = interactive
+- [ ] `CanvasNode.Widget` serialization + `ignoreUnknownKeys` for forward compat
+- [ ] Widget undo: add/remove widget uses existing snapshot undo; config changes are undoable
+
+### 21.2 Core navigation widgets (MVP widget set)
+- [ ] **Portal** — clickable canvas object linking to any `NavigationTarget`; simplest widget type
+- [ ] **Frame Navigator** — canvas-native table of contents showing frame hierarchy; click → camera jump
+- [ ] **Tag Cloud** — visual tag frequency map; click tag → filtered view or frame
+- [ ] **Highlights / Media Gallery** — curated photo grid/strip; click item → source frame
+- [ ] **Calendar** — month/year grid with album dates highlighted; click day/month → frame
+- [ ] **Map** — place markers from album data; click marker → frame; optional route lines
+
+### 21.3 People & relationships widgets
+- [ ] **People** — person avatars with photo count; click → person frame
+- [ ] **Family Tree** — genealogy graph with relationship lines; click person → frame
+
+### 21.4 Travel album widgets
+- [ ] **Route** — trip route with waypoints; click segment/city → frame
+- [ ] **Places / Cities List** — structured list with date range + photo count per place
+- [ ] **Trip Calendar** — travel-specific calendar; shows where family was each day
+- [ ] **Travel Highlights** — best photo per city / day
+
+### 21.5 Family / child / school album widgets
+- [ ] **Milestone Timeline** — key events on a chronological axis; click → frame
+- [ ] **Growth Timeline** — age-based view (pregnancy → birth → years → school)
+- [ ] **Milestones Card Grid** — grid of milestone cards (first steps, first day, etc.)
+- [ ] **Classmates / Teachers** — people widget specialized for school years
+- [ ] **Drawings / Crafts Gallery** — media gallery filtered by art/craft tag
+- [ ] **Certificates / Achievements** — achievement cards with date
+
+### 21.6 Cookbook widgets
+- [ ] **Recipe Index** — searchable list; filter by person/ingredient/season/category; click → recipe frame
+- [ ] **Recipe Card** — structured single-recipe widget (title, ingredients, steps, photos)
+- [ ] **Recipe Steps** — step-by-step cooking widget with photos; designed for cook mode
+- [ ] **Ingredients** — ingredient → recipe list; click ingredient → recipes
+- [ ] **Seasons** — recipes organized by season/holiday; click → frame/filter
+- [ ] **Meal Calendar** — calendar specialized for food history
+- [ ] **Map of Tastes** — map widget with recipe-origin regions; click → recipe cluster
+- [ ] **Recipe People** — recipes by family member / author
+- [ ] **Incomplete Recipes** — workflow widget: drafts missing photos/ingredients/steps
+
+### 21.7 AI Diary integration widgets
+- [ ] **Period Summary** — AI-generated day/week/month/year summary; click → filtered frame
+- [ ] **Memory Resurfacing** — "1 year ago / on this day" strip; click → source frame
+- [ ] **Recent Entries** — latest diary entries or edited album notes
+- [ ] **Needs Review** — AI-generated items awaiting user confirmation
+- [ ] **Statistics** — compact summary card (entries, photos, places, people counts)
+
+### 21.8 Educational / project widgets
+- [ ] **Concept Map** — concepts + dependency links; click concept → detail frame
+- [ ] **Process Timeline** — project stages with before/after and media evidence
+- [ ] **Checklist** — interactive checklist; items can link to frames
+- [ ] **Before / After** — side-by-side or slider comparison widget
+- [ ] **Asset Strip** — media strip filtered by frame/person/date/tag
+
+### 21.9 Wizard integration
+- [ ] Album wizard can auto-generate an overview frame populated with widgets linked to nested frames
+- [ ] Travel wizard: main frame = Map + Trip Calendar + Highlights + Tag Cloud + Cities List + AI Summary; nested frames per city/day
+- [ ] Cookbook wizard: overview = Family Table + Recipe Index + Ingredients + Seasons + People; nested frames per recipe
+- [ ] Child/school wizard: overview = Growth Timeline + Milestones + People + Calendar + Highlights; nested frames per year/event
+
+### Post-MVP
+- [ ] AI auto-layout (wizard places widgets and frames from imported data automatically)
+- [ ] Timer / Cook mode widget (interactive, hands-free kitchen use)
+- [ ] Animated widget transitions
+- [ ] Batch widget data refresh when album content changes
+- [ ] Widget marketplace / sharing presets
 
 ---
 

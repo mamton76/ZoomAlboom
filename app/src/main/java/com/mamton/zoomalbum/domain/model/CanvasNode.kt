@@ -34,7 +34,17 @@ sealed class CanvasNode {
 }
 
 @Serializable
-enum class MediaType { IMAGE, VIDEO, AUDIO }
+enum class MediaType {
+    IMAGE,        // raster photo/image
+    VIDEO,        // video clip
+    AUDIO,        // audio clip
+    TEXT,         // inline text block
+    STICKER,      // static sticker/illustration
+    VECTOR_SHAPE, // SVG or vector primitive
+
+    // future
+    ANIMATED_PHOTO, // Live Photo / animated GIF
+}
 
 /** Returns a copy of this node with the given [transform], preserving all other fields. */
 fun CanvasNode.withTransform(transform: Transform): CanvasNode = when (this) {

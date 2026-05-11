@@ -115,7 +115,8 @@ All child nodes are positioned in world coordinates inside this Box. The GPU app
   - **Gotcha:** `Spacer` has 0×0 layout size. `TransformOrigin(0.5f, 0.5f)` on a 0×0 composable
     computes pivot = `(0,0)` (not center), which rotates around the top-left corner of the visual
     rect and shifts the center. Always use `TransformOrigin(0f, 0f)` with this pattern.
-- **`Media`** — placeholder (Coil image loading deferred to Stage 2).
+  - LOD tiers: `Hidden` → skip; `Stub`/`Preview` → `StubRenderer` (solid rect); `Simplified` → border-only; `Full` → rounded filled rect + border.
+- **`Media`** — same `Spacer + graphicsLayer + drawBehind` pattern. LOD tiers: `Hidden` → skip; `Stub`/`Preview` → `MediaPlaceholder` (dashed border); `Simplified` → filled placeholder; `Full` → `FullMediaRenderer` using Coil 3 (`rememberAsyncImagePainter`) with `drawBehind` + `clipRect`.
 
 Nodes use **`graphicsLayer`** for position and rotation (GPU-only, no Compose Constraints limits) and **`drawBehind`** for painting at exact world-coordinate dimensions. This avoids the ~16383dp Compose `Constraints` limit that `Modifier.size()` hits at extreme zoom levels.
 
@@ -177,7 +178,7 @@ Three modes layer over the canvas depending on user action:
 
 **2. Add content mode** (triggered by FAB [+])
 - Bottom Sheet slides up from the bottom edge
-- Contains: content type picker (Frame + all `MediaType` variants: Image, Video, Text; future: Audio, Sticker, AnimatedPhoto, VectorShape) + media library browser
+- Contains: content type picker (Frame + media types: Photo, Video, Audio, Text, Sticker, Vector; future: AnimatedPhoto) + media library browser
 - Canvas remains visible and interactive behind the sheet
 - Sheet dismisses on drag-down or content placement
 

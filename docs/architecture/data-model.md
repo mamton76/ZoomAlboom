@@ -102,7 +102,8 @@ fun Transform.toCamera(screenWidth: Float, screenHeight: Float, fillFraction: Fl
 | Variant | Extra fields | Purpose |
 |---------|-------------|---------|
 | `Frame` | `label`, `color` (hex string), `containsNodeIds` (dynamically calculated), `background: FrameBackground?` | Navigation area / logical grouping |
-| `Media` | `mediaRefId` (FK to `media_library`), `mediaType`, `tags`, `intrinsicPixelWidth/Height` | Any media asset (image, video, text; future: audio, sticker, animated photo, vector shape) |
+| `Media` | `mediaRefId` (FK to `media_library`), `mediaType`, `tags`, `intrinsicPixelWidth/Height`, `appearance: MediaAppearance?` | Any media asset (image, video, text; future: audio, sticker, animated photo, vector shape) |
+| `Widget` | `widgetType: WidgetType`, `config: WidgetConfig`, `dataSource: WidgetDataSource`, `links: List<WidgetLink>` | Canvas-native smart object with data binding and navigation (post-MVP) |
 
 `Media.intrinsicPixelWidth/Height` are the source's native pixel dimensions (after EXIF rotation). They are **media metadata**, not layout — kept separate from `Transform.w/h` per the scaling contract above. LOD uses them to compute `sourcePxPerScreenPx = intrinsicPixelWidth / (renderW * camera.scale)` for downsampling decisions. `0` = unknown (LOD falls back to render-size-only). When `media_library` ships, intrinsic dims will also live there as the source of truth; the field on `Media` is a per-instance cache.
 
@@ -110,57 +111,9 @@ Both share `id: String`, `transform: Transform`, `visibilityPolicy: VisibilityPo
 
 ### AlbumBackground & FrameBackground
 
-Backgrounds are **not** `CanvasNode` objects. They are render-layer style properties stored alongside (not inside) the nodes list in the scene graph.
+Backgrounds are **not** `CanvasNode` objects — they are render-layer style properties stored alongside the nodes list in the scene graph. `AlbumBackground` supports `SolidColor` / `Texture` types, `CameraLocked` (screen-fixed) and `WorldLocked` (moves with canvas) anchor modes, and configurable tiling (`tileOriginX/Y`, `tileWidth/Height`). `FrameBackground` is a nullable solid-color fill on `CanvasNode.Frame`. `albumBackground` lives in the JSON scene graph root (§1.3 wrapper).
 
-```kotlin
-@Serializable
-enum class BackgroundType { None, SolidColor, Texture }
-
-@Serializable
-enum class TileMode { None, Stretch, Cover, Contain, Repeat, RepeatX, RepeatY }
-
-@Serializable
-enum class AnchorMode {
-    CameraLocked,  // fixed to viewport/screen — does not move with canvas pan/zoom/rotation
-    WorldLocked,   // anchored in world coordinates — moves and scales with the camera
-    // FrameLocked — future: local to a specific frame, clipped to frame bounds
-}
-
-@Serializable
-data class AlbumBackground(
-    val type: BackgroundType = BackgroundType.None,
-    val color: String = "#000000",           // hex color (used when type == SolidColor)
-    val textureRefId: String? = null,        // FK to media_library (used when type == Texture)
-    val opacity: Float = 1f,
-    val tileMode: TileMode = TileMode.None,
-    val anchorMode: AnchorMode = AnchorMode.CameraLocked,
-    val tileOriginX: Float = 0f,            // world X of the tile grid anchor
-    val tileOriginY: Float = 0f,            // world Y of the tile grid anchor
-    val tileWidth: Float = 200f,            // tile width in world units
-    val tileHeight: Float = 200f,           // tile height in world units
-)
-
-@Serializable
-data class FrameBackground(
-    val color: String? = null,  // null = transparent / no fill
-    val opacity: Float = 1f,
-    // texture support planned post-MVP
-)
-```
-
-**Rendering order:**
-1. Camera-locked album background — drawn outside the camera `graphicsLayer` (screen-fixed, no transform)
-2. World-locked album background — drawn inside the camera `graphicsLayer`, before all nodes
-3. Frame backgrounds — drawn inside each frame's own rendering, clipped to frame bounds
-4. Canvas nodes by `zIndex`
-5. Selection overlays, guidelines, snapping indicators
-6. IDE UI overlay
-
-**Tile algorithm (world-locked, tileMode = Repeat/RepeatX/RepeatY):**
-Find the first tile column/row whose origin ≤ visible world edge:
-`firstCol = floor((worldLeft - tileOriginX) / tileWidth)`, then loop until past `worldRight`. Same for rows. Draw each tile with `drawImage` (texture) or `drawRect` (solid color). `tileOriginX/Y` control the phase of the grid so the user can shift the pattern without changing tile size.
-
-**Persistence:** `albumBackground` lives in the scene graph root object (requires §1.3 JSON wrapper — implemented together). `FrameBackground` is a field on `CanvasNode.Frame` in the nodes array.
+**→ Full type definitions, rendering order, tile algorithm, MVP scope:** [background.md](background.md)
 
 ### VisibilityPolicy & RenderDetail
 
@@ -184,20 +137,60 @@ LOD resolution is performed by `LodResolver` (`core/math/LodResolver.kt`) — se
 
 ### MediaType
 
+```kotlin
 enum class MediaType {
-    Image,          // raster photo/image
-    Video,          // video clip
-    Text,           // text block
+    IMAGE,        // raster photo/image
+    VIDEO,        // video clip
+    AUDIO,        // audio clip
+    TEXT,         // inline text block
+    STICKER,      // static sticker/illustration
+    VECTOR_SHAPE, // SVG or vector primitive
 
     // future
-    Audio,          // audio clip
-    Sticker,        // static sticker/illustration
-    AnimatedPhoto,  // Live Photo / animated GIF
-    VectorShape,    // SVG or vector primitive
+    ANIMATED_PHOTO, // Live Photo / animated GIF
 }
+```
 
+`IMAGE`, `VIDEO`, `AUDIO`, `TEXT`, `STICKER`, `VECTOR_SHAPE` are MVP variants. `ANIMATED_PHOTO` is planned post-MVP.
 
-`Image, Video, Text are MVP variants. The rest are planned post-MVP extensions.
+### MediaAppearance
+
+Non-destructive rendering recipe stored on `CanvasNode.Media`. The original source file is never modified.
+
+**Core formula:** `source media asset + MediaAppearance = rendered media object on canvas`
+
+Fields: `opacity`, `cornerRadius`, `crop: CropSettings` (Fit/Fill/Manual/Stretch + focal point), `border: BorderStyle?`, `shadow: ShadowStyle?`, `colorAdjustments: MediaColorAdjustments?` (brightness/contrast/saturation/temperature/…), `overlays: List<MediaOverlay>` (raster PNG/WebP layers with blend mode + opacity), `frameOverlay: FrameOverlay?` (Stretch or NineSlice decorative frame), `caption: CaptionStyle?`.
+
+**→ Full type definitions, rendering pipeline, style presets, rendered derivatives:** [media-appearance.md](media-appearance.md)
+
+```kotlin
+@Serializable
+data class MediaAppearance(
+    val opacity: Float = 1f,
+    val cornerRadius: Float = 0f,
+    val crop: CropSettings = CropSettings(),
+    val border: BorderStyle? = null,
+    val shadow: ShadowStyle? = null,
+    val colorAdjustments: MediaColorAdjustments? = null,
+    val overlays: List<MediaOverlay> = emptyList(),
+    val frameOverlay: FrameOverlay? = null,
+    val caption: CaptionStyle? = null,
+)
+```
+
+**Persistence:** `appearance` is a nullable field on `CanvasNode.Media` in the scene graph JSON. `null` = default rendering. `ignoreUnknownKeys` handles old nodes.
+
+**Rendered derivatives:** Users can flatten the current appearance into a new image asset registered in `media_library` with `origin = RENDERED_DERIVATIVE`.
+
+### Widget System
+
+Widgets are `CanvasNode.Widget` entries in the scene graph — canvas-native smart objects with a data source binding and clickable navigation links. They participate in hit-testing, selection, drag/resize, LOD, and viewport culling identically to `Frame` and `Media`.
+
+Key types: `WidgetType` enum (Map, Calendar, TagCloud, Portal, FrameNavigator, People, FamilyTree, Route, RecipeIndex, PeriodSummary, …), `WidgetDataSource` sealed class (AlbumNodes/Tags/Dates/Places/StaticConfig), `WidgetLink`, `NavigationTarget` sealed class (ToFrame/ToNode/ToAlbum/ToFilteredView/ToExternalUri), `WidgetConfig` per-type sealed class, `CanvasWidgetRenderer<TConfig>` Composable interface.
+
+**→ Full type definitions, widget categories, renderer contract, LOD table, wizard integration:** [widgets.md](widgets.md)
+
+**Persistence:** `CanvasNode.Widget` serialized in the scene graph nodes array. `dataSource` and `links` stored on the node; widget UI state is transient or in `ide_workspaces`.
 
 ### AlbumMeta
 
@@ -241,7 +234,7 @@ Isolates panel state from the canvas. Panel collapse/expand writes here without 
 
 #### Table `media_library` (Project Media Files)
 
-Registry of all media used in an album. Allows finding all usages of a single file.
+Registry of all media used in an album. Allows finding all usages of a single file. Includes both imported assets and rendered derivatives (flattened appearance recipes).
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -250,6 +243,13 @@ Registry of all media used in an album. Allows finding all usages of a single fi
 | `sourceUri` | String | Content URI (local) or URL (network) |
 | `mediaType` | Enum | IMAGE, VIDEO, TEXT (current); AUDIO, STICKER, ANIMATED_PHOTO, VECTOR_SHAPE (future) |
 | `status` | Enum | AVAILABLE, MISSING (validated at startup) |
+| `origin` | Enum | IMPORTED (default) or RENDERED_DERIVATIVE |
+| `sourceAssetId` | String? | For derivatives: id of the source asset |
+| `recipeHash` | String? | For derivatives: hash of the `MediaAppearance` used to render it |
+| `widthPx` | Int? | Intrinsic pixel width (null = unknown) |
+| `heightPx` | Int? | Intrinsic pixel height (null = unknown) |
+
+Rendered derivatives are stored in `filesDir/media/<albumId>/rendered/`. Imported assets are external URIs or copied to `filesDir/media/<albumId>/imported/`.
 
 ### JSON Scene Graph
 
@@ -297,49 +297,9 @@ Key points:
 
 ## Undo/Redo Model (Snapshot-Based)
 
-Two `ArrayDeque<CanvasCommand>` (undo + redo) inside `CommandHistory`, capped at 50 entries. Persisted to `filesDir/history_{albumId}.json` on `ViewModel.onCleared()` (alongside scene graph save), loaded on album open.
+Implemented. Two `ArrayDeque<CanvasCommand>` (undo + redo) inside `CommandHistory`, capped at 50 entries. List-shape `before`/`after: List<CanvasNode>?` collapses single- and multi-node ops into one type — `CommandKind`: ADD, REMOVE, DELETE, DUPLICATE, MOVE, RESIZE, ROTATE. Gestures are grouped via `BeginInteraction` / `FinishInteraction`. Persisted to `filesDir/history_{albumId}.json` on `onCleared()`.
 
-```kotlin
-@Serializable
-enum class CommandKind { ADD, REMOVE, DELETE, DUPLICATE, MOVE, RESIZE, ROTATE }
-
-@Serializable
-data class CanvasCommand(
-    val before: List<CanvasNode>?,        // null = pure insert
-    val after: List<CanvasNode>?,         // null = pure delete
-    val beforeIndices: List<Int>? = null, // positions of `before` at capture (used for delete restore)
-    val kind: CommandKind,
-    val timestampMs: Long,
-)
-
-@Serializable
-data class HistorySnapshot(
-    val version: Int = 1,
-    val undo: List<CanvasCommand> = emptyList(),
-    val redo: List<CanvasCommand> = emptyList(),
-)
-```
-
-The list-shape of `before`/`after` collapses single- and multi-node operations into one command type — no separate `Single | Compound` variants needed. Every undoable user action emits exactly one `CanvasCommand`.
-
-**Invariants:**
-- `before == null && after != null` → insert (ADD, DUPLICATE).
-- `before != null && after == null` → delete (REMOVE, DELETE). `beforeIndices` records original positions so undo restores list ordering.
-- `before != null && after != null` → mutate (MOVE, RESIZE, ROTATE). Same length, same ids, paired positionally.
-- At least one side non-null.
-
-**Grouping:**
-- **Drag / resize / rotate gestures** — `BeginInteraction(kind)` from the gesture detector snapshots selected nodes' state into `pendingSnapshot`; per-frame `MoveSelection`/`ResizeSelection`/`RotateSelection` actions mutate `_allNodes` as today; `FinishInteraction` (or canvas `onGestureEnd` for two-finger node rotation) emits one `CanvasCommand` with `before = pendingSnapshot` and `after = current selected slice in matching id order`. No-op gestures (where `before == after`) are dropped.
-- **Discrete mutations** (`addNode`, `removeNode`, `DeleteSelection`, `DuplicateSelection`) commit immediately with their kind.
-
-**Mechanics:**
-- `commit(cmd)` — push to undo, clear redo, refresh `canUndo`/`canRedo` flows.
-- `Undo` action — defensively commits any pending interaction first, then pops undo and applies in reverse direction.
-- `Redo` action — symmetric.
-- `applyCommand(cmd, reverse)` preserves list order: mutations replace by id in-place; deletes filter by id; pure inserts append; restored deletes re-insert at `beforeIndices`.
-- Selection policy after apply: pure insert → select inserted; pure delete → clear; mutation → select mutated.
-
-**Persistence limitation:** History saves on `onCleared()` only — survives normal app close/reopen but not process death. Same caveat applies to the scene graph; a debounced post-commit autosave for both is a separate concern.
+**→ Full type definitions, invariants, grouping mechanics, file map:** [undo-redo.md](undo-redo.md)
 
 ## Repository Interfaces
 

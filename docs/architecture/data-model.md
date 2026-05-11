@@ -109,6 +109,12 @@ fun Transform.toCamera(screenWidth: Float, screenHeight: Float, fillFraction: Fl
 
 Both share `id: String`, `transform: Transform`, `visibilityPolicy: VisibilityPolicy?`. Both are `@Serializable`.
 
+### AlbumPresentationProfile
+
+Album-level declaration of the intended screen shape for viewing/presenting (aspect ratio, orientation, default fit mode, default outside-frame behaviour, safe-area inset). Stored in the scene graph JSON root alongside `albumBackground`. Nullable — older albums and default-state new albums both work without it. Drives new-frame creation defaults, View-mode camera transforms, and editor overlays. Does **not** constrain or resize the infinite canvas.
+
+**→ Full type definitions, persistence shape, camera-math integration, open questions:** [presentation-profile.md](presentation-profile.md)
+
 ### AlbumBackground & FrameBackground
 
 Backgrounds are **not** `CanvasNode` objects — they are render-layer style properties stored alongside the nodes list in the scene graph. `AlbumBackground` supports `SolidColor` / `Texture` types, `CameraLocked` (screen-fixed) and `WorldLocked` (moves with canvas) anchor modes, and configurable tiling (`tileOriginX/Y`, `tileWidth/Height`). `FrameBackground` is a nullable solid-color fill on `CanvasNode.Frame`. `albumBackground` lives in the JSON scene graph root (§1.3 wrapper).

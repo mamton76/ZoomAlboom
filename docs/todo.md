@@ -49,15 +49,15 @@ Work from foundation toward features. Do not jump to widgets, export, or appeara
 - [x] `CanvasNodeFactory` simplified (no rotateVector compensation needed with center-based coords)
 - [x] `CanvasViewModel.allNodes` → `MutableStateFlow` (fixes P5 race condition)
 - [x] `CanvasViewModel.frames: StateFlow<List<Frame>>` exposed reactively
-- [~] Update `SceneGraphSerializer` for new JSON structure (serializer exists, but emits flat `List<CanvasNode>` — needs root wrapper; JSON field names now cx/cy)
+- [x] Update `SceneGraphSerializer` for new JSON structure (wraps in `SceneGraph` root; migration fallback for old bare-list format)
 
 ### 1.2 AlbumMeta / albums table
 - [ ] Remove `createdAt` field (still present in `AlbumMeta` + `AlbumEntity`)
 - [ ] Rename `thumbnailPath` to `thumbnailUri` (still `thumbnailPath` in code)
 
 ### 1.3 Scene graph JSON format
-- [ ] Wrap nodes in root object with `albumId` and `viewport` (currently serializes bare list)
-- [ ] Save/restore last camera position on album open/close
+- [x] Wrap nodes in root object with `albumId` and `viewport` (currently serializes bare list)
+- [x] Save/restore last camera position on album open/close
 
 ### 1.4 New Room tables
 - [ ] `ide_workspaces` — persist panel state per album (`album_id`, `activeTheme`, `panelsState` JSON)
@@ -677,6 +677,71 @@ See [PRD § 8.8](product/PRD.md#88-widget-system) and [PRD § 11.9](product/PRD.
 - [ ] Animated widget transitions
 - [ ] Batch widget data refresh when album content changes
 - [ ] Widget marketplace / sharing presets
+
+---
+
+## 22. Presentation Form Factor
+
+Album-level "intended screen shape" for viewing/presenting. The infinite canvas stays infinite — the profile only shapes new-frame defaults, View-mode camera fit, and editor overlays.
+
+See [architecture/presentation-profile.md](architecture/presentation-profile.md) for the full design, data model, and open questions.
+
+**Depends on §1.3** (scene graph root wrapper) — the profile lives in the JSON root alongside `albumBackground`.
+
+### 22.1 Domain model
+- [ ] `AlbumPresentationProfile` — aspectRatio, orientation, defaultFitMode, defaultOutsideMode, safeAreaInset
+- [ ] `AspectRatio` sealed class — R_16_9, R_9_16, R_4_3, R_3_4, Square, Free, Custom(w, h)
+- [ ] `Orientation` enum — Landscape, Portrait
+- [ ] `FrameFitMode` enum — CONTAIN (MVP default), COVER, STRETCH
+- [ ] `OutsideFrameMode` enum — ALBUM_BACKGROUND, SOLID_FILL, BLURRED_BACKDROP (last is post-MVP)
+- [ ] All `@Serializable`
+
+### 22.2 Scene graph integration
+- [ ] Add `profile: AlbumPresentationProfile?` field to `SceneGraph` root (nullable for back-compat)
+- [ ] `SceneGraphSerializer` reads/writes profile (`ignoreUnknownKeys` covers old files)
+
+### 22.3 Camera math
+- [ ] Parameterize `Transform.toCamera()` by `FrameFitMode` + `safeAreaInset`
+- [ ] Remove hardcoded `fillFraction = 0.9f`; default to profile or `0.1f` safe area
+- [ ] CONTAIN uses `min(sx, sy)`; COVER uses `max(sx, sy)`
+- [ ] Update all callers to thread profile (or default) through
+
+### 22.4 Frame creation defaults
+- [ ] `CanvasNodeFactory.Frame` fits album aspect ratio inside the current viewport budget
+- [ ] `AspectRatio.Free` skips the ratio fit (preserves current behavior)
+- [ ] Preserve `1/camera.scale` rebase trick — `w/h` stay camera-independent
+
+### 22.5 Editor overlays
+- [ ] `PresentationOverlayRenderer` composable — drawn inside camera `graphicsLayer`, world-locked, strokes scaled by `1/camera.scale`
+- [ ] Target aspect ratio rect (around focused frame or canvas center)
+- [ ] Safe area inset rect
+- [ ] Current device viewport indicator
+- [ ] Target profile preview (hypothetical device at fixed pixel diagonal)
+- [ ] TopBar toggle (visible in Edit mode only)
+
+### 22.6 Settings UI
+- [ ] Album settings entry point — likely a dedicated bottom sheet (no "Album Settings" surface exists today)
+- [ ] Profile picker — aspect ratio + orientation + fit mode + outside mode + safe area inset
+- [ ] `CanvasAction.SetAlbumPresentationProfile(profile)`
+- [ ] Profile changes do not mutate existing frames (no reflow)
+
+### 22.7 View mode consumption (depends on §12)
+- [ ] `FocusNode` uses `Transform.toCamera(viewport, effectiveFitMode, profile.safeAreaInset)`
+- [ ] Render `OutsideFrameMode` for the letterbox region in CONTAIN fit
+
+### 22.8 Per-frame override (post-MVP)
+- [ ] `FramePresentationOverride` — nullable per-field overrides on `CanvasNode.Frame`
+- [ ] Effective fit/outside/ratio = override ?? album default
+- [ ] UI for per-frame override (frame properties sheet, depends on §5 Object selected mode)
+
+### 22.9 Post-MVP rendering
+- [ ] `OutsideFrameMode.BLURRED_BACKDROP` — sample + blur (RenderEffect API 31+ or offscreen pass)
+
+### Out of scope
+- Adaptive layouts that rearrange nodes per screen.
+- Multiple independent layouts per frame.
+- Smart AI recomposition.
+- Multiple profiles per album (only the primary is stored for MVP).
 
 ---
 

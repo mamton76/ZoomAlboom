@@ -260,7 +260,7 @@ Background is a style property of the album or frame, not a canvas object — it
 
 ### 8.8 Widget system
 
-Widgets are **canvas-native smart objects** — first-class canvas nodes that live inside the spatial story alongside photos, text, and frames.
+Widgets are **canvas-native smart objects** — first-class canvas nodes that live inside the spatial story alongside photos, text, and frames. See [widgets.md](../architecture/widgets.md) for the full technical spec.
 
 > Widgets are not separate dashboard panels outside the album. They are part of the album world.
 
@@ -288,63 +288,93 @@ A widget has a position, size, rotation, and z-index like any other canvas objec
 
 ## 9. MVP Scope
 
-### 9.1 In scope for MVP
+> **Core MVP** proves the spatial editor loop: canvas + frames + photos + basic editing + save/reopen. **MVP-adjacent** features ship right after the first usable vertical slice but do not block it. **Post-MVP** features are planned but must not be attempted before Core MVP is stable.
 
-#### Album canvas
-- create and open an album
+### 9.1 Core MVP
+
+#### Album
+- create, open, and delete an album
 - display album on an infinite or effectively unbounded canvas
-- support panning
-- support zooming
-- support rotation
-- set album background: solid color or texture/image
-- choose background anchor: screen-fixed (does not move with canvas) or world-anchored (moves and scales with the canvas)
-- choose tile mode for textured backgrounds: none, stretch, cover, repeat, and variants
-- set background opacity
-
-#### Frames
-- create frames
-- place frames on canvas
-- move/resize frames
-- visually distinguish frames from general content
-- navigate/focus into frames
-- animated frame transitions — smooth camera interpolation (linear/bezier) between frames
-- set frame background fill color and opacity
-
-#### Media items
-- add photo item
-- add video item
-- add text item
-- add sticker item
-- move / scale / rotate media items
-- display media within the canvas
-- set crop mode (fit / fill / manual) per media object
-- set opacity, corner radius, border, shadow per media object
-- apply raster overlays (texture, dust, light leak, vignette, frame) with blend mode and opacity
-- apply decorative frame overlay (stretch or nine-slice)
-- apply basic color adjustments (brightness, contrast, saturation, temperature)
-- copy / paste appearance between media objects
-- save appearance as a named style preset
-- save rendered derivative as a new reusable media asset
-
-#### Editing
-- basic selection
-- transform selected object
-- edit basic text content
-- delete object
-- duplicate object
-- reset appearance to default
-
-#### Structure / panels / workspace
-- media library as a panel OR bottom sheet (accessible via FAB → Add content flow)
-- frame list / structure panel (accessible via menu or swipe gesture, not permanently visible)
-- contextual action bar for selected canvas nodes
-- IDE-like overlay panels available as opt-in power-user configuration
-- Panel Configuration UI: allows users to toggle panels on/off, choose position (docked slot or floating), and reset to defaults 
-
-#### Persistence
-- save and reopen albums locally
+- support panning, zooming, and rotation
+- save and reopen album locally
 - persist canvas structure, frames, and item placement
 - persist references to media files
+
+#### Frames
+- create frames and place them on canvas
+- move and resize frames
+- visually distinguish frames from general content
+- navigate / focus into a frame (animated camera interpolation)
+- frame list accessible from menu or swipe gesture
+
+#### Media
+- add photo, video, text, and sticker items
+- move / scale / rotate items
+- delete and duplicate items
+- basic text node creation and inline editing
+- display media within the canvas
+
+#### Editing
+- single-node and multi-node selection
+- basic undo / redo
+- contextual action bar (delete, duplicate, edit)
+
+#### Workspace
+- FAB [+] → Add content bottom sheet
+- canvas-first chrome: minimal default UI with TopBar and FAB only
+
+### 9.2 MVP-adjacent (soon after Core MVP)
+
+These features are important but do not block the first working vertical slice:
+
+- multi-photo import and auto grid placement
+- Edit / View mode split
+- basic media validation and missing-media placeholder
+- basic non-destructive appearance fields: opacity, crop mode (fit / fill / manual), corner radius, border, shadow
+- copy / paste appearance between media objects
+- save appearance as a named style preset
+- solid and texture/image album background
+- frame background fill color and opacity
+- basic snapping and guidelines
+- group align / distribute
+- basic widget infrastructure: `Portal` and `FrameNavigator`
+- basic media library (copied local assets, referenced by id)
+
+### 9.3 Post-MVP
+
+These features are part of the product vision but must not be treated as MVP requirements:
+
+- raster overlays with blend modes (texture, dust, light leak, vignette, decoration)
+- decorative frame overlays (stretch or nine-slice rendering)
+- parametric color adjustments (brightness, contrast, saturation, temperature, etc.)
+- save rendered derivative as a new media asset
+- full non-destructive appearance editor UI
+- full widget system (Map, Calendar, Tag Cloud, Family Tree, etc.)
+- full wizard system
+- interactive HTML export / static website / video walkthrough / print export
+- cloud sync and real-time collaboration
+- animated overlays and AnimatedPhoto / Live Photo support
+- AI auto-layout and diary generation pipeline
+- cinematic transition editor
+
+See [§10](#10-future-scope-post-mvp) and [future-ideas.md](future-ideas.md) for the detailed list.
+
+---
+
+## 9b. MVP Vertical Slice
+
+The first successful vertical slice should allow a user to:
+
+1. create an album;
+2. add several photos;
+3. create several frames;
+4. arrange photos spatially inside/around frames;
+5. pan, zoom, rotate, and focus frames;
+6. save and reopen the album without losing layout;
+7. undo/redo basic editing operations;
+8. switch to a simple View mode where accidental editing is disabled.
+
+This vertical slice proves the core product: a spatial multimedia album, not just a gallery.
 
 ---
 
@@ -473,6 +503,9 @@ When AI Diary data is available, ZoomAlboom can generate album structures automa
 - Data model should support future extension
 
 ### 11.8 Media appearance (non-destructive editing)
+
+> **Scope note:** Basic fields (opacity, crop, corner radius, border, shadow, copy/paste appearance, named presets) are MVP-adjacent. Raster overlays, parametric color adjustments, decorative frame overlays, and rendered derivatives are post-MVP.
+
 - Original source media files are never modified by appearance editing
 - User can set crop mode per media object: fit (whole image visible), fill (fills bounds, may crop), manual (pan+zoom inside bounds), stretch
 - User can set a focal point to preserve important areas (faces) during auto-crop
@@ -503,6 +536,9 @@ When AI Diary data is available, ZoomAlboom can generate album structures automa
 - Post-MVP: frame texture backgrounds, per-layer backgrounds
 
 ### 11.9 Widget system
+
+See [widgets.md](../architecture/widgets.md) for domain types and the full spec. See [open-questions.md §9](../architecture/open-questions.md#9-portal--widget-target-movement-semantics) for unresolved portal / widget target movement semantics.
+
 - User can place widget objects on the canvas; widgets have position, size, rotation, z-index like any canvas node
 - User can move, resize, and place widgets inside frames
 - User can configure a widget's data source (album tags, dates, places, frames, diary entries)
@@ -510,9 +546,9 @@ When AI Diary data is available, ZoomAlboom can generate album structures automa
 - Widget elements are clickable in View/Present mode and trigger camera navigation
 - Widgets support the same LOD visibility policy as other nodes (Hidden / Stub / Preview / Full)
 - Widgets are saved in the scene graph JSON as part of the album composition
-- MVP widget set (infrastructure first, then): Portal/Frame Navigator, Calendar, Map, Tag Cloud, Highlights/Media Gallery, People
-- Extended widget set (post-MVP): Timeline, Family Tree, Route, Recipe Index/Card, Milestones, Growth Timeline, Period Summary, Memory Resurfacing, and domain-specific widgets for travel / family / cookbook / educational albums
-- Wizard integration: wizards can auto-generate overview frames populated with widgets linked to nested frames
+- MVP-adjacent widget set: Portal, Frame Navigator
+- Extended widget set (post-MVP): Calendar, Map, Tag Cloud, Highlights/Media Gallery, People, Timeline, Family Tree, Route, Recipe Index/Card, Milestones, Growth Timeline, Period Summary, Memory Resurfacing, and domain-specific widgets for travel / family / cookbook / educational albums
+- Wizard integration (post-MVP): wizards auto-generate overview frames populated with widgets linked to nested frames
 
 ---
 

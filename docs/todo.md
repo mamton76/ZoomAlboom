@@ -11,6 +11,24 @@ Gap between current implementation and target architecture.
 
 ---
 
+## Recommended next implementation order
+
+Work from foundation toward features. Do not jump to widgets, export, or appearance editor before the scene graph and media foundation are stable.
+
+1. **Scene graph root wrapper** (§1.3) — `albumId`, `viewport/camera`, `albumBackground`, `nodes`, editor metadata.
+2. **Save/restore camera position** (§1.3) — on album open/close.
+3. **Minimal media library** (§1.4–1.5) — `media_library` table: id, album_id, sourceUri, mediaType, status, intrinsic dimensions.
+4. **Media validation + missing placeholder** (§4.4) — check `sourceUri` on album open, show placeholder for `MISSING`.
+5. **Dynamic frame containment** (§4.3) — update `containsNodeIds` on node movement, run on `Dispatchers.Default`.
+6. **Edit / View mode split** (§12) — gates gesture routing; unblocks View-mode navigation.
+7. **Multi-photo import + auto grid placement** (§16).
+8. **Group align / distribute** (§17).
+9. **Guidelines** (§14.1–14.3) — without snapping first.
+10. **Snapping** (§14.4).
+11. **Basic widget infrastructure** (§21.1) — `CanvasNode.Widget`, then `Portal` and `FrameNavigator` (§21.2).
+
+---
+
 ## 1. Data Model Migration
 
 ### 1.1 Transform & CanvasNode refactor
@@ -559,10 +577,9 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 - [ ] Crop mode selector + manual crop handle in canvas
 - [ ] Context menu actions: Copy Appearance, Paste Appearance, Save as Preset, Reset Appearance, Save Edited Image
 
-### MVP scope (from spec)
-Required: opacity, crop (Fit/Fill/Manual), cornerRadius, border, shadow, raster overlays (PNG/WebP) with opacity + blend mode, FrameOverlay (Stretch), copy/paste appearance, save as preset, save rendered derivative as new asset.
-
-Nice to have in MVP: NineSlice frame, basic color adjustments, CreateRenderedCopyOnCanvas, ReplaceWithRenderedImage, ResetAppearance.
+### Implementation priority
+MVP-adjacent: opacity, crop (Fit/Fill/Manual), cornerRadius, border, shadow, copy/paste appearance, save as preset, ResetAppearance.
+Post-MVP: raster overlays with blend modes, FrameOverlay (Stretch or NineSlice), parametric color adjustments, rendered derivatives, animated overlays.
 
 ### Post-MVP
 - [ ] AI auto-enhance, background removal, old photo restoration, B&W colorization

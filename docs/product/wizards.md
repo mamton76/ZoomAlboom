@@ -1,6 +1,6 @@
 # Album Wizard System
 
-> Related: [PRD](PRD.md) | [future-ideas](future-ideas.md) | [widgets](../architecture/widgets.md) | [todo §21](../todo.md#21-widget-system)
+> Related: [PRD](PRD.md) | [future-ideas](future-ideas.md) | [widgets](../architecture/widgets.md) | [open-questions §9](../architecture/open-questions.md#9-portal--widget-target-movement-semantics) | [todo §21](../todo.md#21-widget-system)
 
 Wizards help users generate a structured ZoomAlboom album from media, diary entries, tags, dates, places, or manual input. A wizard is not a flat template — it creates a **spatial story structure** that can be edited freely afterward.
 
@@ -191,6 +191,12 @@ Creates a family history album organized around people, places, and generations.
 **Nested frames (one per person / family branch / place / period / story):**
 - photos, documents, old media
 - linked from family tree nodes and place map
+
+---
+
+## Shareable Output
+
+Wizard-generated albums should be exportable as shareable read-only spatial stories. See [future-ideas.md — Import / Export / Publishing](future-ideas.md#import--export--publishing) for the planned export formats.
 
 ---
 

@@ -13,11 +13,10 @@
 - **Present mode** — read-only viewing for shared/published albums (see [todo § 12.6](../todo.md#126-future))
 - **Crop / masking** — mask media through internal bounding box editing
 - **Text / sticker enhancements** — richer text editing, sticker library
-- **Animated photos** — Live Photo / animated GIF support (`MediaType.ANIMATED_PHOTO`)
+- **Animated photos / Live Photos** — Live Photo, animated GIF, or "moving photo" media (`MediaType.ANIMATED_PHOTO`), inspired by Harry Potter-style moving portraits and newspapers.
 
 ## Media
 - **Audio notes** — voice memos attached to canvas locations
-- **Live photos** — animated/moving photos (Harry Potter style)
 
 ## Intelligence
 - **AI-assisted organization** — auto-suggest groupings, tag recognition, layout hints

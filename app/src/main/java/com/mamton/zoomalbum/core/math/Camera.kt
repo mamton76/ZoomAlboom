@@ -1,5 +1,7 @@
 package com.mamton.zoomalbum.core.math
 
+import kotlinx.serialization.Serializable
+
 /**
  * Camera state for the infinite canvas.
  *
@@ -10,6 +12,7 @@ package com.mamton.zoomalbum.core.math
  * scale    = zoom factor (1.0 = 100%, 2.0 = zoomed in 2x).
  * rotation = canvas rotation in degrees.
  */
+@Serializable
 data class Camera(
     val cx: Float = 0f,
     val cy: Float = 0f,

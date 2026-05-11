@@ -16,6 +16,7 @@ import com.mamton.zoomalbum.core.math.ViewportCuller
 import com.mamton.zoomalbum.core.mvi.Intent
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
+import com.mamton.zoomalbum.domain.model.SceneGraph
 import com.mamton.zoomalbum.domain.model.RenderDetail
 import com.mamton.zoomalbum.domain.model.withTransform
 import com.mamton.zoomalbum.domain.repository.HistoryRepository
@@ -602,15 +603,17 @@ class CanvasViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         val nodes = _allNodes.value
+        val camera = _state.value.camera
         val historySnapshot = history.snapshot()
         if (albumId != 0L) {
             // Fire-and-forget save — ViewModel scope is cancelled but we use
             // a non-cancellable context for the final save.
             kotlinx.coroutines.MainScope().launch(Dispatchers.IO) {
                 try {
-                    if (nodes.isNotEmpty()) {
-                        mediaRepository.saveSceneGraph(albumId, nodes)
-                    }
+                    mediaRepository.saveSceneGraph(
+                        albumId,
+                        SceneGraph(albumId = albumId, camera = camera, nodes = nodes),
+                    )
                     historyRepository.save(albumId, historySnapshot)
                 } catch (_: Exception) {
                     // Best-effort save on exit
@@ -709,15 +712,16 @@ class CanvasViewModel @Inject constructor(
 
     private fun loadAlbum() {
         viewModelScope.launch {
-            val nodes = if (albumId != 0L) {
+            val sceneGraph = if (albumId != 0L) {
                 mediaRepository.loadSceneGraph(albumId)
             } else {
-                emptyList()
+                SceneGraph(albumId = albumId)
             }
-            _allNodes.value = nodes
+            _allNodes.value = sceneGraph.nodes
             _state.update {
                 it.copy(
-                    totalNodeCount = nodes.size,
+                    camera = sceneGraph.camera,
+                    totalNodeCount = sceneGraph.nodes.size,
                     isLoading = false,
                 )
             }

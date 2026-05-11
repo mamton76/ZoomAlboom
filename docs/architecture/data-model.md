@@ -261,19 +261,14 @@ Rendered derivatives are stored in `filesDir/media/<albumId>/rendered/`. Importe
 
 **Location:** `filesDir/scene_{albumId}.json`
 
-> **Current implementation:** `SceneGraphSerializer` emits a bare `List<CanvasNode>` (flat JSON array), not the wrapped format below. The root object with `albumId`, `viewport`, and `background` is the **target** format — see todo §1.3 and §19.
+The scene graph is serialized as a `SceneGraph` root object wrapping `albumId`, `camera`, and `nodes`. A migration fallback detects the legacy bare-`List<CanvasNode>` format (raw JSON starting with `[`) and wraps it on read with a default camera.
 
 ```json
 {
   "albumId": 123,
-  "viewport": { "cx": 0, "cy": 0, "scale": 1.0 },
-  "background": {
-    "type": "SolidColor",
-    "color": "#1A1A2E",
-    "opacity": 1.0,
-    "anchorMode": "CameraLocked",
-    "tileMode": "None"
-  },
+  "camera": { "cx": 0, "cy": 0, "scale": 1.0, "rotation": 0 },
+  // "background": { ... },  // planned — see §19
+  // "profile":    { ... },  // planned — see §22 (presentation-profile.md)
   "nodes": [
     {
       "id": "node_1",
@@ -294,10 +289,11 @@ Rendered derivatives are stored in `filesDir/media/<albumId>/rendered/`. Importe
 ```
 
 Key points:
-- `viewport` saves last camera position (restored on album open)
+- `camera` saves last camera position (restored on album open) — full `Camera` shape with `cx`, `cy`, `scale`, `rotation`
 - `mediaRefId` links to `media_library` table instead of storing URI directly
 - `containsNodeIds` on frames is dynamically calculated during node movement
 - Serialized via kotlinx-serialization (`prettyPrint`, `ignoreUnknownKeys`)
+- Legacy bare-list files are upgraded transparently on first read
 
 **Components:** `FileStorageHelper` (raw file I/O) + `SceneGraphSerializer` (encode/decode) + `MediaRepositoryImpl` (abstraction).
 
@@ -335,5 +331,5 @@ Implementations in `data/repository/`, bound via Hilt `@Binds`.
 | `CanvasNode.tags` | not present | added |
 | `ide_workspaces` table | not present | new table |
 | `media_library` table | not present | new table |
-| Scene graph `viewport` | not saved | saved in JSON root |
+| Scene graph `camera` | not saved | saved in JSON root ✓ |
 | Undo/Redo | not present | Snapshot-based list-shape `CanvasCommand` deque (cap 50), persisted to `history_{albumId}.json` on `onCleared()` |

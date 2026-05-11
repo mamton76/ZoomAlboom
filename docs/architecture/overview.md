@@ -94,7 +94,7 @@ See [data-model.md](data-model.md) for schema details.
 | Album metadata | Room (`albums` table) | SQL | implemented |
 | IDE workspace state | Room (`ide_workspaces` table) | SQL + JSON blob | planned |
 | Media registry | Room (`media_library` table) | SQL | planned |
-| Scene graphs | `filesDir/scene_{albumId}.json` | JSON (kotlinx-serialization) | implemented (format changing) |
+| Scene graphs | `filesDir/scene_{albumId}.json` | JSON (kotlinx-serialization) | implemented |
 | Undo/Redo history | `filesDir/history_{albumId}.json` | JSON (kotlinx-serialization) | implemented |
 
 Canvas mutations go through `CanvasCommand` (snapshot-based: `before`/`after` as `List<CanvasNode>?`). Commands are stored in two `ArrayDeque`s (undo + redo, capped at 50) inside `CommandHistory` and saved to disk on `ViewModel.onCleared()`. See [data-model.md § Undo/Redo](data-model.md#undoredo-model-snapshot-based).

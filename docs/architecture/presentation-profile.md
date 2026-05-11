@@ -78,7 +78,7 @@ Effective fit mode for a frame: `frame.presentation?.fitMode ?: album.profile.de
 ```jsonc
 {
   "albumId": 123,
-  "viewport": { ... },
+  "camera": { ... },
   "background": { ... },
   "profile": {
     "aspectRatio": "R_16_9",

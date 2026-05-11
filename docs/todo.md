@@ -15,7 +15,7 @@ Gap between current implementation and target architecture.
 
 Work from foundation toward features. Do not jump to widgets, export, or appearance editor before the scene graph and media foundation are stable.
 
-1. **Scene graph root wrapper** (§1.3) — `albumId`, `viewport/camera`, `albumBackground`, `nodes`, editor metadata.
+1. **Scene graph root wrapper** (§1.3) — `albumId`, `camera`, `albumBackground`, `nodes`, editor metadata.
 2. **Save/restore camera position** (§1.3) — on album open/close.
 3. **Minimal media library** (§1.4–1.5) — `media_library` table: id, album_id, sourceUri, mediaType, status, intrinsic dimensions.
 4. **Media validation + missing placeholder** (§4.4) — check `sourceUri` on album open, show placeholder for `MISSING`.
@@ -56,7 +56,7 @@ Work from foundation toward features. Do not jump to widgets, export, or appeara
 - [ ] Rename `thumbnailPath` to `thumbnailUri` (still `thumbnailPath` in code)
 
 ### 1.3 Scene graph JSON format
-- [x] Wrap nodes in root object with `albumId` and `viewport` (currently serializes bare list)
+- [x] Wrap nodes in root object with `albumId` and `camera` (migration fallback for legacy bare-list format)
 - [x] Save/restore last camera position on album open/close
 
 ### 1.4 New Room tables
@@ -492,7 +492,7 @@ See [data-model.md § AlbumBackground & FrameBackground](architecture/data-model
 - [ ] Add `background: FrameBackground?` field to `CanvasNode.Frame`
 
 ### 19.2 Scene graph (requires §1.3 first)
-- [ ] `SceneGraph` root wrapper: `albumId`, `viewport`, `background: AlbumBackground`, `nodes`
+- [x] `SceneGraph` root wrapper: `albumId`, `camera`, `nodes` (background field still TBD here)
 - [ ] Migration reader: try root object, fall back to bare `List<CanvasNode>` for old files
 - [ ] `SceneGraphSerializer` updated to encode/decode root wrapper
 - [ ] `albumBackground` added to `CanvasState`

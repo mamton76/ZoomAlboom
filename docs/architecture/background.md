@@ -94,7 +94,7 @@ Then loop until past `worldRight` / `worldBottom`. Draw each tile with:
 ```json
 {
   "albumId": 123,
-  "viewport": { "cx": 0, "cy": 0, "scale": 1.0 },
+  "camera": { "cx": 0, "cy": 0, "scale": 1.0, "rotation": 0 },
   "background": {
     "type": "Texture",
     "textureRefId": "media_paper_grain",

@@ -9,17 +9,24 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mamton.zoomalbum.core.math.BoundingBox
 import com.mamton.zoomalbum.core.math.Camera
+import com.mamton.zoomalbum.core.math.CameraAnimation
+import com.mamton.zoomalbum.core.math.CameraInterpolation
 import com.mamton.zoomalbum.core.math.LodResolver
 import com.mamton.zoomalbum.core.math.ResizeHandle
 import com.mamton.zoomalbum.core.math.TransformUtils
 import com.mamton.zoomalbum.core.math.ViewportCuller
+import com.mamton.zoomalbum.core.math.toCamera
 import com.mamton.zoomalbum.core.mvi.Intent
 import com.mamton.zoomalbum.domain.model.AlbumPresentationProfile
+import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
+import com.mamton.zoomalbum.domain.model.EasingType
+import com.mamton.zoomalbum.domain.model.FrameFitMode
 import com.mamton.zoomalbum.domain.model.RenderDetail
 import com.mamton.zoomalbum.domain.model.SceneGraph
 import com.mamton.zoomalbum.domain.model.Transform
+import com.mamton.zoomalbum.domain.model.TransitionPreset
 import com.mamton.zoomalbum.domain.model.withTransform
 import com.mamton.zoomalbum.domain.repository.HistoryRepository
 import com.mamton.zoomalbum.domain.repository.MediaRepository
@@ -32,6 +39,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -62,6 +71,9 @@ data class CanvasState(
     /** Group selection bounding rect — computed on selection change, rotation accumulated. */
     val groupSelectionTransform: Transform? = null,
     val profile: AlbumPresentationProfile? = null,
+    val mode: CanvasInteractionMode = CanvasInteractionMode.Edit,
+    /** Transient in-flight focus animation. Cancelled by any pan/pinch gesture. */
+    val cameraAnimation: CameraAnimation? = null,
 )
 
 // ── Actions ───────────────────────────────────────────────────────────
@@ -84,7 +96,16 @@ sealed interface CanvasAction : Intent {
 
     // Group operations — apply to ALL selected nodes
     data class MoveSelection(val worldDx: Float, val worldDy: Float) : CanvasAction
-    data class ResizeSelection(val scaleFactor: Float) : CanvasAction
+    /**
+     * Uniform scale around [pivotX, pivotY] (world coords). The pivot is the
+     * opposite corner of the dragged handle so that corner stays fixed during
+     * the gesture — corner-anchored resize, not center-anchored.
+     */
+    data class ResizeSelection(
+        val scaleFactor: Float,
+        val pivotX: Float,
+        val pivotY: Float,
+    ) : CanvasAction
     data class RotateSelection(val angleDelta: Float) : CanvasAction
 
     // Lifecycle
@@ -99,6 +120,11 @@ sealed interface CanvasAction : Intent {
 
     // Rectangle selection preview
     data class UpdateSelectionRect(val worldRect: BoundingBox?) : CanvasAction
+
+    // Mode + navigation
+    data class SetMode(val mode: CanvasInteractionMode) : CanvasAction
+    /** Animated camera focus on the given node (frame or media). */
+    data class FocusNode(val nodeId: String) : CanvasAction
 }
 
 // ── ViewModel ─────────────────────────────────────────────────────────
@@ -133,6 +159,7 @@ class CanvasViewModel @Inject constructor(
     private var screenWidth = 1080f
     private var screenHeight = 1920f
     private var cullingJob: Job? = null
+    private var cameraAnimationJob: Job? = null
 
     init {
         loadAlbum()
@@ -160,6 +187,8 @@ class CanvasViewModel @Inject constructor(
      *   under C must remain fixed after zoom & rotation change.
      */
     fun onGesture(centroid: Offset, pan: Offset, zoom: Float, rotationDelta: Float) {
+        // Any direct gesture cancels an in-flight focus animation.
+        cancelCameraAnimation()
         _state.update { s ->
             val oldCam = s.camera
             val newScale = (oldCam.scale * zoom).coerceIn(Camera.MIN_SCALE, Camera.MAX_SCALE)
@@ -328,38 +357,36 @@ class CanvasViewModel @Inject constructor(
                 val selected = _allNodes.value.filter { it.id in ids }
                 if (selected.isEmpty()) return
 
-                // Pivot = group rect center (stable rigid-body pivot).
-                // Fall back to node centroid only when no rect exists (single node).
-                val gt = _state.value.groupSelectionTransform
-                val (gcx, gcy) = if (gt != null) {
-                    gt.cx to gt.cy
-                } else {
-                    TransformUtils.groupCenter(selected)
-                }
                 val factor = action.scaleFactor.coerceIn(0.01f, 100f)
+                val px = action.pivotX
+                val py = action.pivotY
 
                 _allNodes.update { nodes ->
                     nodes.map { node ->
                         if (node.id in ids) {
                             val t = node.transform
-                            val newCx = gcx + (t.cx - gcx) * factor
-                            val newCy = gcy + (t.cy - gcy) * factor
+                            val newCx = px + (t.cx - px) * factor
+                            val newCy = py + (t.cy - py) * factor
                             val newScale = (t.scale * factor).coerceIn(0.01f, 1000f)
                             node.withTransform(t.copy(cx = newCx, cy = newCy, scale = newScale))
                         } else node
                     }
                 }
                 inlinePatchVisibleNodes(ids) { t ->
-                    val newCx = gcx + (t.cx - gcx) * factor
-                    val newCy = gcy + (t.cy - gcy) * factor
+                    val newCx = px + (t.cx - px) * factor
+                    val newCy = py + (t.cy - py) * factor
                     val newScale = (t.scale * factor).coerceIn(0.01f, 1000f)
                     t.copy(cx = newCx, cy = newCy, scale = newScale)
                 }
-                // Rigid-body scale: rect grows/shrinks with the nodes
-                if (gt != null) {
+                // Group rect: its center moves with the pivot too, w/h scale uniformly.
+                _state.value.groupSelectionTransform?.let { gt ->
+                    val newGtCx = px + (gt.cx - px) * factor
+                    val newGtCy = py + (gt.cy - py) * factor
                     _state.update {
                         it.copy(
                             groupSelectionTransform = gt.copy(
+                                cx = newGtCx,
+                                cy = newGtCy,
                                 w = gt.w * factor,
                                 h = gt.h * factor,
                             ),
@@ -528,6 +555,30 @@ class CanvasViewModel @Inject constructor(
 
             is CanvasAction.UpdateSelectionRect -> {
                 _state.update { it.copy(selectionRect = action.worldRect) }
+            }
+
+            is CanvasAction.SetMode -> {
+                val target = action.mode
+                if (_state.value.mode == target) return
+                _state.update { s ->
+                    if (target != CanvasInteractionMode.Edit) {
+                        // Any non-Edit mode is read-only — clear selection so
+                        // overlays/handles/action bar are auto-hidden.
+                        s.copy(
+                            mode = target,
+                            selectedNodeIds = emptySet(),
+                            groupSelectionTransform = null,
+                            selectionRect = null,
+                        )
+                    } else {
+                        s.copy(mode = target)
+                    }
+                }
+            }
+
+            is CanvasAction.FocusNode -> {
+                val node = _allNodes.value.firstOrNull { it.id == action.nodeId } ?: return
+                startCameraAnimation(node.transform)
             }
         }
     }
@@ -780,6 +831,61 @@ class CanvasViewModel @Inject constructor(
         }
     }
 
+    // ── Camera focus animation ────────────────────────────────────────
+
+    /**
+     * Animates [_state].camera from its current value to the camera derived from
+     * [targetTransform], using the active profile's transition preset + easing.
+     * Cancels any prior animation; first user gesture cancels this one.
+     */
+    private fun startCameraAnimation(targetTransform: Transform) {
+        cancelCameraAnimation()
+        val from = _state.value.camera
+        val profile = _state.value.profile
+        val fitMode = profile?.defaultFitMode ?: FrameFitMode.CONTAIN
+        val safeArea = profile?.safeAreaInset ?: 0.1f
+        val to = targetTransform.toCamera(screenWidth, screenHeight, fitMode, safeArea)
+
+        val (durationMs, easing) = CameraInterpolation.resolveTransition(
+            preset = profile?.defaultTransitionPreset ?: TransitionPreset.SOFT,
+            profileEasing = profile?.defaultEasing ?: EasingType.EASE_IN_OUT,
+            from = from,
+            to = to,
+        )
+
+        val animation = CameraAnimation(
+            from = from,
+            to = to,
+            startTimeMs = System.currentTimeMillis(),
+            durationMs = durationMs,
+            easing = easing,
+        )
+        _state.update { it.copy(cameraAnimation = animation) }
+
+        cameraAnimationJob = viewModelScope.launch {
+            val startNs = System.nanoTime()
+            while (isActive) {
+                val elapsedMs = (System.nanoTime() - startNs) / 1_000_000f
+                val t = (elapsedMs / durationMs.toFloat()).coerceIn(0f, 1f)
+                val current = CameraInterpolation.interpolate(from, to, t, easing)
+                _state.update { it.copy(camera = current) }
+                recalculateVisibleNodes()
+                if (t >= 1f) break
+                delay(FRAME_DELAY_MS)
+            }
+            _state.update { it.copy(cameraAnimation = null) }
+            cameraAnimationJob = null
+        }
+    }
+
+    private fun cancelCameraAnimation() {
+        cameraAnimationJob?.cancel()
+        cameraAnimationJob = null
+        if (_state.value.cameraAnimation != null) {
+            _state.update { it.copy(cameraAnimation = null) }
+        }
+    }
+
     // ── Undo/Redo internals ───────────────────────────────────────────
 
     private fun commit(command: CanvasCommand) {
@@ -891,5 +997,7 @@ class CanvasViewModel @Inject constructor(
         const val ROTATION_HANDLE_OFFSET_PX = 40f
         /** Diagonal offset (screen px) applied to duplicated nodes. */
         const val DUPLICATE_SHIFT_PX = 40f
+        /** ~60 fps tick interval for camera focus animations. */
+        private const val FRAME_DELAY_MS = 16L
     }
 }

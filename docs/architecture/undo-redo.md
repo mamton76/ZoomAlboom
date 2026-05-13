@@ -98,7 +98,13 @@ History saves on `onCleared()` only — survives normal app close/reopen (user b
 
 ## What Is NOT Undoable
 
-Selection state mutations (`SelectNode`, `ToggleNodeSelection`, `DeselectAll`, `SelectNodesInRect`) do not push `CanvasCommand` entries. They are transient UI state, not scene graph mutations.
+The following actions do **not** push `CanvasCommand` entries — they are transient UI / camera state, not scene graph mutations:
+
+- **Selection** — `SelectNode`, `ToggleNodeSelection`, `DeselectAll`, `SelectNodesInRect`.
+- **Camera** — pan / pinch-zoom / rotate via `onGesture`, double-tap `reset()`, and `FocusNode(nodeId)` (animated frame focus). Camera state is persisted in the scene graph root, but its evolution within a session is not history.
+- **Mode** — `SetMode(target)` toggles between `Edit` / `View` / `Pesentation`. Clears selection as a side effect, but the cleared selection wasn't undoable in the first place.
+
+Rule of thumb: a `CanvasCommand` is pushed iff the action mutates `_allNodes` (or the count thereof).
 
 ---
 

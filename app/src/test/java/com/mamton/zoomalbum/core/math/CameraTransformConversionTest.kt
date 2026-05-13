@@ -77,12 +77,45 @@ class CameraTransformConversionTest {
         )
     }
 
-    /** Camera rotation is copied from Transform rotation. */
+    /**
+     * Camera rotation = -transform.rotation so canvas rotation cancels frame
+     * rotation, making the focused frame appear axis-aligned on screen.
+     */
     @Test
-    fun `toCamera copies rotation from transform`() {
+    fun `toCamera inverts transform rotation so frame appears axis-aligned`() {
         val transform = Transform(cx = 0f, cy = 0f, w = 100f, h = 100f, rotation = 45f)
         val camera = transform.toCamera(1080f, 1920f)
-        assertEquals(45f, camera.rotation, eps)
+        assertEquals(-45f, camera.rotation, eps)
+    }
+
+    /**
+     * When the frame is rotated AND off-origin, the translation must rotate the
+     * scaled-world vector through the camera rotation first. Without that the
+     * frame center lands at the wrong screen position.
+     *
+     * Setup: 100×100 frame at world (100, 0), rotation = 45°, square 1000×1000 screen.
+     *  scale = 1000 * 0.8 / 100 = 8
+     *  cameraRotation = -45°
+     *  rotate((100*8, 0), -45°) = (565.685, -565.685)
+     *  expected camera.cx = 500 - 565.685 = -65.685
+     *  expected camera.cy = 500 - (-565.685) = 1065.685
+     *
+     * Verify the round trip: applying the camera transform to (100, 0) must land
+     * at screen center (500, 500).
+     */
+    @Test
+    fun `toCamera centers rotated frame correctly`() {
+        val transform = Transform(cx = 100f, cy = 0f, w = 100f, h = 100f, rotation = 45f)
+        val camera = transform.toCamera(1000f, 1000f)
+
+        assertEquals(8f, camera.scale, eps)
+        assertEquals(-45f, camera.rotation, eps)
+
+        val (screenX, screenY) = TransformUtils.worldToScreen(
+            transform.cx, transform.cy, camera,
+        )
+        assertEquals(500f, screenX, 0.05f)
+        assertEquals(500f, screenY, 0.05f)
     }
 
     /**

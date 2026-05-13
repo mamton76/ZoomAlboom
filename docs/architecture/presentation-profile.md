@@ -117,7 +117,7 @@ Effective fit mode for a frame: `frame.presentation?.fitMode ?: album.profile.de
 val scale = minOf(screenW * fillFraction / renderW, screenH * fillFraction / renderH)
 ```
 
-For presentation work, parameterize by fit mode + safe-area inset:
+For presentation work, parameterize by fit mode + safe-area inset, and **invert the rotation so the focused frame appears axis-aligned on screen**:
 
 ```kotlin
 fun Transform.toCamera(
@@ -134,14 +134,24 @@ fun Transform.toCamera(
         FrameFitMode.COVER   -> maxOf(sx, sy)
         FrameFitMode.STRETCH -> sx // X-driven; Y handled separately if/when used
     }
+    // Cancel the frame's rotation — visible rotation = cameraRotation + frameRotation.
+    val cameraRotation = -rotation
+    // The camera transform is `screen = rotate(world * scale, cameraRotation) + (cx, cy)`,
+    // so the translation that centers world point (cx, cy) on screen has to rotate the
+    // scaled-world vector through the camera rotation first.
+    val (rotX, rotY) = TransformUtils.rotateVector(cx * scale, cy * scale, cameraRotation)
     return Camera(
-        cx = screenW / 2f - cx * scale,
-        cy = screenH / 2f - cy * scale,
+        cx = screenW / 2f - rotX,
+        cy = screenH / 2f - rotY,
         scale = scale,
-        rotation = rotation,
+        rotation = cameraRotation,
     )
 }
 ```
+
+Two easy mistakes here, both currently fixed in the implementation:
+1. `camera.rotation = transform.rotation` *doubles* the visible rotation (canvas rotates by R, frame's own rotation R applies on top → 2R). Always use `-rotation`.
+2. `camera.cx = screenW/2 - cx*scale` ignores camera rotation. The graphicsLayer applies translate after scale and rotate, so the scaled-world vector must be rotated before subtracting.
 
 Removing the hardcoded `0.9f` is project-wide — every existing caller needs to pass (or default) the profile-derived value. Small but touches several files.
 

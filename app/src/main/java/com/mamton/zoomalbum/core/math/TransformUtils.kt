@@ -308,9 +308,16 @@ object TransformUtils {
  * STRETCH — independent X/Y scale (ignores aspect ratio). Returns the X-driven
  *           uniform scale; non-uniform STRETCH rendering is the caller's concern.
  *
+ * Rotation: the returned camera rotates by **-transform.rotation** so the
+ * canvas-level rotation cancels the frame's own rotation — the frame appears
+ * axis-aligned on screen. (Visible rotation = cameraRotation + frameRotation.)
+ *
  * Camera.cx/cy are graphicsLayer translation values (screen-pixel units), not
- * world coordinates. The translation that places world point (wx, wy) at the
- * screen center is: cx = screenWidth/2 - wx*scale, cy = screenHeight/2 - wy*scale.
+ * world coordinates. The graphicsLayer transform is
+ *   screen = rotate(world * scale, cameraRotation) + (camera.cx, camera.cy).
+ * To place world point (wx, wy) at the screen center, we therefore rotate the
+ * scaled world vector first, then subtract from the screen-center vector:
+ *   (camera.cx, camera.cy) = (screenW/2, screenH/2) - rotate(wx*scale, wy*scale, cameraRotation).
  *
  * NOTE: Camera.scale and Transform.scale have different semantics —
  * do NOT copy one to the other.
@@ -331,10 +338,12 @@ fun Transform.toCamera(
         FrameFitMode.COVER -> maxOf(sx, sy)
         FrameFitMode.STRETCH -> sx
     }
+    val cameraRotation = -rotation
+    val (rotX, rotY) = TransformUtils.rotateVector(cx * scale, cy * scale, cameraRotation)
     return Camera(
-        cx = screenWidth / 2f - cx * scale,
-        cy = screenHeight / 2f - cy * scale,
+        cx = screenWidth / 2f - rotX,
+        cy = screenHeight / 2f - rotY,
         scale = scale,
-        rotation = rotation,
+        rotation = cameraRotation,
     )
 }

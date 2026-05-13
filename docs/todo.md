@@ -314,32 +314,41 @@ Extract the canvas rendering / navigation / interaction system as a reusable lib
 Two global modes that change gesture meaning. Layered on top of the existing canvas-first contextual modes (Navigate / Add content / Object selected, see [PRD § 12.6](product/PRD.md#126-canvas-first-chrome)) — modes gate *which* contextual modes are reachable.
 
 ### 12.1 Model
-- [ ] `enum class CanvasInteractionMode { Edit, View }` in `domain/model/`
-- [ ] `mode: CanvasInteractionMode` on `CanvasState` (default `Edit`)
-- [ ] `CanvasAction.SetMode(mode)`
-- [ ] Entering View clears selection
+- [x] `enum class CanvasInteractionMode { Edit, View }` in `domain/model/`
+- [x] `mode: CanvasInteractionMode` on `CanvasState` (default `Edit`)
+- [x] `CanvasAction.SetMode(mode)`
+- [x] Entering View clears selection (+ groupSelectionTransform, selectionRect)
+
+### 12.1a Camera focus animation (infrastructure)
+- [x] `CameraAnimation` data class — transient runtime state on `CanvasState`
+- [x] `CameraInterpolation.interpolate(from, to, t, easing)` — shortest-path angular lerp
+- [x] `CameraInterpolation.resolveTransition(preset, profileEasing, from, to)` — auto-duration + preset multiplier
+- [x] `EasingType.apply(t)` extension (LINEAR / EASE_IN / EASE_OUT / EASE_IN_OUT)
+- [x] `CanvasAction.FocusNode(nodeId)` action — looks up node, runs animation
+- [x] ViewModel coroutine ticks camera state at ~60Hz; cancels on any `onGesture`
 
 ### 12.2 View mode behavior
-- [ ] Tap on any node → `FocusNode(id)` — animated camera fit using `Transform.toCamera()`
-- [ ] Long-press / rect-select drag → no-op
-- [ ] Pan / pinch-zoom / rotate → unchanged (always active)
-- [ ] No selection overlays, no handles, no contextual action bar, no toolbars
+- [x] Tap on any node → `FocusNode(id)` — animated camera fit using `Transform.toCamera()`
+- [x] Long-press / rect-select drag → no-op (long-press consumed; no rect-select drag fallthrough)
+- [x] Pan / pinch-zoom / rotate → unchanged (always active)
+- [x] No selection overlays, no handles, no contextual action bar, no toolbars (selection cleared on mode entry; chrome auto-hides)
 
 ### 12.3 Gesture stack changes
 See [selection.md § 5](architecture/selection.md#5-gesture-stack):
-- [ ] Layer 1 (`nodeInteractionGestures`): early-return when `mode != Edit`
-- [ ] Layer 2 (`tapAndLongPressGestures`): branch on mode (Edit dispatches existing actions; View dispatches `FocusNode` / no-ops)
-- [ ] Layer 3 (`infiniteCanvasGestures`): unchanged
+- [x] Layer 1 (`nodeInteractionGestures`): early-returns on empty selection — selection is cleared whenever `mode != Edit`, so the layer is de-facto disabled in View/Presentation
+- [x] Layer 2 (`tapAndLongPressGestures`): branches on mode in `CanvasScreen` (Edit dispatches existing actions; View/Presentation dispatches `FocusNode` and swallows long-press)
+- [x] Layer 3 (`infiniteCanvasGestures`): unchanged
 
 ### 12.4 UI
-- [ ] Toggle in `CanvasTopBar` (Edit ⇄ View) — explicit button
-- [ ] Edit-only chrome (toolbar, action bar, layer popover) hidden in View
+- [x] Toggle in `CanvasTopBar` (Edit ⇄ View) — text button; cycles Edit ↔ View, Presentation reachable programmatically
+- [x] Edit-only chrome (toolbar, action bar, layer popover) hidden in View (auto via empty selection)
+- [x] FrameList row tap dispatches `FocusNode` + dismisses sheet (works in both Edit and View)
 
 ### 12.5 Persistence
 - [ ] `mode` saved to `ide_workspaces` (UI state)
 
 ### 12.6 Future
-- A "Present" mode for shared/published albums (read-only, no album-list overflow). Out of MVP — see [open-questions.md § 5](architecture/open-questions.md).
+- A "Present" mode for shared/published albums (read-only, no album-list overflow). Out of MVP — see [open-questions.md § 5](architecture/open-questions.md). Enum value (`Pesentation`) reserved on `CanvasInteractionMode`; UI surface deferred.
 
 ---
 

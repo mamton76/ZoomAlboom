@@ -21,6 +21,7 @@ fun FrameListBottomSheet(
     onDeleteFrame: (String) -> Unit,
     onDismiss: () -> Unit,
     visibleFrameIds: Set<String> = emptySet(),
+    onFocusFrame: ((String) -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState()
 
@@ -38,6 +39,7 @@ fun FrameListBottomSheet(
             frames = frames,
             onDeleteFrame = onDeleteFrame,
             visibleFrameIds = visibleFrameIds,
+            onFocusFrame = onFocusFrame,
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 100.dp, max = 400.dp),

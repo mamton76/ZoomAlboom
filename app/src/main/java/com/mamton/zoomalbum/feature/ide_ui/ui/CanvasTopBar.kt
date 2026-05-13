@@ -15,6 +15,7 @@ import com.mamton.zoomalbum.core.designsystem.PanelBackground
 import com.mamton.zoomalbum.core.designsystem.TextPrimary
 import com.mamton.zoomalbum.core.designsystem.TextSecondary
 import com.mamton.zoomalbum.core.math.Camera
+import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,6 +32,8 @@ fun CanvasTopBar(
     onNavigateBack: () -> Unit,
     onOpenFrameList: () -> Unit,
     onOpenPanelConfig: () -> Unit,
+    mode: CanvasInteractionMode = CanvasInteractionMode.Edit,
+    onToggleMode: () -> Unit = {},
 ) {
     TopAppBar(
         title = {
@@ -62,6 +65,16 @@ fun CanvasTopBar(
         actions = {
             IconButton(onClick = onUndo ?: {}, enabled = onUndo != null) { Text("↶") } // undo
             IconButton(onClick = onRedo ?: {}, enabled = onRedo != null) { Text("↷") } // redo
+            IconButton(onClick = onToggleMode) {
+                Text(
+                    text = when (mode) {
+                        CanvasInteractionMode.Edit -> "Edit"
+                        CanvasInteractionMode.View -> "View"
+                        CanvasInteractionMode.Pesentation -> "Pres"
+                    },
+                    fontSize = 11.sp,
+                )
+            }
             IconButton(onClick = onOpenFrameList) { Text("\u2630") } // ☰ hamburger
             IconButton(onClick = onOpenPanelConfig) { Text("\u2699") } // ⚙ gear
         },

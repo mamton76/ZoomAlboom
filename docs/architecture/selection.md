@@ -20,6 +20,8 @@ Selection is the canvas's interaction focus — the set of nodes that group oper
 
 Touch-first. There are no modifier keys, so meaning is encoded in tap vs long-press, and in whether the gesture starts on a node, on empty space, or on a stack.
 
+The table below describes **Edit mode** behavior. For non-Edit modes see [§ 7 Mode Interaction](#7-mode-interaction).
+
 | Gesture | Result | Action dispatched |
 |---------|--------|-------------------|
 | Tap on a node | **Replace** — selection becomes `{node}` | `SelectNode(id)` |
@@ -30,7 +32,7 @@ Touch-first. There are no modifier keys, so meaning is encoded in tap vs long-pr
 | Frame-list item tap | Replace with one node | `SelectNode(id)` |
 | Double-tap anywhere | Camera reset (unrelated to selection) | — |
 | Drag on a selected node body | Move the whole selection | `MoveSelection(dx, dy)` |
-| Drag on a corner handle | Resize the selection rigidly | `ResizeSelection(factor)` |
+| Drag on a corner handle | Resize the selection rigidly around the **opposite corner** (corner-anchored) | `ResizeSelection(factor, pivotX, pivotY)` |
 | Drag on the rotation handle | Rotate the selection rigidly | `RotateSelection(Δ)` |
 
 **Rationale:**
@@ -115,3 +117,21 @@ Two-or-more-finger camera pan / pinch-zoom / rotate. Single-finger events pass t
 - **Overlap picker dispatches `SelectNode` (replace), not toggle.** Long-press on a stack of nodes shows the picker and replaces selection with the chosen one — there's no path to toggle a single overlapping node into an existing multi-selection. Revisit when the picker UX is reworked.
 - **Single-tap result has a ~300 ms delay** because Phase 3 of `tapAndLongPressGestures` waits `DOUBLE_TAP_MS` to disambiguate from double-tap. Inherent to the gesture design; could be tuned if it becomes a complaint.
 - **Selection mutations are not undoable.** `SelectNode`, `ToggleNodeSelection`, `DeselectAll`, `SelectNodesInRect` do not push `CanvasCommand` entries. Only structural mutations (move, resize, rotate, add, delete, duplicate) are undoable.
+
+## 7. Mode Interaction
+
+The gesture stack is **selection-aware**, not directly mode-aware. `CanvasAction.SetMode(target)` clears `selectedNodeIds` (and `groupSelectionTransform`, `selectionRect`) whenever `target != Edit`. Every layer then behaves correctly without per-mode branches inside the detectors:
+
+| Layer | Edit | View / Pesentation |
+|-------|------|---------------------|
+| 1 — `nodeInteractionGestures` | Active on non-empty selection | Dormant — selection always empty, the modifier early-returns at the top of its `pointerInput` block |
+| 2 — `tapAndLongPressGestures` | Tap → `SelectNode` / `DeselectAll`; long-press → toggle / overlap picker / rect-select | Tap → `FocusNode(hit.id)` if there's a hit, no-op otherwise; long-press is swallowed (returns `true`) — no overlap picker, no rect-select fallthrough |
+| 3 — `infiniteCanvasGestures` | Unchanged | Unchanged — pan / pinch / rotate always work, and they cancel any in-flight focus animation |
+
+The branch lives in `CanvasScreen.kt`'s `onTap` / `onLongPress` callbacks, not in the detector itself. This keeps the gesture detectors mode-agnostic and reusable when the `:canvas-engine` extraction lands.
+
+**Selection chrome auto-hides in non-Edit modes** because `SelectionOverlay`, the resize/rotation handle overlays, and `ContextualActionBar` all key off `selectedNodeIds.isNotEmpty()`. No mode flag needed in their composables.
+
+**`FrameListBottomSheet` tap-to-focus works in both Edit and View** — the row-click handler dispatches `FocusNode(frameId)` and dismisses the sheet, regardless of mode. The TopBar toggle currently cycles Edit ↔ View; `Pesentation` is reachable only via `SetMode` programmatically (reserved for a future Present surface).
+
+See [navigation.md § Animated Frame Focus](navigation.md#animated-frame-focus) for what `FocusNode` does after dispatch.

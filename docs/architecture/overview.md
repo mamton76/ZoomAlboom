@@ -105,11 +105,21 @@ See [rendering.md](rendering.md) § IDE Overlay.
 
 ### Canvas-First Default
 
-The default UI uses minimal chrome to maximize canvas visibility. Three modes drive the UI surface:
+The default UI uses minimal chrome to maximize canvas visibility. Three **contextual** modes drive the chrome surface:
 
-1. **Navigate mode** (default) — canvas takes ~100% of screen. `CanvasTopBar` (album name, node count HUD, zoom/rotation/xy, back, ☰ frame list, ⚙ panel config) and a FAB [+] bottom-right.
+1. **Navigate mode** (default) — canvas takes ~100% of screen. `CanvasTopBar` (album name, node count HUD, zoom/rotation/xy, back, Edit/View toggle, ☰ frame list, ⚙ panel config) and a FAB [+] bottom-right.
 2. **Add content mode** (FAB tap) — `AddContentBottomSheet` slides up with a content type picker (Frame + media types: Photo, Video, Audio, Text, Sticker, Vector; future: AnimatedPhoto). Canvas remains visible behind the sheet.
-3. **Object selected mode** (node tap) — `ContextualActionBar` appears at the bottom (stub; awaits §4.2 node interaction). Disappears on deselection.
+3. **Object selected mode** (node tap in Edit mode) — `ContextualActionBar` appears at the bottom. Disappears on deselection.
+
+On top of those contextual modes sits a **global interaction mode** that gates *which* contextual modes are reachable:
+
+| `CanvasInteractionMode` | Tap on node | Selection chrome | Notes |
+|--------------------------|-------------|------------------|-------|
+| `Edit` (default) | Replace selection | Visible | Full editor; all of the above contextual modes apply. |
+| `View` | Animated focus (`FocusNode`) | Hidden (selection always empty) | Read-only navigation; long-press / rect-select are no-ops. |
+| `Pesentation` | Same as `View` | Hidden | Reserved for the post-MVP Present surface (no UI yet). |
+
+The TopBar Edit/View toggle drives the global mode. See [navigation.md § Canvas Interaction Mode](navigation.md#canvas-interaction-mode) and [selection.md § 7](selection.md#7-mode-interaction).
 
 **Bottom sheets** (`AddContentBottomSheet`, `FrameListBottomSheet`) are the primary UI surface for canvas-first users, alongside the opt-in IDE panel system.
 
@@ -129,7 +139,7 @@ Three navigation levels:
 
 1. **App-level** — Jetpack Navigation between screens (`PROJECTS_HOME` -> `CANVAS/{albumId}`), wired into `MainActivity` via `AppNavigation`.
 2. **In-album camera** — pan / zoom / rotate via gestures. Continuous, user-driven.
-3. **Frame transitions** — animated camera interpolation (linear/bezier) to focus on a frame. Discrete, intent-driven.
+3. **Frame transitions** — `CanvasAction.FocusNode(nodeId)` animates the camera to `node.transform.toCamera(...)` using the album profile's `TransitionPreset` + `EasingType` (defaults: SOFT / EASE_IN_OUT). Discrete, intent-driven; the transient animation state lives on `CanvasState.cameraAnimation` and is cancelled by any pan/pinch/rotate gesture. See [navigation.md § Animated Frame Focus](navigation.md#animated-frame-focus).
 
 ## Tech Stack
 

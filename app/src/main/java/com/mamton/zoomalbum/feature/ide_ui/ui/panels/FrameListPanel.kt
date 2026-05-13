@@ -11,11 +11,13 @@ fun FrameListPanel(
     onDeleteFrame: (String) -> Unit,
     modifier: Modifier = Modifier,
     visibleFrameIds: Set<String> = emptySet(),
+    onFocusFrame: ((String) -> Unit)? = null,
 ) {
     FrameListContent(
         frames = frames,
         onDeleteFrame = onDeleteFrame,
         visibleFrameIds = visibleFrameIds,
+        onFocusFrame = onFocusFrame,
         modifier = modifier,
     )
 }

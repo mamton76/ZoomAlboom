@@ -16,6 +16,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mamton.zoomalbum.core.designsystem.CanvasDark
 import com.mamton.zoomalbum.core.math.TransformUtils
+import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.feature.canvas.gestures.infiniteCanvasGestures
 import com.mamton.zoomalbum.feature.canvas.gestures.nodeInteractionGestures
@@ -77,17 +78,31 @@ fun CanvasScreen(
                     }
                     val diagonalLen = kotlin.math.sqrt(cornerX * cornerX + cornerY * cornerY)
                     if (diagonalLen < 0.001f) return@nodeInteractionGestures
+
+                    // Pivot = opposite corner in world coords. Stays geometrically fixed
+                    // throughout the gesture; the per-event recomputation produces the
+                    // same world point because the rect grows symmetrically around it.
+                    val (oppXRot, oppYRot) = TransformUtils.rotateVector(
+                        -cornerX, -cornerY, t.rotation,
+                    )
+                    val pivotX = t.cx + oppXRot
+                    val pivotY = t.cy + oppYRot
+
                     val (worldDx, worldDy) = TransformUtils.screenDeltaToWorld(dx, dy, state.camera)
                     val (localDx, localDy) = TransformUtils.rotateVector(
-                        worldDx,
-                        worldDy,
-                        -t.rotation
+                        worldDx, worldDy, -t.rotation,
                     )
                     val dirX = cornerX / diagonalLen
                     val dirY = cornerY / diagonalLen
                     val projection = localDx * dirX + localDy * dirY
-                    val scaleFactor = (diagonalLen + projection) / diagonalLen
-                    viewModel.onAction(CanvasAction.ResizeSelection(scaleFactor))
+
+                    // Distance from pivot (opposite corner) to dragged corner = 2 * diagonalLen
+                    // (the full diagonal). The scale factor is the relative change in that distance.
+                    val fullDiag = 2f * diagonalLen
+                    val scaleFactor = (fullDiag + projection) / fullDiag
+                    viewModel.onAction(
+                        CanvasAction.ResizeSelection(scaleFactor, pivotX, pivotY),
+                    )
                 },
                 onRotationDragPosition = { screenX, screenY ->
                     // Pivot = selection transform center (single node or group rect center).
@@ -128,18 +143,31 @@ fun CanvasScreen(
             // Layer 2: tap + double-tap + long-press+drag — single Main pass handler
             .tapAndLongPressGestures(
                 onTap = { offset ->
-                    // Tap = replace-style selection. Hit → {node}; miss → clear.
-                    // To add/remove individual nodes, use long-press (toggle).
                     val hit = viewModel.hitTest(offset.x, offset.y)
-                    if (hit != null) {
-                        viewModel.onAction(CanvasAction.SelectNode(hit.id))
-                    } else {
-                        viewModel.onAction(CanvasAction.DeselectAll)
+                    when (state.mode) {
+                        CanvasInteractionMode.Edit -> {
+                            // Tap = replace-style selection. Hit → {node}; miss → clear.
+                            // To add/remove individual nodes, use long-press (toggle).
+                            if (hit != null) {
+                                viewModel.onAction(CanvasAction.SelectNode(hit.id))
+                            } else {
+                                viewModel.onAction(CanvasAction.DeselectAll)
+                            }
+                        }
+                        CanvasInteractionMode.View,
+                        CanvasInteractionMode.Pesentation -> {
+                            // View / Presentation: tap a node to focus it. Miss = no-op.
+                            if (hit != null) viewModel.onAction(CanvasAction.FocusNode(hit.id))
+                        }
                     }
                 },
                 onDoubleTap = { viewModel.reset() },
                 onLongPress = { screenX, screenY ->
-                    // Long-press routing:
+                    // View / Presentation: swallow long-press — no overlap picker,
+                    // no selection toggle, no rect-select drag.
+                    if (state.mode != CanvasInteractionMode.Edit) return@tapAndLongPressGestures true
+
+                    // Edit long-press routing:
                     //   >1 hits → overlap picker dialog (consume)
                     //   1 hit   → toggle that node in selection (consume; no rect drag)
                     //   0 hits  → fall through to rect-select drag

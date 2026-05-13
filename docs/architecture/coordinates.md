@@ -126,6 +126,40 @@ Two consequences:
 - A frame created with `nodeRotation = −cameraRotation` appears axis-aligned on screen (see [rendering § 7](rendering.md#7-node-creation)).
 - A group selection rect stored with `rotation = −cameraRotation` at formation time appears screen-aligned, then pins to the world as the camera rotates further (§9).
 
+## 8.1 Frame-Focus Camera (`Transform.toCamera`)
+
+`Transform.toCamera(screenW, screenH, fitMode, safeAreaInset): Camera` produces the camera state that centers a node on screen with the frame appearing axis-aligned. Used by `FocusNode` ([navigation.md § Animated Frame Focus](navigation.md#animated-frame-focus)).
+
+```kotlin
+val fill = 1f - safeAreaInset * 2f
+val sx = (screenW * fill) / renderW
+val sy = (screenH * fill) / renderH
+val scale = when (fitMode) {
+    CONTAIN -> minOf(sx, sy)
+    COVER   -> maxOf(sx, sy)
+    STRETCH -> sx
+}
+// Cancel the frame's rotation — visible rotation = cameraRotation + frameRotation.
+val cameraRotation = -rotation
+// Camera transform: screen = rotate(world * scale, cameraRotation) + (cx, cy).
+// To land world point (cx, cy) at screen center, rotate the scaled-world vector
+// FIRST, then subtract from the screen-center vector.
+val (rotX, rotY) = rotateVector(cx * scale, cy * scale, cameraRotation)
+Camera(
+    cx = screenW / 2f - rotX,
+    cy = screenH / 2f - rotY,
+    scale = scale,
+    rotation = cameraRotation,
+)
+```
+
+Two traps in this formula, both easy to get wrong:
+
+1. **`camera.rotation = transform.rotation`** would *double* the visible rotation (canvas rotates by R, frame's own R applies on top → 2R). The inverse — `-rotation` — is what cancels it.
+2. **`camera.cx = screenW/2 − cx*scale`** is wrong whenever `camera.rotation ≠ 0`. graphicsLayer applies translate *after* scale+rotate, so the scaled-world vector must be rotated through `cameraRotation` before subtracting.
+
+Both traps were once present in the implementation; they only manifest on rotated frames, so they survived until rotated-frame focus actually shipped. If you add another "compute a camera from a target" function, follow the same pattern (rotate, then translate).
+
 ## 9. Group Selection Rect — Invariants
 
 The multi-selection rectangle (`CanvasState.groupSelectionTransform`, built by `TransformUtils.screenAlignedGroupTransform`) is a **rigid-body handle** around the selection, not a tight recomputed bounding box:
@@ -134,7 +168,9 @@ The multi-selection rectangle (`CanvasState.groupSelectionTransform`, built by `
 2. **After formation, the rect is pinned to world.** Camera pan/zoom/rotate do not mutate it — they appear to rotate/scale it on screen because rendering applies the camera transform on top.
 3. **Move:** translate the rect's `(cx, cy)` by the same world delta as the nodes.
 4. **Rotate (handle or two-finger):** rigid-body. `rect.rotation += Δ`. `w`, `h` unchanged. All selected nodes rotate around `(rect.cx, rect.cy)` and their own `rotation` accumulates by `Δ`.
-5. **Resize (corner handle):** rigid-body uniform scale. Pivot = `(rect.cx, rect.cy)`. `rect.w *= factor`, `rect.h *= factor`. Each node's `(cx, cy)` translates away from the pivot by `factor`, and its `scale *= factor`. Shape is preserved.
+5. **Resize (corner handle):** rigid-body uniform scale, **corner-anchored**. Pivot = world position of the corner *opposite* the dragged handle (computed from the rect's local opposite-corner offset rotated by `rect.rotation` and translated by `(rect.cx, rect.cy)`). `rect.cx`, `rect.cy` move with the pivot too — `newCx = pivotX + (rect.cx − pivotX) * factor`, same for `cy`. `rect.w *= factor`, `rect.h *= factor`. Each node's `(cx, cy)` translates away from the pivot by `factor`, and its `scale *= factor`. Shape is preserved.
+
+   Scale-factor derivation on the screen side: the dragged corner sits at `2 × diagonalLen` from the opposite-corner pivot (the full diagonal). The drag delta projected onto the local diagonal direction gives `projection`, and `factor = (2*diag + projection) / (2*diag)`. Using `diag` (center-to-corner) here would over-scale by 2×.
 6. **Never** recompute the rect at the end of a gesture — that would snap it back to screen-aligned and destroy the user's rotation/resize.
 
 Add/remove from selection is the *only* event that recomputes the rect, and recomputation always re-anchors it to the current screen axes.

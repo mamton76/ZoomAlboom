@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
 import com.mamton.zoomalbum.domain.model.RenderDetail
@@ -87,6 +88,17 @@ fun CanvasScaffold(
                 onNavigateBack = onNavigateBack,
                 onOpenFrameList = { showFrameList = true },
                 onOpenPanelConfig = { showPanelConfig = true },
+                mode = canvasState.mode,
+                onToggleMode = {
+                    val next = if (canvasState.mode == CanvasInteractionMode.Edit) {
+                        CanvasInteractionMode.View
+                    } else {
+                        CanvasInteractionMode.Edit
+                    }
+                    canvasViewModel.onAction(
+                        com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.SetMode(next),
+                    )
+                },
             )
         },
         floatingActionButton = {
@@ -185,6 +197,12 @@ fun CanvasScaffold(
             onDeleteFrame = { canvasViewModel.removeNode(it) },
             onDismiss = { showFrameList = false },
             visibleFrameIds = visibleFrameIds,
+            onFocusFrame = { frameId ->
+                canvasViewModel.onAction(
+                    com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.FocusNode(frameId),
+                )
+                showFrameList = false
+            },
         )
     }
 

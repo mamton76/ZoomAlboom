@@ -1,6 +1,7 @@
 package com.mamton.zoomalbum.feature.ide_ui.ui.content
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -38,6 +39,7 @@ fun FrameListContent(
     onDeleteFrame: (String) -> Unit,
     modifier: Modifier = Modifier,
     visibleFrameIds: Set<String> = emptySet(),
+    onFocusFrame: ((String) -> Unit)? = null,
 ) {
     if (frames.isEmpty()) {
         Box(
@@ -64,6 +66,7 @@ fun FrameListContent(
                     frame = frame,
                     isVisible = frame.id in visibleFrameIds,
                     onDelete = { onDeleteFrame(frame.id) },
+                    onFocus = onFocusFrame?.let { focus -> { focus(frame.id) } },
                 )
             }
         }
@@ -75,6 +78,7 @@ private fun FrameListItem(
     frame: CanvasNode.Frame,
     isVisible: Boolean,
     onDelete: () -> Unit,
+    onFocus: (() -> Unit)? = null,
 ) {
     val frameColor = Color(frame.color.toColorInt())
     val displayName = frame.label.ifEmpty { frame.id }
@@ -88,7 +92,8 @@ private fun FrameListItem(
                 if (isVisible) Modifier.border(1.dp, frameColor.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
                 else Modifier
             )
-            .padding(horizontal = if (isVisible) 8.dp else 0.dp),
+            .padding(horizontal = if (isVisible) 8.dp else 0.dp)
+            .then(if (onFocus != null) Modifier.clickable { onFocus() } else Modifier),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {

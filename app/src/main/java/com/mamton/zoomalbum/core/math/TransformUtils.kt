@@ -1,6 +1,7 @@
 package com.mamton.zoomalbum.core.math
 
 import com.mamton.zoomalbum.domain.model.CanvasNode
+import com.mamton.zoomalbum.domain.model.FrameFitMode
 import com.mamton.zoomalbum.domain.model.Transform
 import kotlin.math.abs
 import kotlin.math.cos
@@ -295,8 +296,17 @@ object TransformUtils {
 }
 
 /**
- * Compute the [Camera] state that centers this [Transform] on screen and
- * scales it so its render size fills [fillFraction] of the screen.
+ * Compute the [Camera] state that centers this [Transform] on screen using the
+ * presentation profile's fit mode and safe-area inset.
+ *
+ * [safeAreaInset] is a fractional inset applied to each axis (0.1 = 10% on each side
+ * → 80% of the screen filled by the frame at CONTAIN fit).
+ *
+ * CONTAIN — frame fully visible (min scale). May leave letterbox bars; what fills
+ *           them is governed by `OutsideFrameMode` at render time.
+ * COVER   — frame fills the viewport (max scale). May crop the frame off-axis.
+ * STRETCH — independent X/Y scale (ignores aspect ratio). Returns the X-driven
+ *           uniform scale; non-uniform STRETCH rendering is the caller's concern.
  *
  * Camera.cx/cy are graphicsLayer translation values (screen-pixel units), not
  * world coordinates. The translation that places world point (wx, wy) at the
@@ -310,11 +320,17 @@ object TransformUtils {
 fun Transform.toCamera(
     screenWidth: Float,
     screenHeight: Float,
-    fillFraction: Float = 0.9f,
+    fitMode: FrameFitMode = FrameFitMode.CONTAIN,
+    safeAreaInset: Float = 0.1f,
 ): Camera {
-    val fitScaleW = (screenWidth * fillFraction) / renderW
-    val fitScaleH = (screenHeight * fillFraction) / renderH
-    val scale = minOf(fitScaleW, fitScaleH)
+    val fill = 1f - safeAreaInset * 2f
+    val sx = (screenWidth * fill) / renderW
+    val sy = (screenHeight * fill) / renderH
+    val scale = when (fitMode) {
+        FrameFitMode.CONTAIN -> minOf(sx, sy)
+        FrameFitMode.COVER -> maxOf(sx, sy)
+        FrameFitMode.STRETCH -> sx
+    }
     return Camera(
         cx = screenWidth / 2f - cx * scale,
         cy = screenHeight / 2f - cy * scale,

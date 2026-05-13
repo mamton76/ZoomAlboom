@@ -689,11 +689,13 @@ See [architecture/presentation-profile.md](architecture/presentation-profile.md)
 **Depends on §1.3** (scene graph root wrapper) — the profile lives in the JSON root alongside `albumBackground`.
 
 ### 22.1 Domain model
-- [x] `AlbumPresentationProfile` — aspectRatio, orientation, defaultFitMode, defaultOutsideMode, safeAreaInset
+- [x] `AlbumPresentationProfile` — aspectRatio, orientation, defaultFitMode, defaultOutsideMode, safeAreaInset, defaultTransitionPreset, defaultEasing
 - [x] `AspectRatio` sealed class — R_16_9, R_9_16, R_4_3, R_3_4, Square, Free, Custom(w, h)
 - [x] `Orientation` enum — Landscape, Portrait
 - [x] `FrameFitMode` enum — CONTAIN (MVP default), COVER, STRETCH
 - [x] `OutsideFrameMode` enum — ALBUM_BACKGROUND, SOLID_FILL, BLURRED_BACKDROP (last is post-MVP)
+- [x] `EasingType` enum — LINEAR, EASE_IN, EASE_OUT, EASE_IN_OUT (shared with future transition editor)
+- [x] `TransitionPreset` enum — CALM, SOFT (MVP default), FAST, LINEAR, CUSTOM (last is post-MVP)
 - [x] All `@Serializable`
 
 ### 22.2 Scene graph integration
@@ -701,15 +703,16 @@ See [architecture/presentation-profile.md](architecture/presentation-profile.md)
 - [x] `SceneGraphSerializer` reads/writes profile (`ignoreUnknownKeys` covers old files)
 
 ### 22.3 Camera math
-- [ ] Parameterize `Transform.toCamera()` by `FrameFitMode` + `safeAreaInset`
-- [ ] Remove hardcoded `fillFraction = 0.9f`; default to profile or `0.1f` safe area
-- [ ] CONTAIN uses `min(sx, sy)`; COVER uses `max(sx, sy)`
-- [ ] Update all callers to thread profile (or default) through
+- [x] Parameterize `Transform.toCamera()` by `FrameFitMode` + `safeAreaInset`
+- [x] Remove hardcoded `fillFraction = 0.9f`; default to profile or `0.1f` safe area
+- [x] CONTAIN uses `min(sx, sy)`; COVER uses `max(sx, sy)`; STRETCH is X-driven
+- [x] Update all callers to thread profile (or default) through (no production callers yet; tests updated)
 
 ### 22.4 Frame creation defaults
-- [ ] `CanvasNodeFactory.Frame` fits album aspect ratio inside the current viewport budget
-- [ ] `AspectRatio.Free` skips the ratio fit (preserves current behavior)
-- [ ] Preserve `1/camera.scale` rebase trick — `w/h` stay camera-independent
+- [x] `CanvasNodeFactory.Frame` fits album aspect ratio inside the current viewport budget
+- [x] `AspectRatio.Free` (and `profile == null`) skips the ratio fit (preserves current behavior)
+- [x] Preserve `1/camera.scale` rebase trick — `w/h` stay camera-independent
+- [x] `AspectRatio.numericRatio()` helper in `AlbumPresentationProfile.kt`
 
 ### 22.5 Editor overlays
 - [ ] `PresentationOverlayRenderer` composable — drawn inside camera `graphicsLayer`, world-locked, strokes scaled by `1/camera.scale`

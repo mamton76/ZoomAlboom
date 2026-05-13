@@ -15,12 +15,19 @@ object CanvasNodeFactory {
     )
 
     /**
-     * Creates a frame centered in the viewport, ~80% of visible area.
+     * Creates a frame centered in the viewport, fitting the album's presentation
+     * aspect ratio inside a viewport budget of ~80% of the visible area.
      *
      * Frame dimensions are derived from screen pixels / camera.scale — NOT from
      * the viewport AABB. The AABB expands when the camera is rotated (at 45° it is
      * nearly square even on a portrait screen), so using it for w/h produces wrong
      * aspect ratios. Screen pixels are always rotation-independent.
+     *
+     * Aspect rules:
+     *  - `profile == null` or `AspectRatio.Free` → frame fills the full budget rect
+     *    (preserves the legacy "free-ratio frame" behavior).
+     *  - Any other ratio → the ratio rect is fitted inside the budget rect, leaving
+     *    the shorter axis padded.
      *
      * viewport is only used for cx/cy (the world point at the screen center).
      * rotation = -camera.rotation so the frame appears axis-aligned on screen.
@@ -36,13 +43,25 @@ object CanvasNodeFactory {
         viewport: BoundingBox,
         nextZIndex: Float,
         camera: Camera,
+        profile: AlbumPresentationProfile? = null,
     ): CanvasNode.Frame {
         // Visible world extent along screen axes — rotation-independent.
         val visibleWorldW = screenWidth / camera.scale
         val visibleWorldH = screenHeight / camera.scale
 
-        val targetRenderW = visibleWorldW * 0.8f
-        val targetRenderH = visibleWorldH * 0.8f
+        val budgetW = visibleWorldW * 0.8f
+        val budgetH = visibleWorldH * 0.8f
+
+        val ratio = profile?.aspectRatio?.numericRatio()
+        val (targetRenderW, targetRenderH) = if (ratio == null) {
+            budgetW to budgetH
+        } else {
+            // Fit a (ratio:1) rect inside the budget — width-driven if it fits, else height-driven.
+            val byWidth = budgetW / ratio
+            if (byWidth <= budgetH) budgetW to byWidth
+            else budgetH * ratio to budgetH
+        }
+
         val initialScale = 1f / camera.scale
 
         return CanvasNode.Frame(

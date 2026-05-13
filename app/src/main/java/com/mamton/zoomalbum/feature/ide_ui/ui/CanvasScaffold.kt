@@ -157,6 +157,7 @@ fun CanvasScaffold(
                             viewport = viewport,
                             nextZIndex = zIndex,
                             camera = camera,
+                            profile = canvasState.profile,
                         )
                     }
                     "Photo" -> {

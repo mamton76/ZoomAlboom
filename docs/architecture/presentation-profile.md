@@ -30,6 +30,8 @@ data class AlbumPresentationProfile(
     val defaultFitMode: FrameFitMode = FrameFitMode.CONTAIN,
     val defaultOutsideMode: OutsideFrameMode = OutsideFrameMode.ALBUM_BACKGROUND,
     val safeAreaInset: Float = 0.1f, // fractional inset on the shorter axis
+    val defaultTransitionPreset: TransitionPreset = TransitionPreset.SOFT,
+    val defaultEasing: EasingType = EasingType.EASE_IN_OUT,
 )
 
 @Serializable
@@ -56,7 +58,19 @@ sealed class AspectRatio {
     BLURRED_BACKDROP,  // blurred sample (post-MVP for full fidelity; see § 6)
     SOLID_FILL,        // single dark/desaturated color
 }
+
+@Serializable enum class EasingType { LINEAR, EASE_IN, EASE_OUT, EASE_IN_OUT }
+
+@Serializable enum class TransitionPreset {
+    CALM,    // ease-in-out, 1.2× auto duration
+    SOFT,    // ease-in-out, 1.0× auto duration, slight midpoint zoom-out (MVP default)
+    FAST,    // ease-out, 0.5× auto duration
+    LINEAR,  // linear, 1.0× auto duration
+    CUSTOM,  // per-segment overrides (post-MVP transition editor only)
+}
 ```
+
+`EasingType` and `TransitionPreset` are pre-shared with the future transition editor (see [transition-editor.md](future-features/transition-editor.md)) so the editor adds `FrameTransition` / waypoints without forcing a profile migration.
 
 Per-frame override (post-MVP, see § 7):
 
@@ -167,6 +181,19 @@ A new render layer drawn **inside** the camera `graphicsLayer` (world-locked, zo
 | Target profile preview | a hypothetical device with the profile's aspect ratio (fixed pixel diagonal, e.g. 6") | TopBar |
 
 Visible in **Edit mode only**. Not visible in View/Present mode (that's what the actual viewport is for).
+
+## 7a. Motion Defaults
+
+Frame-to-frame navigation (`FocusNode`) needs a default camera-interpolation style. The profile owns the album-wide default; per-edge overrides live in `FrameTransition` (post-MVP, see [transition-editor.md](future-features/transition-editor.md)).
+
+| Field | Purpose |
+|-------|---------|
+| `defaultTransitionPreset` | High-level motion style (CALM / SOFT / FAST / LINEAR). Encodes easing + duration multiplier + optional midpoint zoom-out. |
+| `defaultEasing` | Low-level curve used when `preset == LINEAR` or as a fallback (e.g. for the future `CUSTOM` preset). |
+
+Auto-duration is computed at navigation time from world distance + zoom-ratio (formula in [transition-editor.md § Auto-Duration Formula](future-features/transition-editor.md#auto-duration-formula)) and scaled by the preset's multiplier. The profile stores style, not duration — every transition is distance-aware.
+
+Runtime animation state (source camera, target camera, progress) is **transient**, never persisted. Pan/zoom gestures during a focus animation cancel it.
 
 ## 8. Mode Interaction
 

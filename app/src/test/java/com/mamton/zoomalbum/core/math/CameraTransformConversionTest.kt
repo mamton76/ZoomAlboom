@@ -1,5 +1,6 @@
 package com.mamton.zoomalbum.core.math
 
+import com.mamton.zoomalbum.domain.model.FrameFitMode
 import com.mamton.zoomalbum.domain.model.Transform
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -17,7 +18,8 @@ class CameraTransformConversionTest {
 
     /**
      * A 800×600 frame at world (100, 200) with scale=1 on a 1080×1920 screen.
-     * Expected camera scale = min(1080*0.9/800, 1920*0.9/600) = min(1.215, 2.88) = 1.215.
+     * Default safeAreaInset = 0.1 → fill = 0.8 on each axis.
+     * Expected camera scale = min(1080*0.8/800, 1920*0.8/600) = min(1.08, 2.56) = 1.08.
      * Camera cx/cy should place the frame center at screen center.
      */
     @Test
@@ -32,8 +34,8 @@ class CameraTransformConversionTest {
         )
         val camera = transform.toCamera(screenWidth = 1080f, screenHeight = 1920f)
 
-        // Scale: frame width should fill 90% of screen width
-        val expectedScale = (1080f * 0.9f) / 800f  // 1.215
+        // CONTAIN at default safeAreaInset=0.1 → 80% width fill is the binding axis.
+        val expectedScale = (1080f * 0.8f) / 800f  // 1.08
         assertEquals(expectedScale, camera.scale, eps)
 
         // cx/cy: place frame center at screen center
@@ -84,18 +86,32 @@ class CameraTransformConversionTest {
     }
 
     /**
-     * Larger fillFraction → more zoomed in → larger camera scale.
-     * scale = screenWidth * fillFraction / renderW.
+     * Smaller safeAreaInset → less padding → larger camera scale.
+     * scale = screenWidth * (1 - 2*inset) / renderW.
      */
     @Test
-    fun `toCamera respects fillFraction - larger fraction means more zoom`() {
+    fun `toCamera respects safeAreaInset - smaller inset means more zoom`() {
         val transform = Transform(cx = 0f, cy = 0f, w = 200f, h = 200f, scale = 1f)
-        val camera50 = transform.toCamera(1000f, 1000f, fillFraction = 0.5f)
-        val camera90 = transform.toCamera(1000f, 1000f, fillFraction = 0.9f)
-        // fillFraction=0.9 → scale=4.5, fillFraction=0.5 → scale=2.5
+        val cameraInset25 = transform.toCamera(1000f, 1000f, safeAreaInset = 0.25f)  // fill=0.5
+        val cameraInset05 = transform.toCamera(1000f, 1000f, safeAreaInset = 0.05f)  // fill=0.9
         assertTrue(
-            "fillFraction=0.9 scale (${camera90.scale}) should be > fillFraction=0.5 scale (${camera50.scale})",
-            camera90.scale > camera50.scale,
+            "inset=0.05 scale (${cameraInset05.scale}) should be > inset=0.25 scale (${cameraInset25.scale})",
+            cameraInset05.scale > cameraInset25.scale,
         )
+    }
+
+    /**
+     * COVER produces a larger scale than CONTAIN when frame and screen aspect ratios differ —
+     * COVER uses max(sx, sy), CONTAIN uses min.
+     */
+    @Test
+    fun `toCamera COVER vs CONTAIN - COVER scales larger when aspects differ`() {
+        // 800×600 frame on 1080×1920 screen: tall screen, wide frame.
+        // sx = 1080*0.8/800 = 1.08, sy = 1920*0.8/600 = 2.56.
+        val transform = Transform(cx = 0f, cy = 0f, w = 800f, h = 600f, scale = 1f)
+        val contain = transform.toCamera(1080f, 1920f, fitMode = FrameFitMode.CONTAIN)
+        val cover = transform.toCamera(1080f, 1920f, fitMode = FrameFitMode.COVER)
+        assertEquals(1.08f, contain.scale, eps)
+        assertEquals(2.56f, cover.scale, eps)
     }
 }

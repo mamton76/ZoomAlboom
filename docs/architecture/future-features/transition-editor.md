@@ -120,19 +120,9 @@ data class TransitionSegment(
 @Serializable
 data class WorldPoint(val x: Float, val y: Float)
 
-@Serializable
-enum class EasingType {
-    LINEAR, EASE_IN, EASE_OUT, EASE_IN_OUT
-}
-
-@Serializable
-enum class TransitionPreset {
-    CALM,            // ease-in-out, 1.2x auto duration, no zoom shift
-    SOFT,            // ease-in-out, 1.0x auto duration, slight zoom-out mid-path
-    FAST,            // ease-out, 0.5x auto duration, no zoom shift
-    LINEAR,          // linear, 1.0x auto duration
-    CUSTOM           // per-segment overrides active
-}
+// EasingType and TransitionPreset already live in
+// domain/model/AlbumPresentationProfile.kt — the album-level defaults reuse
+// the same enums the per-edge editor will consume. Do not re-declare here.
 ```
 
 ### Scene Graph Integration

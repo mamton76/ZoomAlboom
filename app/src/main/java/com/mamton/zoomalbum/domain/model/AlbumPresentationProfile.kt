@@ -17,6 +17,9 @@ data class AlbumPresentationProfile(
     val defaultFitMode: FrameFitMode = FrameFitMode.CONTAIN,
     val defaultOutsideMode: OutsideFrameMode = OutsideFrameMode.ALBUM_BACKGROUND,
     val safeAreaInset: Float = 0.1f,
+
+    val defaultTransitionPreset: TransitionPreset = TransitionPreset.SOFT,
+    val defaultEasing: EasingType = EasingType.EASE_IN_OUT,
 )
 
 @Serializable
@@ -28,6 +31,23 @@ sealed class AspectRatio {
     @Serializable object Square : AspectRatio()
     @Serializable object Free : AspectRatio()
     @Serializable data class Custom(val w: Int, val h: Int) : AspectRatio()
+}
+
+/**
+ * Numeric `w/h` ratio for the aspect, or `null` for [AspectRatio.Free]
+ * (caller should skip aspect-ratio fitting).
+ *
+ * Canonical ratios (R_16_9, R_9_16, etc.) encode orientation in the value
+ * itself, so [Orientation] is informational and does not affect the result.
+ */
+fun AspectRatio.numericRatio(): Float? = when (this) {
+    AspectRatio.R_16_9 -> 16f / 9f
+    AspectRatio.R_9_16 -> 9f / 16f
+    AspectRatio.R_4_3 -> 4f / 3f
+    AspectRatio.R_3_4 -> 3f / 4f
+    AspectRatio.Square -> 1f
+    AspectRatio.Free -> null
+    is AspectRatio.Custom -> w.toFloat() / h.toFloat()
 }
 
 @Serializable
@@ -52,3 +72,28 @@ enum class FrameFitMode { CONTAIN, COVER, STRETCH }
  */
 @Serializable
 enum class OutsideFrameMode { ALBUM_BACKGROUND, SOLID_FILL, BLURRED_BACKDROP }
+
+/**
+ * Camera interpolation curve for frame-to-frame transitions.
+ *
+ * Shared between [AlbumPresentationProfile.defaultEasing] and the future
+ * per-edge transition editor (see docs/architecture/future-features/transition-editor.md).
+ */
+@Serializable
+enum class EasingType { LINEAR, EASE_IN, EASE_OUT, EASE_IN_OUT }
+
+/**
+ * Album-level motion style for frame-to-frame transitions. Combines an
+ * easing curve, a duration multiplier on the distance-derived auto-duration,
+ * and an optional mid-path camera "breath".
+ *
+ *  CALM    — ease-in-out, 1.2× auto duration, no zoom shift.
+ *  SOFT    — ease-in-out, 1.0× auto duration, slight zoom-out at midpoint (MVP default).
+ *  FAST    — ease-out, 0.5× auto duration, snappy.
+ *  LINEAR  — linear, 1.0× auto duration.
+ *  CUSTOM  — per-segment overrides active (post-MVP transition editor only).
+ *
+ * See docs/architecture/future-features/transition-editor.md.
+ */
+@Serializable
+enum class TransitionPreset { CALM, SOFT, FAST, LINEAR, CUSTOM }

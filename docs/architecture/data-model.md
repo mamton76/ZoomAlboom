@@ -117,7 +117,7 @@ Album-level declaration of the intended screen shape for viewing/presenting (asp
 
 ### Backgrounds (`BackgroundData`, `AlbumBackground`)
 
-Backgrounds are **not** `CanvasNode` objects — they are render-layer style properties stored alongside the nodes list in the scene graph. The payload is a sealed `BackgroundData` family with three variants: `SolidBackgroundData` (hex color), `TextureBackgroundData` (Coil-loadable URI + `TileData`), and `Procedural` (parameterised `ProceduralPattern`). Albums wrap it as `AlbumBackground(data, anchorMode)` where `anchorMode ∈ { CameraLocked, WorldLocked }`. Frames hold `Frame.background: BackgroundData?` directly — the frame is implicitly its own anchor. `albumBackground` lives in the JSON scene graph root (§1.3 wrapper).
+Backgrounds are **not** `CanvasNode` objects — they are render-layer style properties stored alongside the nodes list in the scene graph. The payload is a sealed `BackgroundData` family with three variants: `SolidBackgroundData` (hex color), `TextureBackgroundData` (Coil-loadable URI + `TileData` — `tileMode` ∈ {None, Stretch, Cover, Contain, Repeat}), and `ProceduralBackgroundData` (parameterised `ProceduralPattern` + optional `fillColor` drawn under the pattern). Albums wrap it as `AlbumBackground(data, anchorMode)` where `anchorMode ∈ { CameraLocked, WorldLocked }`. Frames hold `Frame.background: BackgroundData?` directly — the frame is implicitly its own anchor. `albumBackground` lives in the JSON scene graph root (§1.3 wrapper).
 
 **→ Full type definitions, rendering order, tile algorithm, MVP scope:** [background.md](background.md)
 

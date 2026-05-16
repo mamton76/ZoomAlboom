@@ -44,21 +44,26 @@ sealed class BackgroundData {
     abstract val opacity: Float
 
     @Serializable @SerialName("Solid")
-    data class Solid(
+    data class SolidBackgroundData(
         val color: String = "#000000",
         override val opacity: Float = 1f,
     ) : BackgroundData()
 
     @Serializable @SerialName("Texture")
-    data class Texture(
+    data class TextureBackgroundData(
         val textureRefId: String,
         val tile: TileData = TileData(),
         override val opacity: Float = 1f,
     ) : BackgroundData()
 
     @Serializable @SerialName("Procedural")
-    data class Procedural(
+    data class ProceduralBackgroundData(
         val pattern: ProceduralPattern,
+        // Optional solid fill drawn under the pattern. Useful for patterns
+        // with gaps (Grid / DotGrid / RuledPaper / GraphPaper / Gradient /
+        // Grain / Noise). `null` = no fill — whatever's behind the layer
+        // shows through. Alpha-aware via 8-char hex.
+        val fillColor: String? = null,
         override val opacity: Float = 1f,
     ) : BackgroundData()
 }
@@ -72,10 +77,12 @@ data class AlbumBackground(
 
 Notes:
 
-- `Procedural` does **not** carry a `TileData`. Each `ProceduralPattern` variant (`Grid.cellSize`, `DotGrid.spacing`, `RuledPaper.lineSpacing`, etc.) owns its own tiling/positioning. An outer `TileData` would be redundant — what does `tileMode=Stretch` mean for a `Grid`?
+- `ProceduralBackgroundData` does **not** carry a `TileData`. Each `ProceduralPattern` variant (`Grid.cellSize`, `DotGrid.spacing`, `RuledPaper.lineSpacing`, etc.) owns its own tiling/positioning. An outer `TileData` would be redundant — what does `tileMode=Stretch` mean for a `Grid`?
+- `ProceduralBackgroundData.fillColor` is an optional solid color drawn under the pattern. Patterns with gaps (Grid lines, dots, gradient transitions, sparse noise) can use it instead of inheriting whatever's behind the layer. `Watercolor` overrides it (it draws its own full-rect `baseColor` wash).
 - Per-source `opacity` lives on each `BackgroundData` variant rather than on `AlbumBackground`, so the same opacity follows the source even when reusing it elsewhere.
 - A `Frame.background = BackgroundData?` of `null` means "no background" (transparent frame).
 - An `AlbumBackground? = null` on the scene graph means "no album background" (canvas-default backdrop only).
+- Class names carry the `*BackgroundData` suffix in code; the `@SerialName` discriminators are the short forms (`"Solid"` / `"Texture"` / `"Procedural"`) — that's the on-disk wire format and is what to use when reading or writing scene JSON by hand.
 
 ---
 
@@ -110,14 +117,18 @@ Notes:
 ```kotlin
 internal fun DrawScope.drawBackgroundData(
     data: BackgroundData,
-    left: Float, top: Float, right: Float, bottom: Float,
+    left: Float, top: Float, right: Float, bottom: Float,        // viewport — what to rasterize
     textureBitmap: ImageBitmap? = null,
+    anchorLeft: Float = left, anchorTop: Float = top,            // pattern anchor — see "Procedural anchor split"
+    anchorRight: Float = right, anchorBottom: Float = bottom,
 )
 ```
 
-- For `Solid`, fills the rect with the parsed color × `opacity`.
-- For `Texture`, draws via the [Texture pipeline](#texture-pipeline) — single `drawImage` for non-Repeat modes, shader brush for Repeat modes.
-- For `Procedural`, delegates to `drawProceduralPattern` in `ProceduralBackgroundRenderer.kt`.
+- For `SolidBackgroundData`, fills the rect with the parsed color × `opacity`.
+- For `TextureBackgroundData`, draws via the [Texture pipeline](#texture-pipeline) — `drawImage` for None/Stretch/Cover/Contain (Cover/Contain are aspect-preserving), native-canvas `BitmapShader` for Repeat.
+- For `ProceduralBackgroundData`, fills the viewport with `fillColor` (if non-null), then delegates to `drawProceduralPattern` in `ProceduralBackgroundRenderer.kt` with both rects.
+
+The `anchor*` params default to the viewport, which is correct for CameraLocked album + Frame backgrounds. `WorldLockedAlbumBackground` overrides with a fixed world rect — see [Procedural anchor split](#procedural-anchor-split). Tileable patterns (Grid family) ignore it; the four fill-rect patterns (Gradient / Watercolor / Grain / Noise) use it for positioning. `SolidBackgroundData` / `TextureBackgroundData` ignore it.
 
 The Composable layer is responsible for resolving the texture bitmap. A helper `rememberBackgroundBitmap(data)` runs Coil's `ImageLoader.execute(...)` inside a `LaunchedEffect(refId)` and returns the decoded `ImageBitmap` (or `null` while loading / on error). Loading is keyed on `textureRefId` so the bitmap survives recomposition and is shared across renderers (album camera-locked, album world-locked, frame).
 
@@ -126,8 +137,22 @@ The Composable layer is responsible for resolving the texture bitmap. A helper `
 ## Texture pipeline
 
 ```
-non-Repeat (None / Stretch / Cover / Contain):
+None / Stretch:
     drawImage(bitmap, dstOffset = (left, top), dstSize = (w, h), alpha = opacity)
+    (Stretch fills the rect ignoring aspect; None currently aliases Stretch —
+    "native-pixel-size at tileOrigin" semantics are a separate ticket.)
+
+Cover:
+    scale  = max(rectW/bw, rectH/bh)        # fills both axes
+    drawn  = (bw * scale, bh * scale)        # one axis overflows
+    dst    = rect.topLeft + (rect.size - drawn) / 2   # centered
+    drawImage(bitmap, dstOffset = dst, dstSize = drawn, alpha = opacity)
+
+Contain:
+    scale  = min(rectW/bw, rectH/bh)        # fits inside both axes
+    drawn  = (bw * scale, bh * scale)        # one axis letterboxes
+    dst    = rect.topLeft + (rect.size - drawn) / 2   # centered
+    drawImage(bitmap, dstOffset = dst, dstSize = drawn, alpha = opacity)
 
 Repeat:
     shader  = BitmapShader(bitmap, REPEAT, REPEAT)
@@ -182,6 +207,24 @@ Each pattern carries lengths (`cellSize`, `lineWidth`, `spacing`, `dotRadius`, `
 ### Determinism
 
 Seeded patterns (`PaperGrain`, `Noise`, `Watercolor`) sample `kotlin.random.Random(seed)`. Same seed + same parameters → same pattern every render. Persisting the seed in the scene graph keeps the canvas visually stable across reloads.
+
+### Procedural anchor split
+
+`drawProceduralPattern` takes **two** rects: a **viewport** (what to rasterize) and an **anchor** (the pattern's fixed coordinate frame). For tileable patterns (`Grid` / `DotGrid` / `RuledPaper` / `GraphPaper`) the anchor is ignored — their `floor((axisLow − originX) / step)` math already anchors lines to a world-fixed `originX/Y` field on the pattern itself. For the four fill-rect patterns (`Gradient` / `Watercolor` / `PaperGrain` / `Noise`) the anchor is what they use to position content:
+
+- `Gradient` — derives `start` / `end` (Linear) and `center` / `radius` (Radial) from the anchor center + extent. The `drawRect` still uses the viewport so we only rasterize visible pixels.
+- `Watercolor` — splotch positions are random within the anchor; viewport-cull each draw with `padR = splotchRadius × 1.4`. Base wash fills the viewport.
+- `PaperGrain` / `Noise` — dot count is `density × anchor.area / 100` (capped at 4000); positions are random within the anchor; viewport-cull each draw. RNG advances `target` times regardless of culling so positions stay deterministic per seed.
+
+Where the anchor comes from per scope:
+
+| Scope | Viewport | Anchor |
+|-------|----------|--------|
+| Album, `CameraLocked` | Screen rect | Same as viewport |
+| Album, `WorldLocked` | Visible world rect (from `cameraViewport`) | Hardcoded `(-2500..+2500)` world units (`AlbumBackgroundRenderer.kt :: PROCEDURAL_WORLD_ANCHOR_HALF`) — TODO §19.10: wire to `AlbumPresentationProfile` |
+| Frame | Frame-local rect | Same as viewport |
+
+The split is what stops Gradient/Watercolor/Grain/Noise from "sliding with the camera" in `WorldLocked` (they used to recompute geometry from the moving viewport every frame, which made them effectively camera-locked).
 
 ### Cost / density caps
 
@@ -241,6 +284,6 @@ The renderer (`ProceduralBackgroundRenderer.kt`) clamps line/dot grids to ≤500
 **Post-MVP:**
 - `AnchorMode.FrameLocked` — clip album background to a specific frame and transform with it
 - Animated backgrounds
-- Aspect-preserving Cover / Contain tile modes (currently behave as Stretch)
+- `TileMode.None` aspect-preserving "native pixel size at tileOrigin" semantics (currently aliased to Stretch)
 - Per-pattern preview swatches in the editor
 - Better noise (Perlin / simplex) and watercolor (mask-based soft stamps)

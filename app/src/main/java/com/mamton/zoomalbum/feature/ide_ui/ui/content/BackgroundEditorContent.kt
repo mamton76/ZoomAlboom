@@ -21,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -180,6 +181,18 @@ fun BackgroundEditor(
             (initial as? BackgroundData.ProceduralBackgroundData)?.pattern ?: ProceduralPattern.Grid(),
         )
     }
+    // Optional solid fill behind the procedural pattern. null = no fill (default,
+    // current behavior). Editor exposes a checkbox + ColorPicker; when the box is
+    // unchecked we drop the color but remember the user's last picked value so it
+    // re-applies if they toggle it back on.
+    var proceduralFillEnabled by remember {
+        mutableStateOf((initial as? BackgroundData.ProceduralBackgroundData)?.fillColor != null)
+    }
+    var proceduralFillColor by remember {
+        mutableStateOf(
+            parseHexOrBlack((initial as? BackgroundData.ProceduralBackgroundData)?.fillColor ?: "#FFFFFF"),
+        )
+    }
     var opacity by remember { mutableFloatStateOf(initial?.opacity ?: 1f) }
 
     val texturePicker = rememberLauncherForActivityResult(
@@ -219,6 +232,7 @@ fun BackgroundEditor(
 
             BackgroundSourceChoice.Procedural -> BackgroundData.ProceduralBackgroundData(
                 pattern = proceduralBackgroundData,
+                fillColor = if (proceduralFillEnabled) toHex(proceduralFillColor) else null,
                 opacity = opacity,
             )
         }
@@ -314,6 +328,22 @@ fun BackgroundEditor(
                 ProceduralPatternEditor(
                     pattern = proceduralBackgroundData,
                     onChange = { proceduralBackgroundData = it; emit() })
+
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = proceduralFillEnabled,
+                        onCheckedChange = { proceduralFillEnabled = it; emit() },
+                    )
+                    Text("Solid fill behind pattern")
+                }
+                if (proceduralFillEnabled) {
+                    SectionLabel("Fill color")
+                    ColorPicker(
+                        initial = proceduralFillColor,
+                        onChange = { proceduralFillColor = it; emit() },
+                    )
+                }
             }
         }
 

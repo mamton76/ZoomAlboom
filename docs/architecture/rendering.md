@@ -49,7 +49,10 @@ After each camera update, `recalculateVisibleNodes()` runs on `Dispatchers.Defau
 
 1. `TransformUtils.cameraViewport()` maps screen corners through the inverse camera matrix to get a world-space AABB.
 2. `ViewportCuller.visibleNodes()` filters `allNodes` by AABB intersection with the viewport.
-3. Result stored in `CanvasState.visibleNodes`.
+3. Result sorted ascending by `Transform.zIndex` (lowest first → highest on top, matching Compose's draw-in-iteration-order convention).
+4. Sorted result stored in `CanvasState.visibleNodes`.
+
+Render correctness depends purely on `Transform.zIndex` — not on insertion order in `_allNodes`. The four z-order actions (`BringToFront` / `SendToBack` / `BringForward` / `SendBackward`) mutate `zIndex` directly and either re-sort `visibleNodes` in place (cheap path) or rely on the next `recalculateVisibleNodes()` to re-sort (for undo/redo, which calls it).
 
 **Current:** brute-force O(n). **Planned:** spatial index (grid or R-tree) for >2k nodes.
 

@@ -195,6 +195,21 @@ internal fun DrawScope.drawBackgroundData(
             )
         }
         is BackgroundData.ProceduralBackgroundData -> {
+            // Optional solid fill drawn under the pattern. Lets patterns with
+            // gaps (Grid/DotGrid/RuledPaper/GraphPaper/Gradient/Grain/Noise)
+            // have a user-chosen background instead of showing whatever is
+            // behind the layer.
+            val fillHex = data.fillColor
+            if (fillHex != null) {
+                val fill = parseHex(fillHex)
+                if (fill != null) {
+                    drawRect(
+                        color = fill.copy(alpha = (fill.alpha * data.opacity).coerceIn(0f, 1f)),
+                        topLeft = Offset(left, top),
+                        size = Size(w, h),
+                    )
+                }
+            }
             drawProceduralPattern(
                 pattern = data.pattern,
                 left = left, top = top, right = right, bottom = bottom,
@@ -257,10 +272,14 @@ private fun DrawScope.drawTextureBitmap(
     val h = bottom - top
     if (w <= 0f || h <= 0f) return
 
+    val bw = bitmap.width.toFloat()
+    val bh = bitmap.height.toFloat()
+
     when (tile.tileMode) {
-        TileMode.None, TileMode.Stretch, TileMode.Cover, TileMode.Contain -> {
-            // Single draw filling the anchored rect.
-            // Cover/Contain aspect-preservation deferred; behave as Stretch for MVP.
+        TileMode.None, TileMode.Stretch -> {
+            // Stretch fills the rect, ignoring aspect.
+            // None is currently aliased to Stretch — proper "native pixel size
+            // at tileOrigin" semantics would be a separate ticket.
             drawImage(
                 image = bitmap,
                 dstOffset = IntOffset(left.roundToInt(), top.roundToInt()),
@@ -268,12 +287,51 @@ private fun DrawScope.drawTextureBitmap(
                 alpha = opacity,
             )
         }
+        TileMode.Cover -> drawAspectScaled(
+            bitmap = bitmap, bw = bw, bh = bh,
+            left = left, top = top, w = w, h = h,
+            scale = kotlin.math.max(w / bw, h / bh),  // fill both axes; crops on the smaller
+            opacity = opacity,
+        )
+        TileMode.Contain -> drawAspectScaled(
+            bitmap = bitmap, bw = bw, bh = bh,
+            left = left, top = top, w = w, h = h,
+            scale = kotlin.math.min(w / bw, h / bh),  // fit inside; letterbox on the smaller
+            opacity = opacity,
+        )
         TileMode.Repeat -> drawTiledShader(
             bitmap = bitmap,
             rectLeft = left, rectTop = top, rectW = w, rectH = h,
             tile = tile, opacity = opacity,
         )
     }
+}
+
+/**
+ * Draws [bitmap] scaled by [scale] (aspect-preserving), centered inside the
+ * `(left, top, left+w, top+h)` rect. Used by both Cover (overflow gets clipped
+ * by the caller's clipRect / falls off-screen for album backgrounds) and
+ * Contain (letterbox shows whatever's behind — usually the album solid color
+ * or `CanvasDark`).
+ */
+private fun DrawScope.drawAspectScaled(
+    bitmap: ImageBitmap,
+    bw: Float, bh: Float,
+    left: Float, top: Float, w: Float, h: Float,
+    scale: Float,
+    opacity: Float,
+) {
+    if (bw <= 0f || bh <= 0f || scale <= 0f) return
+    val drawnW = (bw * scale).roundToInt().coerceAtLeast(1)
+    val drawnH = (bh * scale).roundToInt().coerceAtLeast(1)
+    val dstX = (left + (w - drawnW) / 2f).roundToInt()
+    val dstY = (top + (h - drawnH) / 2f).roundToInt()
+    drawImage(
+        image = bitmap,
+        dstOffset = IntOffset(dstX, dstY),
+        dstSize = IntSize(drawnW, drawnH),
+        alpha = opacity,
+    )
 }
 
 /**

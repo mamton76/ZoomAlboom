@@ -27,11 +27,21 @@ private val baseActions = listOf(
 // Frame fill toggle. Short-term entry point — moves to Object Properties Panel later.
 private val backgroundAction = ActionItem("▣", "Background") // ▣
 
+// Z-order actions. Single-node selections only; multi-select would need group
+// semantics that aren't worth designing yet.
+private val zOrderActions = listOf(
+    ActionItem("⤒", "ToFront"),   // ⤒  bring to front
+    ActionItem("▲", "Forward"),   // ▲  bring forward one step
+    ActionItem("▼", "Backward"),  // ▼  send backward one step
+    ActionItem("⤓", "ToBack"),    // ⤓  send to back
+)
+
 @Composable
 fun ContextualActionBar(
     hasSelection: Boolean,
     modifier: Modifier = Modifier,
     showBackgroundAction: Boolean = false,
+    showZOrderActions: Boolean = false,
     onAction: (String) -> Unit = {},
 ) {
     AnimatedVisibility(
@@ -40,7 +50,11 @@ fun ContextualActionBar(
         enter = slideInVertically { it },
         exit = slideOutVertically { it },
     ) {
-        val actions = if (showBackgroundAction) baseActions + backgroundAction else baseActions
+        val actions = buildList {
+            addAll(baseActions)
+            if (showBackgroundAction) add(backgroundAction)
+            if (showZOrderActions) addAll(zOrderActions)
+        }
         Surface(
             modifier = Modifier
                 .fillMaxWidth()

@@ -61,6 +61,15 @@ sealed class BackgroundData {
     @SerialName("Procedural")
     data class ProceduralBackgroundData(
         val pattern: ProceduralPattern,
+        /**
+         * Optional solid fill drawn under the pattern. Lets users set a
+         * background color for patterns that have gaps (Grid lines, dots,
+         * gradients, noise). `null` = no fill (current behavior — whatever is
+         * behind the layer shows through). Alpha-aware via 8-char hex.
+         * Watercolor's own `baseColor` will overwrite this since it draws its
+         * own full-rect wash.
+         */
+        val fillColor: String? = null,
         override val opacity: Float = 1f,
     ) : BackgroundData()
 }

@@ -407,6 +407,20 @@ Two-tier model: **type layers** (fixed, derived from node class) + **user-define
 
 > Open: should user-defined layers allow multi-membership (tag-style)? See [open-questions.md § 6](architecture/open-questions.md).
 
+### 13.5 Z-order actions (BringToFront / SendToBack / BringForward / SendBackward)
+
+Single shared `Transform.zIndex: Float` space across all canvas nodes (Frame / Media / Widget). Until now, render order was implicit insertion order; only hit-testing used `zIndex`. The render order is now sorted by `zIndex` (ascending — lowest first, so highest ends on top), so reorder actions take effect visually.
+
+- [x] `recalculateVisibleNodes` sorts the result by `Transform.zIndex` (`CanvasViewModel.kt`) — render correctness now depends only on `zIndex`, not on `_allNodes` insertion order.
+- [x] `CanvasAction.BringToFront(nodeId)` — `newZ = max + 1`. No-op if already on top.
+- [x] `CanvasAction.SendToBack(nodeId)` — `newZ = min - 1`. No-op if already at bottom.
+- [x] `CanvasAction.BringForward(nodeId)` — swaps `zIndex` with the next-higher neighbor. No-op if already on top.
+- [x] `CanvasAction.SendBackward(nodeId)` — swaps `zIndex` with the next-lower neighbor. No-op if already at bottom.
+- [x] All four routed through `applyZIndexReorder(nodeId, ZReorder)`; undoable via `CommandKind.REORDER` (snapshot of the one or two affected nodes).
+- [x] `ContextualActionBar` exposes the four actions (icons `⤒ ▲ ▼ ⤓`) when exactly one node is selected.
+- [ ] Multi-select reorder semantics (move the group as a block? individually?). Single-only for MVP.
+- [ ] Move into the Object Properties Panel (§5c) once that exists; current `ContextualActionBar` placement is interim.
+
 ---
 
 ## 14. Guidelines + Snapping
@@ -543,7 +557,7 @@ See [data-model.md § Backgrounds](architecture/data-model.md#backgrounds-backgr
 - [x] Frame background clipped to frame bounds (via `drawRoundRect` shape)
 
 ### 19.4 MVP scope
-- [x] Album: solid color + texture/image + procedural pattern; camera-locked + world-locked; all tile modes (Stretch/Cover/Contain currently behave as Stretch — aspect preservation TBD)
+- [x] Album: solid color + texture/image + procedural pattern; camera-locked + world-locked; all tile modes. Stretch fills the rect ignoring aspect, Cover fills both axes preserving aspect (overflows / crops the other), Contain fits inside preserving aspect (letterboxes the other). None currently still aliases Stretch — proper "native pixel size at tileOrigin" semantics tracked separately.
 - [x] Frame: full `BackgroundData?` (solid / texture / procedural) + opacity. Came for free with the §19.6½ refactor.
 - [x] Undo for background changes — `CommandKind.SET_ALBUM_BACKGROUND` + `SET_FRAME_BACKGROUND`; `CanvasCommand.albumBackgroundChange` for album-level snapshots
 
@@ -579,6 +593,7 @@ Third album-background source: parameters, not files. Anchored same way as solid
 - [x] Undoable via existing `SetAlbumBackground` snapshot — no command-kind change needed
 - [x] Density caps (≤500 lines/axis, ≤4000 noise dots, ≤100 splotches) — skip rather than burn GPU
 - [x] Multi-stop gradients — `Gradient.stops: List<GradientStop>` (position 0..1 + hex color, alpha-aware). Renderer sorts defensively and feeds `colors` + `positions` to `android.graphics.LinearGradient` / `RadialGradient`. Editor MVP: read-only preview strip + vertical list with locked edge stops at 0 / 1, position slider + `ColorPicker` + Delete per intermediate stop, `+ Add stop` button that picks the midpoint of the largest gap and interpolates the color.
+- [x] Optional solid fill behind any procedural pattern — `ProceduralBackgroundData.fillColor: String?`. Renderer draws the rect with the fill first, then the pattern on top. Editor: Checkbox "Solid fill behind pattern" + `ColorPicker`. Useful for Grid/DotGrid/Gradient/Grain/Noise — gives the pattern a chosen base instead of inheriting whatever's behind the layer. Watercolor's own `baseColor` overrides since it draws its own wash.
 - [ ] `AnchorMode.FrameLocked` — clip pattern to a specific frame's bounds, move/scale/rotate with it. Post-MVP.
 - [ ] Cover/Contain aspect handling for texture patterns (currently Stretch). Not strictly procedural; tracked here for parity.
 - [ ] Per-pattern preview swatch in the type dropdown (currently text labels only).
@@ -623,13 +638,13 @@ When album-extent / `AlbumPresentationProfile` lands:
 
 Tileable patterns (Grid / DotGrid / RuledPaper / GraphPaper) are not affected — they're already world-anchored via their own `originX/Y` fields.
 
-### 19.9 Tech debt — Frame background tile-origin semantics
+### 19.9 Frame background tile-origin semantics
 
-Frame backgrounds are currently drawn in frame-local coordinates centered on `(0, 0)` (consistent with how every other frame property works), so `tileOrigin = (0, 0)` means "pattern starts at the frame's center" — not what most users expect when they tweak the origin sliders.
+Frame backgrounds are drawn in frame-local coordinates centered on `(0, 0)` (consistent with how every other frame property works). Stored `tileOriginX/Y` is interpreted as **offset from the frame's top-left** (the user-intuitive convention); the renderer translates it into centered frame-local coordinates before passing to `drawBackgroundData`.
 
-- [ ] In the UI editor, treat `tileOriginX/Y` as **offset from the frame's top-left**.
-- [ ] In the renderer / domain mapper, convert that to centered frame-local coordinates before passing to `drawBackgroundData`.
-- [ ] Album backgrounds (CameraLocked / WorldLocked) are unaffected — their origin is already in screen-px / world-units, which has no center/top-left ambiguity.
+- [x] `CanvasRenderer.kt :: drawFrameBackground` — copies the `TileData` with `tileOriginX = -renderW/2 + stored.tileOriginX` (same for Y) before drawing. Only visible in Repeat mode; non-Repeat ignores `tileOriginX/Y`.
+- Album backgrounds (CameraLocked / WorldLocked) are unaffected — their origin is already in screen-px / world-units, which has no center/top-left ambiguity.
+- [ ] Procedural pattern `originX/Y` fields (Grid / DotGrid / RuledPaper / GraphPaper) inside frames have the same "starts at center" issue. Follow-up: apply the same translation to procedural patterns with origin fields when used on frame backgrounds.
 
 ### 19.5 Post-MVP
 - [x] Frame texture backgrounds (tiled or stretched image fill) — done via the §19.6½ refactor: frames take a full `BackgroundData?`, not just a color

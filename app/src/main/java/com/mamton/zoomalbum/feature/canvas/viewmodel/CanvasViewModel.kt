@@ -136,6 +136,12 @@ sealed interface CanvasAction : Intent {
         val nodeId: String,
         val background: BackgroundData?,
     ) : CanvasAction
+
+    // Z-order — single-node only for MVP. Multi-select disables the button.
+    data class BringToFront(val nodeId: String) : CanvasAction
+    data class SendToBack(val nodeId: String) : CanvasAction
+    data class BringForward(val nodeId: String) : CanvasAction
+    data class SendBackward(val nodeId: String) : CanvasAction
 }
 
 // ── ViewModel ─────────────────────────────────────────────────────────
@@ -636,7 +642,85 @@ class CanvasViewModel @Inject constructor(
                     ),
                 )
             }
+
+            is CanvasAction.BringToFront -> applyZIndexReorder(action.nodeId, ZReorder.ToFront)
+            is CanvasAction.SendToBack -> applyZIndexReorder(action.nodeId, ZReorder.ToBack)
+            is CanvasAction.BringForward -> applyZIndexReorder(action.nodeId, ZReorder.Forward)
+            is CanvasAction.SendBackward -> applyZIndexReorder(action.nodeId, ZReorder.Backward)
         }
+    }
+
+    // ── Z-order ───────────────────────────────────────────────────────
+
+    private enum class ZReorder { ToFront, ToBack, Forward, Backward }
+
+    /**
+     * Mutates `Transform.zIndex` on [nodeId] (and possibly one neighbor for
+     * Forward/Backward swaps). All four actions go through this single helper.
+     *
+     * Render order depends on `visibleNodes` being sorted by zIndex (done in
+     * [recalculateVisibleNodes] and after each reorder via the in-place patch below).
+     * Hit-testing already sorts on its own. Undo round-trips via the standard
+     * `before/after` snapshot path with [CommandKind.REORDER].
+     */
+    private fun applyZIndexReorder(nodeId: String, mode: ZReorder) {
+        val current = _allNodes.value
+        val node = current.firstOrNull { it.id == nodeId } ?: return
+        val currentZ = node.transform.zIndex
+
+        val mutations: List<Pair<CanvasNode, CanvasNode>> = when (mode) {
+            ZReorder.ToFront -> {
+                val maxZ = current.maxOf { it.transform.zIndex }
+                if (currentZ >= maxZ) return // already on top
+                listOf(node to node.withTransform(node.transform.copy(zIndex = maxZ + 1f)))
+            }
+            ZReorder.ToBack -> {
+                val minZ = current.minOf { it.transform.zIndex }
+                if (currentZ <= minZ) return // already at bottom
+                listOf(node to node.withTransform(node.transform.copy(zIndex = minZ - 1f)))
+            }
+            ZReorder.Forward -> {
+                // Swap with the next-higher node (smallest zIndex > currentZ).
+                val neighbor = current
+                    .filter { it.transform.zIndex > currentZ }
+                    .minByOrNull { it.transform.zIndex } ?: return
+                listOf(
+                    node to node.withTransform(node.transform.copy(zIndex = neighbor.transform.zIndex)),
+                    neighbor to neighbor.withTransform(neighbor.transform.copy(zIndex = currentZ)),
+                )
+            }
+            ZReorder.Backward -> {
+                val neighbor = current
+                    .filter { it.transform.zIndex < currentZ }
+                    .maxByOrNull { it.transform.zIndex } ?: return
+                listOf(
+                    node to node.withTransform(node.transform.copy(zIndex = neighbor.transform.zIndex)),
+                    neighbor to neighbor.withTransform(neighbor.transform.copy(zIndex = currentZ)),
+                )
+            }
+        }
+
+        val mutatedById = mutations.associate { (_, after) -> after.id to after }
+        _allNodes.update { nodes -> nodes.map { mutatedById[it.id] ?: it } }
+
+        // Patch visibleNodes by id, then re-sort so the renderer iteration order
+        // reflects the new zIndex. Cheaper than a full viewport re-cull.
+        _state.update { s ->
+            s.copy(
+                visibleNodes = s.visibleNodes
+                    .map { vn -> mutatedById[vn.node.id]?.let { vn.copy(node = it) } ?: vn }
+                    .sortedBy { it.node.transform.zIndex },
+            )
+        }
+
+        commit(
+            CanvasCommand(
+                before = mutations.map { it.first },
+                after = mutations.map { it.second },
+                kind = CommandKind.REORDER,
+                timestampMs = System.currentTimeMillis(),
+            ),
+        )
     }
 
     // ── Hit-testing ───────────────────────────────────────────────────
@@ -882,10 +966,16 @@ class CanvasViewModel @Inject constructor(
                 screenHeight = screenHeight,
             )
             val geometryVisible = ViewportCuller.visibleNodes(_allNodes.value, viewport)
-            val resolved = geometryVisible.mapNotNull { node ->
-                val detail = LodResolver.resolveRenderDetail(node, cam)
-                if (detail == RenderDetail.Hidden) null else VisibleNode(node, detail)
-            }
+            // Sort by zIndex (ascending — Compose draws in iteration order, so
+            // lowest first means highest ends up on top). Render correctness
+            // now depends only on Transform.zIndex, not _allNodes insertion
+            // order — necessary for BringToFront / SendToBack / etc to work.
+            val resolved = geometryVisible
+                .mapNotNull { node ->
+                    val detail = LodResolver.resolveRenderDetail(node, cam)
+                    if (detail == RenderDetail.Hidden) null else VisibleNode(node, detail)
+                }
+                .sortedBy { it.node.transform.zIndex }
             _state.update { it.copy(visibleNodes = resolved) }
         }
     }

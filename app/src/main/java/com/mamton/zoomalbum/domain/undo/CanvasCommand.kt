@@ -9,6 +9,7 @@ enum class CommandKind {
     ADD, REMOVE, DELETE, DUPLICATE, MOVE, RESIZE, ROTATE,
     SET_ALBUM_BACKGROUND,
     SET_FRAME_BACKGROUND,
+    REORDER, // BringToFront / SendToBack / BringForward / SendBackward — zIndex mutations.
 }
 
 /** Album-level change captured in a command. Distinguishes "set to null" from "no change". */

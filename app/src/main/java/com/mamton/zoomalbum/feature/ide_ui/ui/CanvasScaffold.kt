@@ -150,6 +150,7 @@ fun CanvasScaffold(
             ContextualActionBar(
                 hasSelection = selectedNodeIds.isNotEmpty(),
                 showBackgroundAction = singleSelectedFrame != null,
+                showZOrderActions = selectedNodeIds.size == 1,
                 modifier = Modifier.align(Alignment.BottomCenter),
                 onAction = { label ->
                     when (label) {
@@ -160,6 +161,26 @@ fun CanvasScaffold(
                             com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.DuplicateSelection,
                         )
                         "Background" -> singleSelectedFrame?.let { frameBgEditing = it }
+                        "ToFront" -> selectedNodeIds.firstOrNull()?.let {
+                            canvasViewModel.onAction(
+                                com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.BringToFront(it),
+                            )
+                        }
+                        "Forward" -> selectedNodeIds.firstOrNull()?.let {
+                            canvasViewModel.onAction(
+                                com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.BringForward(it),
+                            )
+                        }
+                        "Backward" -> selectedNodeIds.firstOrNull()?.let {
+                            canvasViewModel.onAction(
+                                com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.SendBackward(it),
+                            )
+                        }
+                        "ToBack" -> selectedNodeIds.firstOrNull()?.let {
+                            canvasViewModel.onAction(
+                                com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.SendToBack(it),
+                            )
+                        }
                     }
                 },
             )

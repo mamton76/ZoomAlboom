@@ -85,7 +85,28 @@ private fun DrawScope.drawFrameBackground(
                 cornerRadius = CornerRadius(4f, 4f),
             )
         }
-        is BackgroundData.TextureBackgroundData, is BackgroundData.ProceduralBackgroundData -> {
+        is BackgroundData.TextureBackgroundData -> {
+            // Frame-local coords are centered on (0, 0), but users expect
+            // `tileOriginX/Y = (0, 0)` to mean "texture's (0, 0) pixel lands
+            // at the frame's TOP-LEFT" — not its center. Translate the stored
+            // (top-left-relative) origin into frame-local centered coords for
+            // the shader. Only matters for Repeat mode; non-Repeat ignores
+            // tileOriginX/Y.
+            val adjusted = background.copy(
+                tile = background.tile.copy(
+                    tileOriginX = left + background.tile.tileOriginX,
+                    tileOriginY = top + background.tile.tileOriginY,
+                ),
+            )
+            clipRect(left, top, right, bottom) {
+                drawBackgroundData(
+                    data = adjusted,
+                    left = left, top = top, right = right, bottom = bottom,
+                    textureBitmap = textureBitmap,
+                )
+            }
+        }
+        is BackgroundData.ProceduralBackgroundData -> {
             clipRect(left, top, right, bottom) {
                 drawBackgroundData(
                     data = background,
@@ -104,8 +125,8 @@ private fun FullFrameRenderer(
     renderW: Float, renderH: Float, colorHex: String,
     background: BackgroundData?,
 ) {
-    val fillColor = Color(colorHex.toColorInt())
-    val borderColor = fillColor.copy(alpha = 0.6f)
+    val fillColor = Color.White
+    val borderColor = Color(colorHex.toColorInt()).copy(alpha = 0.6f)
     // Always-stable remember slot; returns null when background isn't a Texture.
     val textureBitmap = rememberBackgroundBitmap(background)
 
@@ -124,7 +145,7 @@ private fun FullFrameRenderer(
                 val radius = CornerRadius(4f, 4f)
                 background?.let { drawFrameBackground(it, renderW, renderH, textureBitmap) }
                 drawRoundRect(
-                    color = fillColor.copy(alpha = 0.35f),
+                    color = fillColor.copy(alpha = 0.2f),
                     topLeft = topLeft,
                     size = nodeSize,
                     cornerRadius = radius,
@@ -134,7 +155,7 @@ private fun FullFrameRenderer(
                     topLeft = topLeft,
                     size = nodeSize,
                     cornerRadius = radius,
-                    style = Stroke(width = 1.5f),
+                    style = Stroke(width = 5f),
                 )
             },
     )

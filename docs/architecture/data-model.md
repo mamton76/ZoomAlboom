@@ -101,7 +101,7 @@ fun Transform.toCamera(screenWidth: Float, screenHeight: Float, fillFraction: Fl
 
 | Variant | Extra fields | Purpose |
 |---------|-------------|---------|
-| `Frame` | `label`, `color` (hex string), `containsNodeIds` (dynamically calculated), `background: FrameBackground?` | Navigation area / logical grouping |
+| `Frame` | `label`, `color` (hex string), `containsNodeIds` (dynamically calculated), `background: BackgroundData?` | Navigation area / logical grouping |
 | `Media` | `mediaRefId` (FK to `media_library`), `mediaType`, `tags`, `intrinsicPixelWidth/Height`, `appearance: MediaAppearance?` | Any media asset (image, video, text; future: audio, sticker, animated photo, vector shape) |
 | `Widget` | `widgetType: WidgetType`, `config: WidgetConfig`, `dataSource: WidgetDataSource`, `links: List<WidgetLink>` | Canvas-native smart object with data binding and navigation (post-MVP) |
 
@@ -115,9 +115,9 @@ Album-level declaration of the intended screen shape for viewing/presenting (asp
 
 **→ Full type definitions, persistence shape, camera-math integration, open questions:** [presentation-profile.md](presentation-profile.md)
 
-### AlbumBackground & FrameBackground
+### Backgrounds (`BackgroundData`, `AlbumBackground`)
 
-Backgrounds are **not** `CanvasNode` objects — they are render-layer style properties stored alongside the nodes list in the scene graph. `AlbumBackground` supports `SolidColor` / `Texture` types, `CameraLocked` (screen-fixed) and `WorldLocked` (moves with canvas) anchor modes, and configurable tiling (`tileOriginX/Y`, `tileWidth/Height`). `FrameBackground` is a nullable solid-color fill on `CanvasNode.Frame`. `albumBackground` lives in the JSON scene graph root (§1.3 wrapper).
+Backgrounds are **not** `CanvasNode` objects — they are render-layer style properties stored alongside the nodes list in the scene graph. The payload is a sealed `BackgroundData` family with three variants: `SolidBackgroundData` (hex color), `TextureBackgroundData` (Coil-loadable URI + `TileData`), and `Procedural` (parameterised `ProceduralPattern`). Albums wrap it as `AlbumBackground(data, anchorMode)` where `anchorMode ∈ { CameraLocked, WorldLocked }`. Frames hold `Frame.background: BackgroundData?` directly — the frame is implicitly its own anchor. `albumBackground` lives in the JSON scene graph root (§1.3 wrapper).
 
 **→ Full type definitions, rendering order, tile algorithm, MVP scope:** [background.md](background.md)
 

@@ -18,16 +18,20 @@ import androidx.compose.ui.unit.sp
 
 private data class ActionItem(val icon: String, val label: String)
 
-private val actions = listOf(
+private val baseActions = listOf(
     ActionItem("\u2715", "Delete"),    // ✕
     ActionItem("\u2398", "Duplicate"), // ⎘
     ActionItem("\u270E", "Edit"),      // ✎
 )
 
+// Frame fill toggle. Short-term entry point — moves to Object Properties Panel later.
+private val backgroundAction = ActionItem("▣", "Background") // ▣
+
 @Composable
 fun ContextualActionBar(
     hasSelection: Boolean,
     modifier: Modifier = Modifier,
+    showBackgroundAction: Boolean = false,
     onAction: (String) -> Unit = {},
 ) {
     AnimatedVisibility(
@@ -36,6 +40,7 @@ fun ContextualActionBar(
         enter = slideInVertically { it },
         exit = slideOutVertically { it },
     ) {
+        val actions = if (showBackgroundAction) baseActions + backgroundAction else baseActions
         Surface(
             modifier = Modifier
                 .fillMaxWidth()

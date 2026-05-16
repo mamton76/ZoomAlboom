@@ -32,6 +32,7 @@ fun CanvasTopBar(
     onNavigateBack: () -> Unit,
     onOpenFrameList: () -> Unit,
     onOpenPanelConfig: () -> Unit,
+    onOpenAlbumSettings: () -> Unit = {},
     mode: CanvasInteractionMode = CanvasInteractionMode.Edit,
     onToggleMode: () -> Unit = {},
 ) {
@@ -75,7 +76,8 @@ fun CanvasTopBar(
                     fontSize = 11.sp,
                 )
             }
-            IconButton(onClick = onOpenFrameList) { Text("\u2630") } // ☰ hamburger
+            IconButton(onClick = onOpenAlbumSettings) { Text("🎨") } // 🎨 palette
+            IconButton(onClick = onOpenFrameList){ Text("\u2630") } // ☰ hamburger
             IconButton(onClick = onOpenPanelConfig) { Text("\u2699") } // ⚙ gear
         },
         colors = TopAppBarDefaults.topAppBarColors(

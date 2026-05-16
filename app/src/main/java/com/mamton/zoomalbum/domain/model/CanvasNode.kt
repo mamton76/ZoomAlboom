@@ -29,6 +29,8 @@ sealed class CanvasNode {
         val label: String = "",
         val color: String = "#888888",
         val containsNodeIds: List<String> = emptyList(),
+        /** Frame is implicitly the anchor — `BackgroundData` carries no [AnchorMode]. */
+        val background: BackgroundData? = null,
         override val visibilityPolicy: VisibilityPolicy? = null,
     ) : CanvasNode()
 }

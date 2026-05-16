@@ -29,6 +29,8 @@ import com.mamton.zoomalbum.feature.canvas.view.CanvasScreen
 import com.mamton.zoomalbum.feature.canvas.view.SelectionDebugPanel
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.AddContentBottomSheet
+import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.AlbumSettingsBottomSheet
+import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.FrameBackgroundBottomSheet
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.FrameListBottomSheet
 import com.mamton.zoomalbum.feature.ide_ui.viewmodel.IdeViewModel
 
@@ -56,9 +58,18 @@ fun CanvasScaffold(
     var showAddSheet by remember { mutableStateOf(false) }
     var showFrameList by remember { mutableStateOf(false) }
     var showPanelConfig by remember { mutableStateOf(false) }
+    var showAlbumSettings by remember { mutableStateOf(false) }
+    var frameBgEditing by remember { mutableStateOf<CanvasNode.Frame?>(null) }
     var overlapPickerNodes by remember { mutableStateOf<List<CanvasNode>>(emptyList()) }
 
     val selectedNodeIds = canvasState.selectedNodeIds
+    // Single-Frame selection enables the Background button in the action bar.
+    val singleSelectedFrame: CanvasNode.Frame? = remember(selectedNodeIds, canvasState.visibleNodes) {
+        if (selectedNodeIds.size != 1) null
+        else canvasState.visibleNodes
+            .map { it.node }
+            .firstOrNull { it.id == selectedNodeIds.first() } as? CanvasNode.Frame
+    }
 
     Scaffold(
         topBar = {
@@ -88,6 +99,7 @@ fun CanvasScaffold(
                 onNavigateBack = onNavigateBack,
                 onOpenFrameList = { showFrameList = true },
                 onOpenPanelConfig = { showPanelConfig = true },
+                onOpenAlbumSettings = { showAlbumSettings = true },
                 mode = canvasState.mode,
                 onToggleMode = {
                     val next = if (canvasState.mode == CanvasInteractionMode.Edit) {
@@ -137,6 +149,7 @@ fun CanvasScaffold(
 
             ContextualActionBar(
                 hasSelection = selectedNodeIds.isNotEmpty(),
+                showBackgroundAction = singleSelectedFrame != null,
                 modifier = Modifier.align(Alignment.BottomCenter),
                 onAction = { label ->
                     when (label) {
@@ -146,6 +159,7 @@ fun CanvasScaffold(
                         "Duplicate" -> canvasViewModel.onAction(
                             com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.DuplicateSelection,
                         )
+                        "Background" -> singleSelectedFrame?.let { frameBgEditing = it }
                     }
                 },
             )
@@ -203,6 +217,35 @@ fun CanvasScaffold(
                 )
                 showFrameList = false
             },
+        )
+    }
+
+    if (showAlbumSettings) {
+        AlbumSettingsBottomSheet(
+            initial = canvasState.albumBackground,
+            onApply = { bg ->
+                canvasViewModel.onAction(
+                    com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.SetAlbumBackground(bg),
+                )
+                showAlbumSettings = false
+            },
+            onDismiss = { showAlbumSettings = false },
+        )
+    }
+
+    frameBgEditing?.let { frame ->
+        FrameBackgroundBottomSheet(
+            initial = frame.background,
+            onApply = { bg ->
+                canvasViewModel.onAction(
+                    com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.SetFrameBackground(
+                        nodeId = frame.id,
+                        background = bg,
+                    ),
+                )
+                frameBgEditing = null
+            },
+            onDismiss = { frameBgEditing = null },
         )
     }
 

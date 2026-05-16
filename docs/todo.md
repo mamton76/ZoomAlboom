@@ -209,6 +209,31 @@ Replaces current FAB [+] + BottomSheet. Planned immediately after photo node add
 
 ---
 
+## 5c. Object Properties Panel (planned)
+
+A dedicated surface for editing properties of a selected node. Today these controls live in the Contextual Action Bar (Delete / Duplicate / Edit) plus ad-hoc bottom sheets (Frame Background — §19.6). The action bar is the wrong long-term home for these — too cramped to hold label, color, background, opacity, transform readouts, tags, layer assignment, appearance preset, per-frame presentation override, etc.
+
+### 5c.1 Surface
+- [ ] `ObjectPropertiesPanel` — docked panel slot (right side, fits IDE panel system §6) for tablets/landscape
+- [ ] `ObjectPropertiesBottomSheet` — compact alternative for phone/portrait; opens when any node is selected
+- [ ] Either surface is hidden when selection is empty or in View/Presentation mode
+
+### 5c.2 Per-type sections (drive by `CanvasNode` variant)
+- [ ] **Frame** — label, border color, background (solid color), fit-mode override (§22.8), opacity
+- [ ] **Media** — label, tags, MediaAppearance (§20) preset, opacity
+- [ ] **Widget** (§21) — per-widget-type config form
+- [ ] Header row: node type + id + transform readout (cx, cy, w, h, scale, rotation)
+
+### 5c.3 Action Bar simplification
+- [ ] Once 5c.1 ships, the ContextualActionBar shrinks back to Delete / Duplicate / Open Properties. Move the Frame Background button (§19.6) into the panel and delete it from the bar.
+
+### 5c.4 Dependencies
+- §13 layers (for "Move to Layer" control)
+- §15 context menu (long-press → "Properties" entry)
+- §20 MediaAppearance (Media section needs the appearance UI to be defined)
+
+---
+
 ## 6. IDE Overlay
 
 ### 6.0 Panel infrastructure (done)
@@ -490,41 +515,127 @@ Extends [§4.7 Media adding & editing](#47-media-adding--editing) (single-photo 
 
 Backgrounds are **not** `CanvasNode` objects — they are render-layer style properties stored in the scene graph root (album background) or on `CanvasNode.Frame` (frame background). Requires §1.3 (JSON root wrapper) to be implemented together.
 
-See [data-model.md § AlbumBackground & FrameBackground](architecture/data-model.md#albumbackground--framebackground) for types and rendering order.
+See [data-model.md § Backgrounds](architecture/data-model.md#backgrounds-backgrounddata-albumbackground) for types and rendering order.
 
 ### 19.1 Domain model
-- [ ] `BackgroundType` enum: `None`, `SolidColor`, `Texture`
-- [ ] `TileMode` enum: `None`, `Stretch`, `Cover`, `Contain`, `Repeat`, `RepeatX`, `RepeatY`
-- [ ] `AnchorMode` enum: `CameraLocked`, `WorldLocked` (FrameLocked post-MVP)
-- [ ] `AlbumBackground` — type, color, textureRefId, opacity, tileMode, anchorMode, tileOriginX/Y, tileWidth/Height
-- [ ] `FrameBackground` — color (nullable = transparent), opacity
-- [ ] Add `background: FrameBackground?` field to `CanvasNode.Frame`
+- [x] `BackgroundData` sealed { `SolidBackgroundData` | `TextureBackgroundData` | `Procedural` } in `domain/model/Background.kt` (was a flat `AlbumBackground` with a `BackgroundType` discriminator + nullable per-variant fields — replaced in §19.6½)
+- [x] `TileData` composite (`tileMode`, `tileOriginX/Y`, `tileWidth/Height`) — used only by `TextureBackgroundData`; procedural patterns own their own positioning
+- [x] `TileMode` enum: `None`, `Stretch`, `Cover`, `Contain`, `Repeat`
+- [x] `AnchorMode` enum: `CameraLocked`, `WorldLocked` (FrameLocked post-MVP)
+- [x] `AlbumBackground(data: BackgroundData, anchorMode: AnchorMode)` — album-level wrapper that adds an anchor
+- [x] `Frame.background: BackgroundData?` directly — frames are implicitly their own anchor (no `FrameBackground` wrapper)
 
 ### 19.2 Scene graph (requires §1.3 first)
-- [x] `SceneGraph` root wrapper: `albumId`, `camera`, `nodes` (background field still TBD here)
-- [ ] Migration reader: try root object, fall back to bare `List<CanvasNode>` for old files
-- [ ] `SceneGraphSerializer` updated to encode/decode root wrapper
-- [ ] `albumBackground` added to `CanvasState`
-- [ ] `CanvasAction.SetAlbumBackground(background: AlbumBackground)`
+- [x] `SceneGraph` root wrapper: `albumId`, `camera`, `nodes`, `background`
+- [x] Migration reader: try root object, fall back to bare `List<CanvasNode>` for old files
+- [x] `SceneGraphSerializer` updated to encode/decode root wrapper (handled by `ignoreUnknownKeys` + nullable defaults)
+- [x] `albumBackground` added to `CanvasState`
+- [x] `CanvasAction.SetAlbumBackground(background: AlbumBackground?)`
+- [x] `CanvasAction.SetFrameBackground(nodeId, background)`
 
 ### 19.3 Rendering
-- [ ] `AlbumBackgroundRenderer` composable
-  - Camera-locked: drawn outside (before) the camera `graphicsLayer` Box — screen-fixed, no transform
+- [x] `AlbumBackgroundRenderer` composable (split into `CameraLockedAlbumBackground` + `WorldLockedAlbumBackground`)
+  - Camera-locked: drawn outside the camera `graphicsLayer` Box — screen-fixed, no transform
   - World-locked solid color: inside the `graphicsLayer` Box before nodes, sized to visible world rect from camera state
-  - World-locked tiled texture: `drawBehind` inside `graphicsLayer`, loop `drawImage` tiles over visible world rect using `tileOriginX/Y` and `tileWidth/Height` to anchor the grid
-- [ ] Frame background rendering inside `CanvasNodeRenderer` for Frame, drawn before frame border
-- [ ] Frame background clipped to frame bounds
+  - World-locked tiled texture: shader brush — `BitmapShader(REPEAT, REPEAT)` with `localMatrix` scaling one bitmap copy to `tileWidth × tileHeight` and translating to `tileOriginX/Y`; single `drawRect` covers the visible world rect. Constant cost regardless of zoom level (GPU evaluates the shader once per visible pixel, not once per tile)
+- [x] BitmapShader-based texture tiling (was a per-tile `for` loop; replaced after the 1M-tiles-at-extreme-zoom hang)
+- [x] Frame background rendering inside `CanvasNodeRenderer` for Frame, drawn before frame border
+- [x] Frame background clipped to frame bounds (via `drawRoundRect` shape)
 
 ### 19.4 MVP scope
-- Album: solid color + texture/image; camera-locked + world-locked; all tile modes
-- Frame: color fill + opacity only (no texture for MVP)
-- No undo for background changes (MVP)
+- [x] Album: solid color + texture/image + procedural pattern; camera-locked + world-locked; all tile modes (Stretch/Cover/Contain currently behave as Stretch — aspect preservation TBD)
+- [x] Frame: full `BackgroundData?` (solid / texture / procedural) + opacity. Came for free with the §19.6½ refactor.
+- [x] Undo for background changes — `CommandKind.SET_ALBUM_BACKGROUND` + `SET_FRAME_BACKGROUND`; `CanvasCommand.albumBackgroundChange` for album-level snapshots
+
+### 19.6 UI
+- [x] Shared `BackgroundEditor` composable in `feature/ide_ui/ui/content/BackgroundEditorContent.kt` — source radio (None / Solid / Texture / Procedural), per-source controls, opacity slider. Used by both album and frame sheets.
+- [x] Album Settings bottom sheet (TopBar palette button) — wraps `BackgroundEditor` and adds the anchor toggle (CameraLocked / WorldLocked)
+- [x] Frame Background bottom sheet (ContextualActionBar `▣` button when one Frame selected) — wraps `BackgroundEditor` with no anchor toggle (frame is its own anchor)
+- [x] Inline HSV/RGB color picker (no external dep) — SV square + hue slider + alpha slider + hex field + preset swatches
+- [x] Tile-size slider shows unit suffix ("screen px" for CameraLocked album, "world units" for WorldLocked album and Frame) so users know what number they're adjusting
+- [ ] Texture URI persistence — `takePersistableUriPermission` works for picker-issued URIs; for filesystem URIs we still rely on `media_library` (§1.4/§1.5) to own and validate. Acceptable as interim path.
+
+### 19.6½ Sealed-class refactor
+Replace the flat-struct `AlbumBackground` (discriminator enum + nullable fields) with a sealed-class family. See [background.md § Domain Types](architecture/background.md#domain-types).
+
+- [x] `BackgroundData` sealed { `Solid` | `Texture` | `Procedural` } in `domain/model/Background.kt`
+- [x] `TileData` composite extracted (used by `Texture`; procedural patterns own their own positioning)
+- [x] `AlbumBackground` becomes `data class AlbumBackground(data, anchorMode)` — no more `type` enum, no nullable per-variant fields
+- [x] Drop `FrameBackground` — `Frame.background: BackgroundData?` directly. Frames immediately get texture + procedural support.
+- [x] `BackgroundType` enum removed. `BackgroundSourceChoice` (UI-only) replaces it in the editor.
+- [x] Shared draw entry point: `DrawScope.drawBackgroundData(data, rect, texturePainter)` reused by album (camera/world) and frame renderers.
+- [x] Shared UI: `BackgroundEditor` composable used by both `AlbumSettingsBottomSheet` (with anchor toggle) and `FrameBackgroundBottomSheet`.
+- No on-disk migration needed — no albums-with-background exist yet on disk.
+
+### 19.7 Procedural patterns
+Third album-background source: parameters, not files. Anchored same way as solid/texture (camera-locked, world-locked, frame-locked future). See [background.md § Procedural Patterns](architecture/background.md#procedural-patterns).
+
+- [x] `BackgroundData.Procedural(pattern, opacity)` sealed-class variant (replaces the original plan for a `BackgroundType.Procedural` enum value)
+- [x] `ProceduralPattern` sealed class with 8 `@Serializable @SerialName` variants
+- [x] Procedural patterns reachable from both album and frame backgrounds via `AlbumBackground.data: BackgroundData` and `Frame.background: BackgroundData?` — no dedicated `procedural` field
+- [x] `DrawScope.drawProceduralPattern` in `ProceduralBackgroundRenderer.kt`
+- [x] Wire into `CameraLockedAlbumBackground` (screen rect) and `WorldLockedAlbumBackground` (visible world rect)
+- [x] Album Settings: "Pattern" radio + pattern-type dropdown + per-pattern editor (`ProceduralPatternEditor.kt`)
+- [x] Undoable via existing `SetAlbumBackground` snapshot — no command-kind change needed
+- [x] Density caps (≤500 lines/axis, ≤4000 noise dots, ≤100 splotches) — skip rather than burn GPU
+- [x] Multi-stop gradients — `Gradient.stops: List<GradientStop>` (position 0..1 + hex color, alpha-aware). Renderer sorts defensively and feeds `colors` + `positions` to `android.graphics.LinearGradient` / `RadialGradient`. Editor MVP: read-only preview strip + vertical list with locked edge stops at 0 / 1, position slider + `ColorPicker` + Delete per intermediate stop, `+ Add stop` button that picks the midpoint of the largest gap and interpolates the color.
+- [ ] `AnchorMode.FrameLocked` — clip pattern to a specific frame's bounds, move/scale/rotate with it. Post-MVP.
+- [ ] Cover/Contain aspect handling for texture patterns (currently Stretch). Not strictly procedural; tracked here for parity.
+- [ ] Per-pattern preview swatch in the type dropdown (currently text labels only).
+- [ ] Better noise — Perlin/value noise instead of seeded random dots. Current rendering is a deterministic dot field, recognizable but not "noisy" in the simplex sense.
+- [ ] Better watercolor — soft-edge stamps via masked gradients (current implementation stacks 3 concentric translucent circles per splotch).
+- [ ] Gradient post-MVP polish: draggable stop handles on the preview strip, allow free first/last positions (currently locked to 0 and 1), gradient presets, easing modes between stops.
+
+### 19.8 Tech debt — Compose-native texture tiling
+
+Current production solution for repeated texture backgrounds uses Android `BitmapShader` drawn through `drawIntoCanvas { nativeCanvas.drawRect(...) }` (see `AlbumBackgroundRenderer.kt :: drawTiledShader` and `memory/background_shader_gotchas.md`). It works and should remain the default for now.
+
+Later, investigate a Compose-native implementation based on a custom `ShaderBrush` / `ImageShader`, **only if there is a concrete reason**:
+
+- we need tighter integration with Compose clipping / compositing / blend modes;
+- we add texture previews / swatches and want reusable brush objects;
+- we add animated / tinted / masked texture effects;
+- the nativeCanvas path shows issues inside camera / frame graphics layers;
+- we want to reduce Android-specific drawing code or prepare for Compose Multiplatform.
+
+**Important:** Do not reintroduce the old broken path where a pre-built Android `BitmapShader` is wrapped directly into `ShaderBrush(shader)`. If we try this again, the shader must be created **inside** `ShaderBrush.createShader(size)`, preferably using Compose `ImageShader(image, tileModeX, tileModeY)`.
+
+When the investigation does happen, the work is roughly:
+
+- [ ] Subclass `ShaderBrush`; create the shader **inside** `createShader(size)` so Compose owns its lifecycle (the prior bug was passing a pre-built shader to `ShaderBrush(shader)`).
+- [ ] Prefer `ImageShader(ImageBitmap, tileModeX, tileModeY)` over raw Android `BitmapShader` if behavior matches.
+- [ ] Verify rendering inside the camera `graphicsLayer` (the original failure scope).
+- [ ] Verify CameraLocked, WorldLocked, and Frame backgrounds.
+- [ ] Verify alpha, clipping, tile origin, and tile size.
+- [ ] Keep the nativeCanvas approach if the Compose path isn't clearly better or reliable.
+
+Not an MVP blocker. Do not keep two production backends unless there is a real reason.
+
+### 19.10 Tech debt — Procedural pattern anchor wired to album extent
+
+Fill-rect procedural patterns (Gradient / Watercolor / PaperGrain / Noise) currently use a hardcoded `(-2500..+2500)` world anchor in `WorldLockedAlbumBackground` (`AlbumBackgroundRenderer.kt :: PROCEDURAL_WORLD_ANCHOR_HALF`). The pattern exists inside that rect; outside it Gradient shows the end-color and dot patterns show nothing.
+
+When album-extent / `AlbumPresentationProfile` lands:
+
+- [ ] Replace the hardcoded constant with a value derived from `AlbumPresentationProfile` (or the nodes' world bounding box when no profile is set).
+- [ ] Optionally expose the anchor as a per-pattern field (`originX/Y/width/height`) so a user can position a gradient over a specific region of the canvas.
+- [ ] Decide what happens outside the anchor — current behavior is "Gradient end-color / dot-patterns blank". Possible alternatives: tile the anchor (so the pattern repeats), or extend `CLAMP`-style.
+
+Tileable patterns (Grid / DotGrid / RuledPaper / GraphPaper) are not affected — they're already world-anchored via their own `originX/Y` fields.
+
+### 19.9 Tech debt — Frame background tile-origin semantics
+
+Frame backgrounds are currently drawn in frame-local coordinates centered on `(0, 0)` (consistent with how every other frame property works), so `tileOrigin = (0, 0)` means "pattern starts at the frame's center" — not what most users expect when they tweak the origin sliders.
+
+- [ ] In the UI editor, treat `tileOriginX/Y` as **offset from the frame's top-left**.
+- [ ] In the renderer / domain mapper, convert that to centered frame-local coordinates before passing to `drawBackgroundData`.
+- [ ] Album backgrounds (CameraLocked / WorldLocked) are unaffected — their origin is already in screen-px / world-units, which has no center/top-left ambiguity.
 
 ### 19.5 Post-MVP
-- [ ] Frame texture backgrounds (tiled or stretched image fill)
-- [ ] `AnchorMode.FrameLocked` — background local to a frame, transformed with it
+- [x] Frame texture backgrounds (tiled or stretched image fill) — done via the §19.6½ refactor: frames take a full `BackgroundData?`, not just a color
+- [x] Background editing UI (color picker, texture picker, tile controls) — done in §19.6 (Album Settings + Frame Background bottom sheets)
+- [ ] `AnchorMode.FrameLocked` — background (texture or procedural) anchored to a specific frame, transformed with it. Also tracked in §19.7 for the procedural angle.
 - [ ] User layer backgrounds
-- [ ] Background editing UI (color picker, texture picker, tile controls)
 
 ---
 

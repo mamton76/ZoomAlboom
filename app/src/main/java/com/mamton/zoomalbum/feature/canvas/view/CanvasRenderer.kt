@@ -8,7 +8,9 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
@@ -16,6 +18,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.core.graphics.toColorInt
 import coil3.compose.rememberAsyncImagePainter
+import com.mamton.zoomalbum.domain.model.BackgroundData
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.RenderDetail
 
@@ -44,19 +47,67 @@ private fun FrameRenderer(frame: CanvasNode.Frame, detail: RenderDetail) {
         RenderDetail.Hidden -> return
         RenderDetail.Stub -> StubRenderer(t.cx, t.cy, t.rotation, renderW, renderH, frame.color)
         RenderDetail.Preview -> StubRenderer(t.cx, t.cy, t.rotation, renderW, renderH, frame.color)
-        RenderDetail.Simplified -> SimplifiedFrameRenderer(t.cx, t.cy, t.rotation, renderW, renderH, frame.color)
-        RenderDetail.Full -> FullFrameRenderer(t.cx, t.cy, t.rotation, renderW, renderH, frame.color)
+        RenderDetail.Simplified -> SimplifiedFrameRenderer(
+            t.cx, t.cy, t.rotation, renderW, renderH, frame.color, frame.background,
+        )
+        RenderDetail.Full -> FullFrameRenderer(
+            t.cx, t.cy, t.rotation, renderW, renderH, frame.color, frame.background,
+        )
     }
 }
 
-/** Full render: filled rounded rect with border. */
+/**
+ * Paints [background] into the frame-local rect [-renderW/2..+renderW/2] ×
+ * [-renderH/2..+renderH/2]. Solid is drawn with a rounded-rect shape; Texture
+ * and Procedural are clipped to the rectangular bounds (square corners — the
+ * 4 px corner radius is invisible at most zoom levels).
+ *
+ * Caller must thread the bitmap from [rememberBackgroundBitmap].
+ */
+private fun DrawScope.drawFrameBackground(
+    background: BackgroundData,
+    renderW: Float,
+    renderH: Float,
+    textureBitmap: ImageBitmap?,
+) {
+    val left = -renderW / 2f
+    val top = -renderH / 2f
+    val right = renderW / 2f
+    val bottom = renderH / 2f
+    when (background) {
+        is BackgroundData.SolidBackgroundData -> {
+            // Honor the rounded-rect shape so the fill matches the border outline.
+            val hex = runCatching { Color(background.color.toColorInt()) }.getOrNull() ?: return
+            drawRoundRect(
+                color = hex.copy(alpha = (hex.alpha * background.opacity).coerceIn(0f, 1f)),
+                topLeft = Offset(left, top),
+                size = Size(renderW, renderH),
+                cornerRadius = CornerRadius(4f, 4f),
+            )
+        }
+        is BackgroundData.TextureBackgroundData, is BackgroundData.ProceduralBackgroundData -> {
+            clipRect(left, top, right, bottom) {
+                drawBackgroundData(
+                    data = background,
+                    left = left, top = top, right = right, bottom = bottom,
+                    textureBitmap = textureBitmap,
+                )
+            }
+        }
+    }
+}
+
+/** Full render: optional frame background (any source), then frame border. */
 @Composable
 private fun FullFrameRenderer(
     cx: Float, cy: Float, rotation: Float,
     renderW: Float, renderH: Float, colorHex: String,
+    background: BackgroundData?,
 ) {
     val fillColor = Color(colorHex.toColorInt())
     val borderColor = fillColor.copy(alpha = 0.6f)
+    // Always-stable remember slot; returns null when background isn't a Texture.
+    val textureBitmap = rememberBackgroundBitmap(background)
 
     Spacer(
         modifier = Modifier
@@ -71,6 +122,7 @@ private fun FullFrameRenderer(
                 val topLeft = Offset(-renderW / 2f, -renderH / 2f)
                 val nodeSize = Size(renderW, renderH)
                 val radius = CornerRadius(4f, 4f)
+                background?.let { drawFrameBackground(it, renderW, renderH, textureBitmap) }
                 drawRoundRect(
                     color = fillColor.copy(alpha = 0.35f),
                     topLeft = topLeft,
@@ -88,13 +140,15 @@ private fun FullFrameRenderer(
     )
 }
 
-/** Simplified: border only, no fill. Lightweight for zoomed-in view of large frames. */
+/** Simplified: optional frame background, then border only. */
 @Composable
 private fun SimplifiedFrameRenderer(
     cx: Float, cy: Float, rotation: Float,
     renderW: Float, renderH: Float, colorHex: String,
+    background: BackgroundData?,
 ) {
     val borderColor = Color(colorHex.toColorInt()).copy(alpha = 0.4f)
+    val textureBitmap = rememberBackgroundBitmap(background)
 
     Spacer(
         modifier = Modifier
@@ -108,6 +162,7 @@ private fun SimplifiedFrameRenderer(
             .drawBehind {
                 val topLeft = Offset(-renderW / 2f, -renderH / 2f)
                 val nodeSize = Size(renderW, renderH)
+                background?.let { drawFrameBackground(it, renderW, renderH, textureBitmap) }
                 drawRoundRect(
                     color = borderColor,
                     topLeft = topLeft,

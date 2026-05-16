@@ -24,7 +24,7 @@ fun ZoomAlbumTheme(
     content: @Composable () -> Unit,
 ) {
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme,
+        colorScheme = LightColorScheme, //if (darkTheme) DarkColorScheme else LightColorScheme,
         content = content,
     )
 }

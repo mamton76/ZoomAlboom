@@ -9,6 +9,7 @@ Discovered facts, framework gotchas, and project notes that don't yet have a hom
 - [Consume order in `pointerInput`](compose_consume_order.md) — read `changedToUp()` / `changedToDown()` BEFORE calling `consume()`, not after.
 - [Dependency gotchas](dependencies_gotchas.md) — no `material-icons-core`, `TabRow` deprecated, `PrimaryTabRow.divider` signature, `Modifier.offset` import.
 - [Camera & resize math gotchas](camera_math_gotchas.md) — rotated-frame focus traps in `Transform.toCamera`, opposite-corner pivot + `2*diag` factor in resize-by-handle. Read before touching anything that produces a `Camera` from a target or scales around a handle.
+- [Background texture & shader gotchas](background_shader_gotchas.md) — three causes of silently-transparent texture rendering (Coil HARDWARE bitmap, Compose `ShaderBrush(prebuilt)` inside `graphicsLayer`, zero-size inner `graphicsLayer` with distant draws). Read before touching `AlbumBackgroundRenderer.kt` or any new `BitmapShader` usage.
 
 ### Subsystems not yet in `docs/architecture/`
 - [IDE panel system](ide_panels.md) — `PanelPosition` / `PanelState` / `IdeUiState` model and the `DockedPanel` / `FloatingPanel` / `PanelSlot` split.

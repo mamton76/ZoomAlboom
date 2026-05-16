@@ -6,15 +6,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mamton.zoomalbum.core.designsystem.CanvasDark
+import com.mamton.zoomalbum.core.designsystem.CanvasLight
 import com.mamton.zoomalbum.core.math.TransformUtils
 import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
 import com.mamton.zoomalbum.domain.model.CanvasNode
@@ -46,11 +50,17 @@ fun CanvasScreen(
     // Mutable ref for rectangle selection start point (world coords).
     val rectStartWorld = remember { floatArrayOf(0f, 0f) }
 
+    // Screen size in pixels — needed by world-locked background renderer to
+    // compute the visible world rect. Updated synchronously with the viewmodel's
+    // own screen-size cache.
+    var screenSize by remember { mutableStateOf(IntSize.Zero) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(CanvasDark)
+            .background(CanvasLight)
             .onSizeChanged { size ->
+                screenSize = size
                 viewModel.onScreenSizeChanged(size.width.toFloat(), size.height.toFloat())
             }
             // Layer 1 (outermost): node drag/resize/rotate — Initial pass
@@ -232,6 +242,13 @@ fun CanvasScreen(
                 viewModel.onGesture(centroid, pan, zoom, rotation)
             },
     ) {
+        // Camera-locked album background: screen-fixed, drawn under everything.
+        state.albumBackground?.let { bg ->
+            if (bg.anchorMode == com.mamton.zoomalbum.domain.model.AnchorMode.CameraLocked) {
+                CameraLockedAlbumBackground(bg)
+            }
+        }
+
         // The single graphicsLayer on this inner Box handles ALL pan/zoom.
         // Individual node composables never recalculate their position during gestures;
         // the GPU performs the transform on the entire layer.
@@ -246,6 +263,17 @@ fun CanvasScreen(
                 transformOrigin = TransformOrigin(0f, 0f)
             },
         ) {
+            // World-locked album background: moves/scales with camera; painted under nodes.
+            state.albumBackground?.let { bg ->
+                if (bg.anchorMode == com.mamton.zoomalbum.domain.model.AnchorMode.WorldLocked) {
+                    WorldLockedAlbumBackground(
+                        background = bg,
+                        camera = state.camera,
+                        screenSize = screenSize,
+                    )
+                }
+            }
+
             for ((node, detail) in state.visibleNodes) {
                 CanvasNodeRenderer(node, detail)
             }

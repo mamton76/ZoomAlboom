@@ -17,7 +17,9 @@ import com.mamton.zoomalbum.core.math.TransformUtils
 import com.mamton.zoomalbum.core.math.ViewportCuller
 import com.mamton.zoomalbum.core.math.toCamera
 import com.mamton.zoomalbum.core.mvi.Intent
+import com.mamton.zoomalbum.domain.model.AlbumBackground
 import com.mamton.zoomalbum.domain.model.AlbumPresentationProfile
+import com.mamton.zoomalbum.domain.model.BackgroundData
 import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
@@ -30,6 +32,7 @@ import com.mamton.zoomalbum.domain.model.TransitionPreset
 import com.mamton.zoomalbum.domain.model.withTransform
 import com.mamton.zoomalbum.domain.repository.HistoryRepository
 import com.mamton.zoomalbum.domain.repository.MediaRepository
+import com.mamton.zoomalbum.domain.undo.AlbumBackgroundChange
 import com.mamton.zoomalbum.domain.undo.CanvasCommand
 import com.mamton.zoomalbum.domain.undo.CommandHistory
 import com.mamton.zoomalbum.domain.undo.CommandKind
@@ -74,6 +77,7 @@ data class CanvasState(
     val mode: CanvasInteractionMode = CanvasInteractionMode.Edit,
     /** Transient in-flight focus animation. Cancelled by any pan/pinch gesture. */
     val cameraAnimation: CameraAnimation? = null,
+    val albumBackground: AlbumBackground? = null,
 )
 
 // ── Actions ───────────────────────────────────────────────────────────
@@ -125,6 +129,13 @@ sealed interface CanvasAction : Intent {
     data class SetMode(val mode: CanvasInteractionMode) : CanvasAction
     /** Animated camera focus on the given node (frame or media). */
     data class FocusNode(val nodeId: String) : CanvasAction
+
+    // Backgrounds (§19)
+    data class SetAlbumBackground(val background: AlbumBackground?) : CanvasAction
+    data class SetFrameBackground(
+        val nodeId: String,
+        val background: BackgroundData?,
+    ) : CanvasAction
 }
 
 // ── ViewModel ─────────────────────────────────────────────────────────
@@ -580,6 +591,51 @@ class CanvasViewModel @Inject constructor(
                 val node = _allNodes.value.firstOrNull { it.id == action.nodeId } ?: return
                 startCameraAnimation(node.transform)
             }
+
+            is CanvasAction.SetAlbumBackground -> {
+                val before = _state.value.albumBackground
+                val after = action.background
+                if (before == after) return
+                _state.update { it.copy(albumBackground = after) }
+                commit(
+                    CanvasCommand(
+                        before = null,
+                        after = null,
+                        albumBackgroundChange = AlbumBackgroundChange(before, after),
+                        kind = CommandKind.SET_ALBUM_BACKGROUND,
+                        timestampMs = System.currentTimeMillis(),
+                    ),
+                )
+            }
+
+            is CanvasAction.SetFrameBackground -> {
+                val current = _allNodes.value
+                val idx = current.indexOfFirst { it.id == action.nodeId }
+                if (idx < 0) return
+                val node = current[idx]
+                if (node !is CanvasNode.Frame) return
+                if (node.background == action.background) return
+                val updated = node.copy(background = action.background)
+                _allNodes.update { nodes ->
+                    nodes.map { if (it.id == action.nodeId) updated else it }
+                }
+                // Patch visibleNodes in place so the frame repaints without a full cull.
+                _state.update { s ->
+                    s.copy(
+                        visibleNodes = s.visibleNodes.map { vn ->
+                            if (vn.node.id == action.nodeId) vn.copy(node = updated) else vn
+                        },
+                    )
+                }
+                commit(
+                    CanvasCommand(
+                        before = listOf(node),
+                        after = listOf(updated),
+                        kind = CommandKind.SET_FRAME_BACKGROUND,
+                        timestampMs = System.currentTimeMillis(),
+                    ),
+                )
+            }
         }
     }
 
@@ -673,6 +729,7 @@ class CanvasViewModel @Inject constructor(
         val nodes = _allNodes.value
         val camera = _state.value.camera
         val profile = _state.value.profile
+        val albumBackground = _state.value.albumBackground
         val historySnapshot = history.snapshot()
         if (albumId != 0L) {
             // Fire-and-forget save — ViewModel scope is cancelled but we use
@@ -686,6 +743,7 @@ class CanvasViewModel @Inject constructor(
                             camera = camera,
                             nodes = nodes,
                             profile = profile,
+                            background = albumBackground,
                         ),
                     )
                     historyRepository.save(albumId, historySnapshot)
@@ -796,6 +854,7 @@ class CanvasViewModel @Inject constructor(
                 it.copy(
                     camera = sceneGraph.camera,
                     profile = sceneGraph.profile,
+                    albumBackground = sceneGraph.background,
                     totalNodeCount = sceneGraph.nodes.size,
                     isLoading = false,
                 )
@@ -931,6 +990,13 @@ class CanvasViewModel @Inject constructor(
      * [CanvasCommand.beforeIndices] is used to re-insert at the original positions.
      */
     private fun applyCommand(cmd: CanvasCommand, reverse: Boolean) {
+        // Album-only commands carry no node sides — handle and return early.
+        if (cmd.albumBackgroundChange != null && cmd.before == null && cmd.after == null) {
+            val target = if (reverse) cmd.albumBackgroundChange.before else cmd.albumBackgroundChange.after
+            _state.update { it.copy(albumBackground = target) }
+            return
+        }
+
         val from = if (reverse) cmd.after else cmd.before
         val to = if (reverse) cmd.before else cmd.after
 

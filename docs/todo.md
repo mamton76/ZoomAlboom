@@ -661,38 +661,54 @@ Frame backgrounds are drawn in frame-local coordinates centered on `(0, 0)` (con
 
 ---
 
-## 20. Media Appearance (Non-Destructive Editing)
+## 20. Appearance System (Non-Destructive Styling)
 
-Non-destructive visual styling of media objects. The original source file is never modified.
+Shared non-destructive styling for canvas nodes. Each variant owns its own `*Appearance` container under a sealed `NodeAppearance` base; shared value types (`OverlayStyle`, `OverlaySource`, `NodeBlendMode`, `BorderStyle`, `ShadowStyle`) are defined once and reused. The original source files are never modified.
 
-**Formula:** `source media + MediaAppearance = rendered media object on canvas`
+**Formulae:**
+- `source media + MediaAppearance = rendered media object on canvas`
+- `frame rect + FrameAppearance + linked contents = rendered frame on canvas`
 
-See [data-model.md § MediaAppearance](architecture/data-model.md#mediaappearance) for full type definitions.  
+See [appearance.md](architecture/appearance.md) for the shared model, the render-pipeline contract, and the rule that `MediaAppearance.overlays` (object-level) and `FrameAppearance.contentOverlays` (container/content-level) share the `OverlayStyle` element type but stay as separate `List<OverlayStyle>` fields.  
+See [media-appearance.md](architecture/media-appearance.md) for media-specific surface.  
 See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD § 11.8](product/PRD.md#118-media-appearance-non-destructive-editing) for product requirements.
 
-### 20.1 Domain model
-- [ ] `MediaAppearance` — opacity, cornerRadius, crop, border, shadow, colorAdjustments, overlays, frameOverlay, caption
-- [ ] `CropSettings` + `CropMode` enum (Fit, Fill, Manual, Stretch) with focal point
+### 20.1 Domain model — shared base + value types
+- [ ] `NodeAppearance` sealed base — `opacity`, `cornerRadius`, `border: BorderStyle?`, `shadow: ShadowStyle?`. No generic `overlays` on the base.
+- [ ] `OverlayStyle` — `source: OverlaySource`, `opacity`, `blendMode: NodeBlendMode`
+- [ ] `OverlaySource` sealed — `SolidColor`, `Texture(textureRefId, tile)`, `Procedural(pattern, fillColor?)` (mirrors `BackgroundData` shape; `ProceduralPattern` and `TileData` reused from §19)
+- [ ] `NodeBlendMode` enum (`Normal`, `Multiply`, `Screen`, `Overlay`, `SoftLight`, `Darken`, `Lighten`) — renderer ships `Normal` first; others light up incrementally
 - [ ] `BorderStyle`, `ShadowStyle`
+- [ ] All types `@Serializable`; polymorphism via `@SerialName`; `ignoreUnknownKeys` handles old nodes
+
+### 20.1a Domain model — `MediaAppearance`
+- [ ] `MediaAppearance : NodeAppearance` — `crop`, `colorAdjustments`, `overlays: List<OverlayStyle> = emptyList()` (ordered; entry `[i]` over entry `[i-1]`; replaces prior `overlays: List<MediaOverlay>` + `OverlayKind`/`OverlayBlendMode`), `frameDecoration: MediaFrameDecoration?` (decorative photo-frame around one media — *not* a `CanvasNode.Frame`), `caption`
+- [ ] `CropSettings` + `CropMode` enum (Fit, Fill, Manual, Stretch) with focal point
 - [ ] `MediaColorAdjustments` — brightness, contrast, saturation, temperature, tint, exposure, highlights, shadows, blur, sharpen, vignette
-- [ ] `MediaOverlay` — id, kind, assetUri, opacity, blendMode, fitMode, rotation, scale, offset, isEnabled
-- [ ] `OverlayKind` enum (Texture, Filter, Frame, LightLeak, Dust, Scratches, Vignette, Decoration)
-- [ ] `OverlayBlendMode` enum (Normal, Multiply, Screen, Overlay, SoftLight, Darken, Lighten)
-- [ ] `FrameOverlay` — assetUri, opacity, mode (Stretch/NineSlice), slice insets, content insets
+- [ ] `MediaFrameDecoration` (renamed from `FrameOverlay`) — assetUri, opacity, mode, slice insets, content insets
+- [ ] `MediaFrameDecorationMode` enum (renamed from `FrameRenderMode`) — `Stretch`, `NineSlice`
 - [ ] `MediaStylePreset` — id, name, appearance (saved recipe)
-- [ ] Add `appearance: MediaAppearance?` to `CanvasNode.Media` (nullable — null = default rendering)
-- [ ] All types `@Serializable`; `ignoreUnknownKeys` handles old nodes
+- [ ] `appearance: MediaAppearance?` on `CanvasNode.Media` (already in target data model)
+
+### 20.1b Domain model — `FrameAppearance`
+- [ ] `FrameAppearance : NodeAppearance` — `background: BackgroundData?` (migrated from `Frame.background`), `contentOverlays: List<OverlayStyle> = emptyList()` (ordered; entry `[i]` over entry `[i-1]`), `titleStyle: FrameTitleStyle?`, `contentEffect: FrameContentEffect?` (future)
+- [ ] `appearance: FrameAppearance?` on `CanvasNode.Frame` — replaces direct `Frame.background` field; migration: old JSON `Frame.background` → new `Frame.appearance.background`
+- [ ] `FrameTitleStyle` — typography for the frame label
+- [ ] `FrameContentEffect` (future) — sealed family for off-screen filter passes (sepia/blur/grayscale of rendered contents). Field only; rendering is post-MVP.
 
 ### 20.2 Rendering pipeline
-- [ ] Per-node rendering order: decode + crop → color adjustments → overlays (in order, with blend modes) → frame overlay → corner radius + border + shadow + opacity
+- [ ] **Media rendering (single pass, inside `MediaRenderer`):** decode + crop → color adjustments → `overlays` drawn in list order (each with its own blend mode) → `frameDecoration` (Stretch / NineSlice) → corner radius + border + shadow + opacity
+- [ ] **Layered frame rendering** (depends on frame–content binding from §4 / frame-membership.md): `frame.appearance.background` → linked contents (each child draws its own MediaAppearance, including its overlays) → `frame.appearance.contentOverlays` drawn in list order (clipped to frame bounds) → border + title. See [rendering.md § 6b](architecture/rendering.md#6b-layered-frame-rendering).
+- [ ] **Shared overlay-stack helper:** `DrawScope.drawOverlayStack(overlays: List<OverlayStyle>, bounds)` — used by both `MediaRenderer` and the layered frame renderer
 - [ ] `CropMode.Fit` — letterbox within bounding box
 - [ ] `CropMode.Fill` — crop to fill bounding box; respect focal point
 - [ ] `CropMode.Manual` — pan/zoom inside bounding box (user-controlled)
 - [ ] `CropMode.Stretch` — stretch to bounds ignoring aspect ratio
-- [ ] Raster overlay rendering — `drawImage` with blend mode via `androidx.compose.ui.graphics.BlendMode`
-- [ ] Nine-slice frame rendering — draw 9 regions independently (corners unscaled, edges scaled one axis)
-- [ ] `FrameOverlay.contentInsets` — defines usable content area (e.g. Polaroid caption space)
-- [ ] LOD: skip overlay/filter rendering below a threshold zoom (stub view only)
+- [ ] `OverlayStyle` rendering — Solid / Texture / Procedural source with `NodeBlendMode` via `androidx.compose.ui.graphics.BlendMode`. Same `Source → DrawScope` pipeline as `BackgroundData`.
+- [ ] Nine-slice decoration rendering — draw 9 regions independently (corners unscaled, edges scaled one axis)
+- [ ] `MediaFrameDecoration.contentInsets` — defines usable content area (e.g. Polaroid caption space)
+- [ ] LOD: skip overlay/filter rendering below a threshold zoom (stub view only); at intermediate zoom the renderer may draw only the first overlay entry or only entries with non-`Normal` blend; contentOverlays also drop at low LOD
+- [ ] `FrameContentEffect` rendering — off-screen pass (`GraphicsLayer.record` / `ColorMatrix`); post-MVP
 
 ### 20.3 Style presets
 - [ ] `MediaStylePreset` storage — per-album (scene graph) and/or global (app prefs)
@@ -713,17 +729,20 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 
 ### 20.5 UI
 - [ ] Appearance panel / properties sheet for selected media node
-- [ ] Overlay list with enable/disable toggle, opacity slider, blend mode picker per overlay
-- [ ] Frame overlay picker (browse built-in + user assets)
+- [ ] `overlays` list editor — reorder, enable/disable toggle, opacity slider, blend mode picker per entry
+- [ ] `frameDecoration` picker (browse built-in + user assets)
 - [ ] Color adjustments sliders
 - [ ] Crop mode selector + manual crop handle in canvas
 - [ ] Context menu actions: Copy Appearance, Paste Appearance, Save as Preset, Reset Appearance, Save Edited Image
+- [ ] Frame appearance panel — `background` editor, `contentOverlays` list editor (same component as media overlays list)
 
 ### Implementation priority
-MVP-adjacent: opacity, crop (Fit/Fill/Manual), cornerRadius, border, shadow, copy/paste appearance, save as preset, ResetAppearance.
-Post-MVP: raster overlays with blend modes, FrameOverlay (Stretch or NineSlice), parametric color adjustments, rendered derivatives, animated overlays.
+MVP-adjacent: shared `NodeAppearance` base + `OverlayStyle` value type; `MediaAppearance` with opacity, crop (Fit/Fill/Manual), cornerRadius, border, shadow, `overlays: List<OverlayStyle>` (1–2 entries common), `frameDecoration` (Stretch), copy/paste appearance, save as preset, ResetAppearance; `FrameAppearance` with migrated `background` field plus an empty default `contentOverlays` list (model only; layered rendering can land later).
+Post-MVP: layered frame renderer (`FrameAppearance.contentOverlays`), additional `NodeBlendMode` values, NineSlice decoration, parametric color adjustments, rendered derivatives, `FrameContentEffect`, animated overlays.
 
 ### Post-MVP
+- [ ] Layered frame renderer + `FrameAppearance.contentOverlays` rendering
+- [ ] `FrameAppearance.contentEffect` — off-screen filter pass (sepia / blur / grayscale of rendered frame contents)
 - [ ] AI auto-enhance, background removal, old photo restoration, B&W colorization
 - [ ] Animated overlays (Live Photo / Harry Potter newspaper style)
 - [ ] Batch preset application across selection or entire album

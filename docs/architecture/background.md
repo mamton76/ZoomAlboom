@@ -1,6 +1,6 @@
 # Album & Frame Backgrounds
 
-> Related: [data-model.md](data-model.md) | [overview.md](overview.md) | [todo.md §19](../todo.md#19-album-and-frame-backgrounds) | [PRD §8.6](../product/PRD.md#86-visual-atmosphere)
+> Related: [data-model.md](data-model.md) | [appearance.md](appearance.md) | [overview.md](overview.md) | [todo.md §19](../todo.md#19-album-and-frame-backgrounds) | [PRD §8.6](../product/PRD.md#86-visual-atmosphere)
 
 Backgrounds are **not** `CanvasNode` objects. They are render-layer style properties stored alongside (not inside) the nodes list in the scene graph.
 
@@ -13,7 +13,7 @@ A background source is described by a **`BackgroundData`** sealed family — one
 Same `BackgroundData` type is used at two scopes:
 
 - **`AlbumBackground = BackgroundData + AnchorMode`** — the album-level background. The anchor decides whether the source is screen-fixed (`CameraLocked`) or canvas-fixed (`WorldLocked`).
-- **`Frame.background: BackgroundData?`** — per-frame backgrounds. No anchor field: a frame *is* its own anchor (background moves/scales/rotates with the frame).
+- **`FrameAppearance.background: BackgroundData?`** — per-frame backgrounds, nested inside the frame's `FrameAppearance` container ([appearance.md § 3](appearance.md#3-frameappearance--containercontent-level-styling)). No anchor field: a frame *is* its own anchor (background moves/scales/rotates with the frame). The same `BackgroundData` payload that previously sat directly on `Frame.background` now sits at `frame.appearance.background` — see [data-model.md § Migration Notes](data-model.md#migration-notes).
 
 ---
 
@@ -80,7 +80,7 @@ Notes:
 - `ProceduralBackgroundData` does **not** carry a `TileData`. Each `ProceduralPattern` variant (`Grid.cellSize`, `DotGrid.spacing`, `RuledPaper.lineSpacing`, etc.) owns its own tiling/positioning. An outer `TileData` would be redundant — what does `tileMode=Stretch` mean for a `Grid`?
 - `ProceduralBackgroundData.fillColor` is an optional solid color drawn under the pattern. Patterns with gaps (Grid lines, dots, gradient transitions, sparse noise) can use it instead of inheriting whatever's behind the layer. `Watercolor` overrides it (it draws its own full-rect `baseColor` wash).
 - Per-source `opacity` lives on each `BackgroundData` variant rather than on `AlbumBackground`, so the same opacity follows the source even when reusing it elsewhere.
-- A `Frame.background = BackgroundData?` of `null` means "no background" (transparent frame).
+- A `FrameAppearance.background = BackgroundData?` of `null` (or a `null` `Frame.appearance` entirely) means "no background" (transparent frame).
 - An `AlbumBackground? = null` on the scene graph means "no album background" (canvas-default backdrop only).
 - Class names carry the `*BackgroundData` suffix in code; the `@SerialName` discriminators are the short forms (`"Solid"` / `"Texture"` / `"Procedural"`) — that's the on-disk wire format and is what to use when reading or writing scene JSON by hand.
 
@@ -90,10 +90,14 @@ Notes:
 
 1. **Camera-locked album background** — drawn outside the camera `graphicsLayer` (screen-fixed, no transform applied)
 2. **World-locked album background** — drawn inside the camera `graphicsLayer`, before all nodes
-3. **Frame backgrounds** — drawn inside each frame's own rendering, clipped to frame bounds
-4. **Canvas nodes** by `zIndex`
-5. Selection overlays, guidelines, snapping indicators
-6. IDE UI overlay
+3. **Frame backgrounds** — `frame.appearance.background`, drawn behind the frame's linked contents, clipped to frame bounds
+4. **Canvas nodes** by `zIndex`, including each frame's linked contents
+5. **Frame content overlays** — `frame.appearance.contentOverlays` (ordered list), drawn above the frame's linked contents, clipped to frame bounds; entry `[i]` composites over entry `[i-1]` (future layered renderer — see [appearance.md § 6](appearance.md#6-render-pipeline-implication) and [rendering.md § 6b](rendering.md#6b-layered-frame-rendering))
+6. **Frame decoration** — `frame.appearance.border`, title, selection handles
+7. Selection overlays, guidelines, snapping indicators
+8. IDE UI overlay
+
+Steps 3 and 5 are the two halves of the layered frame render: background goes under the contents, `contentOverlays` go over them in list order. With today's single-pass `CanvasNodeRenderer`, step 3 is implemented and step 5 is persisted-but-not-painted; the renderer slice that closes the gap is tracked in todo.
 
 ---
 
@@ -268,7 +272,7 @@ The renderer (`ProceduralBackgroundRenderer.kt`) clamps line/dot grids to ≤500
 }
 ```
 
-`Frame.background` is a nullable `BackgroundData` on the frame node — `null` means transparent. When present it serializes inline using the same `type` discriminator (`Solid` / `Texture` / `Procedural`).
+Per the appearance system, the frame's background lives at `frame.appearance.background: BackgroundData?`. `null` (or a `null` `frame.appearance` entirely) means transparent. When present it serializes inline using the same `type` discriminator (`Solid` / `Texture` / `Procedural`). Today's on-disk layout still stores `Frame.background` directly on the frame node; the migration to `frame.appearance.background` is tracked in [data-model.md § Migration Notes](data-model.md#migration-notes) and [todo.md § 20](../todo.md#20-appearance-system-non-destructive-styling).
 
 ---
 

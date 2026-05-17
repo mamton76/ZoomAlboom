@@ -101,7 +101,7 @@ fun Transform.toCamera(screenWidth: Float, screenHeight: Float, fillFraction: Fl
 
 | Variant | Extra fields | Purpose |
 |---------|-------------|---------|
-| `Frame` | `label`, `color` (hex string), `overrides: Map<String, FrameMembershipOverride>`, `background: BackgroundData?` | Navigation area / logical grouping. Membership is computed (geometry + overrides) — see [frame-membership.md](frame-membership.md). |
+| `Frame` | `label`, `color` (hex string), `overrides: Map<String, FrameMembershipOverride>`, `appearance: FrameAppearance?` | Navigation area / logical grouping. Membership is computed (geometry + overrides) — see [frame-membership.md](frame-membership.md). |
 | `Media` | `mediaRefId` (FK to `media_library`), `mediaType`, `tags`, `intrinsicPixelWidth/Height`, `appearance: MediaAppearance?` | Any media asset (image, video, text; future: audio, sticker, animated photo, vector shape) |
 | `Widget` | `widgetType: WidgetType`, `config: WidgetConfig`, `dataSource: WidgetDataSource`, `links: List<WidgetLink>` | Canvas-native smart object with data binding and navigation (post-MVP) |
 
@@ -117,7 +117,7 @@ Album-level declaration of the intended screen shape for viewing/presenting (asp
 
 ### Backgrounds (`BackgroundData`, `AlbumBackground`)
 
-Backgrounds are **not** `CanvasNode` objects — they are render-layer style properties stored alongside the nodes list in the scene graph. The payload is a sealed `BackgroundData` family with three variants: `SolidBackgroundData` (hex color), `TextureBackgroundData` (Coil-loadable URI + `TileData` — `tileMode` ∈ {None, Stretch, Cover, Contain, Repeat}), and `ProceduralBackgroundData` (parameterised `ProceduralPattern` + optional `fillColor` drawn under the pattern). Albums wrap it as `AlbumBackground(data, anchorMode)` where `anchorMode ∈ { CameraLocked, WorldLocked }`. Frames hold `Frame.background: BackgroundData?` directly — the frame is implicitly its own anchor. `albumBackground` lives in the JSON scene graph root (§1.3 wrapper).
+Backgrounds are **not** `CanvasNode` objects — they are render-layer style properties stored alongside the nodes list in the scene graph. The payload is a sealed `BackgroundData` family with three variants: `SolidBackgroundData` (hex color), `TextureBackgroundData` (Coil-loadable URI + `TileData` — `tileMode` ∈ {None, Stretch, Cover, Contain, Repeat}), and `ProceduralBackgroundData` (parameterised `ProceduralPattern` + optional `fillColor` drawn under the pattern). Albums wrap it as `AlbumBackground(data, anchorMode)` where `anchorMode ∈ { CameraLocked, WorldLocked }`. Frame backgrounds live inside `FrameAppearance.background` (the frame is implicitly its own anchor — no `anchorMode` is stored). `albumBackground` lives in the JSON scene graph root (§1.3 wrapper).
 
 **→ Full type definitions, rendering order, tile algorithm, MVP scope:** [background.md](background.md)
 
@@ -159,34 +159,75 @@ enum class MediaType {
 
 `IMAGE`, `VIDEO`, `AUDIO`, `TEXT`, `STICKER`, `VECTOR_SHAPE` are MVP variants. `ANIMATED_PHOTO` is planned post-MVP.
 
-### MediaAppearance
+### NodeAppearance, MediaAppearance, FrameAppearance
 
-Non-destructive rendering recipe stored on `CanvasNode.Media`. The original source file is never modified.
-
-**Core formula:** `source media asset + MediaAppearance = rendered media object on canvas`
-
-Fields: `opacity`, `cornerRadius`, `crop: CropSettings` (Fit/Fill/Manual/Stretch + focal point), `border: BorderStyle?`, `shadow: ShadowStyle?`, `colorAdjustments: MediaColorAdjustments?` (brightness/contrast/saturation/temperature/…), `overlays: List<MediaOverlay>` (raster PNG/WebP layers with blend mode + opacity), `frameOverlay: FrameOverlay?` (Stretch or NineSlice decorative frame), `caption: CaptionStyle?`.
-
-**→ Full type definitions, rendering pipeline, style presets, rendered derivatives:** [media-appearance.md](media-appearance.md)
+Non-destructive visual styling for canvas nodes. Each variant of `CanvasNode` that supports styling carries its own typed appearance container — `MediaAppearance` on `CanvasNode.Media`, `FrameAppearance` on `CanvasNode.Frame` — both extending a shared sealed `NodeAppearance` base. The base owns only properties that have the same meaning on every node (`opacity`, `cornerRadius`, `border`, `shadow`). Shared *value* types (`OverlayStyle`, `OverlaySource`, `NodeBlendMode`, `BorderStyle`, `ShadowStyle`) are defined once and reused.
 
 ```kotlin
 @Serializable
-data class MediaAppearance(
-    val opacity: Float = 1f,
-    val cornerRadius: Float = 0f,
-    val crop: CropSettings = CropSettings(),
-    val border: BorderStyle? = null,
-    val shadow: ShadowStyle? = null,
-    val colorAdjustments: MediaColorAdjustments? = null,
-    val overlays: List<MediaOverlay> = emptyList(),
-    val frameOverlay: FrameOverlay? = null,
-    val caption: CaptionStyle? = null,
-)
+sealed class NodeAppearance {
+    abstract val opacity: Float
+    abstract val cornerRadius: Float
+    abstract val border: BorderStyle?
+    abstract val shadow: ShadowStyle?
+}
 ```
 
-**Persistence:** `appearance` is a nullable field on `CanvasNode.Media` in the scene graph JSON. `null` = default rendering. `ignoreUnknownKeys` handles old nodes.
+**Core formulae:**
+- `source media asset + MediaAppearance = rendered media object on canvas`
+- `frame rect + FrameAppearance + linked contents = rendered frame on canvas`
 
-**Rendered derivatives:** Users can flatten the current appearance into a new image asset registered in `media_library` with `origin = RENDERED_DERIVATIVE`.
+The key model rule:
+
+> `MediaAppearance.overlays` are object-level overlays (above this one media node, bounded by its rect).
+> `FrameAppearance.contentOverlays` are container/content-level overlays (above the frame's linked contents, clipped to the frame). They do not mutate child nodes.
+
+Both fields are `List<OverlayStyle>` with declaration-order compositing (entry `[i]` over entry `[i-1]`; empty list = no overlays). They share the element type but are not the same field — see [appearance.md § 4](appearance.md#4-why-media-overlays-and-frame-contentoverlays-are-separate-fields). `NodeAppearance` deliberately does not declare a generic `overlays` field, to keep the base unambiguous.
+
+**`MediaAppearance` (one concrete variant — see [media-appearance.md](media-appearance.md) for full surface):**
+
+```kotlin
+@Serializable
+@SerialName("MediaAppearance")
+data class MediaAppearance(
+    override val opacity: Float = 1f,
+    override val cornerRadius: Float = 0f,
+    override val border: BorderStyle? = null,
+    override val shadow: ShadowStyle? = null,
+    val crop: CropSettings = CropSettings(),
+    val colorAdjustments: MediaColorAdjustments? = null,
+    val overlays: List<OverlayStyle> = emptyList(),
+    val frameDecoration: MediaFrameDecoration? = null,   // decorative photo-frame around one media — NOT a CanvasNode.Frame
+    val caption: CaptionStyle? = null,
+) : NodeAppearance()
+```
+
+**`FrameAppearance` (the other concrete variant — see [appearance.md § 3](appearance.md#3-frameappearance--containercontent-level-styling)):**
+
+```kotlin
+@Serializable
+@SerialName("FrameAppearance")
+data class FrameAppearance(
+    override val opacity: Float = 1f,
+    override val cornerRadius: Float = 0f,
+    override val border: BorderStyle? = null,
+    override val shadow: ShadowStyle? = null,
+    val background: BackgroundData? = null,                       // behind the frame's linked contents
+    val contentOverlays: List<OverlayStyle> = emptyList(),        // above the frame's linked contents, clipped
+    val contentEffect: FrameContentEffect? = null,                // future: off-screen filter pass over rendered contents
+    val titleStyle: FrameTitleStyle? = null,
+) : NodeAppearance()
+```
+
+`FrameAppearance.background` absorbs what is currently `Frame.background: BackgroundData?` — see [Migration Notes](#migration-notes). The frame is still its own anchor (no `anchorMode` is stored on `FrameAppearance.background` — that field only exists on `AlbumBackground`).
+
+**Render pipeline.** `MediaAppearance` is rendered inside a single `MediaRenderer` pass — overlays included (iterated in list order). `FrameAppearance` requires a *layered* frame renderer (background → linked contents → contentOverlays → border/title), because `contentOverlays` composite above the children rather than inside the frame's own surface. See [appearance.md § 6](appearance.md#6-render-pipeline-implication) and [rendering.md § 6b](rendering.md#6b-layered-frame-rendering).
+
+**→ Full type definitions, render-pipeline contract, terminology table, persistence rules, non-goals:** [appearance.md](appearance.md). Media-specific detail (crop, color adjustments, frame decoration, presets, rendered derivatives): [media-appearance.md](media-appearance.md).
+
+**Persistence:** `appearance` is a nullable field on each owning `CanvasNode` variant in the scene graph JSON. `null` = default rendering. `ignoreUnknownKeys` handles old nodes. `NodeAppearance` is polymorphic via the `@SerialName` discriminator (`"MediaAppearance"` / `"FrameAppearance"`).
+
+**Rendered derivatives:** Users can flatten the current `MediaAppearance` into a new image asset registered in `media_library` with `origin = RENDERED_DERIVATIVE`.
 
 ### Widget System
 
@@ -283,6 +324,7 @@ The scene graph is serialized as a `SceneGraph` root object wrapping `albumId`, 
       "color": "#FF5555",
       "transform": { "cx": 450, "cy": 450, "w": 800, "h": 600, "scale": 1.0, "rotation": 0, "zIndex": 0 }
       // "overrides" omitted when empty — see frame-membership.md
+      // "appearance" omitted when null — see appearance.md (FrameAppearance: background, contentOverlays, …)
     }
   ]
 }
@@ -328,6 +370,10 @@ Implementations in `data/repository/`, bound via Hilt `@Binds`.
 | `CanvasNode.Media.uri` | direct URI string | `mediaRefId` FK to `media_library` |
 | `Frame.containsNodeIds` | stored list (never wired) | removed; membership computed from geometry + `Frame.overrides` ([frame-membership.md](frame-membership.md)) |
 | `Frame.color` | Long (ARGB) | hex string |
+| `Frame.background` | `BackgroundData?` directly on `Frame` | moved under `Frame.appearance.background` as part of the [appearance system](appearance.md). Wire format: same `BackgroundData` payload, now nested inside the frame's `appearance` object. |
+| `Frame.appearance` | not present | new `FrameAppearance?` container (background + `contentOverlays: List<OverlayStyle>` + border/shadow + titleStyle). See [appearance.md § 3](appearance.md#3-frameappearance--containercontent-level-styling). |
+| `MediaAppearance` shape | `overlays: List<MediaOverlay>` + `OverlayKind`/`OverlayBlendMode` enums | replaced by `overlays: List<OverlayStyle>` using the shared `OverlayStyle` / `OverlaySource` / `NodeBlendMode` types from [appearance.md § 7](appearance.md#7-shared-value-types). Element type changes; list shape is preserved. |
+| `MediaAppearance.frameOverlay` / `FrameOverlay` type / `FrameRenderMode` enum | `frameOverlay: FrameOverlay?` with `FrameRenderMode { Stretch, NineSlice }` | renamed to `frameDecoration: MediaFrameDecoration?` with `MediaFrameDecorationMode { Stretch, NineSlice }` to finish disambiguating "frame" (decorative photo-frame around one media is not a `CanvasNode.Frame`). Wire format identical; only the field name and `@SerialName` change. |
 | `CanvasNode.tags` | not present | added |
 | `ide_workspaces` table | not present | new table |
 | `media_library` table | not present | new table |

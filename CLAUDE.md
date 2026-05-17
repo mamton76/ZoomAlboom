@@ -18,6 +18,8 @@ Source-of-truth docs:
 - `docs/architecture/coordinates.md` — coordinate spaces, camera math, selection invariants
 - `docs/architecture/selection.md` — selection state, gesture mapping, gesture stack
 - `docs/architecture/navigation.md`
+- `docs/architecture/appearance.md` — shared `NodeAppearance` model, `MediaAppearance` vs `FrameAppearance`, `OverlayStyle`
+- `docs/architecture/media-appearance.md` — media-specific appearance surface (crop, color, frame decoration, presets, derivatives)
 - - `docs/architecture/decisions.md` (if present)
 - `docs/architecture/conventions.md`
 

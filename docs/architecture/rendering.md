@@ -123,6 +123,26 @@ All child nodes are positioned in world coordinates inside this Box. The GPU app
 
 Nodes use **`graphicsLayer`** for position and rotation (GPU-only, no Compose Constraints limits) and **`drawBehind`** for painting at exact world-coordinate dimensions. This avoids the ~16383dp Compose `Constraints` limit that `Modifier.size()` hits at extreme zoom levels.
 
+### 6b. Layered Frame Rendering
+
+> Related: [appearance.md § 6](appearance.md#6-render-pipeline-implication) | [background.md § Rendering Order](background.md#rendering-order) | [frame-membership.md](frame-membership.md)
+
+`FrameAppearance` requires composing a frame in **layers**, not as a single `CanvasNode` pass. A frame's contentOverlays must draw above its linked contents, not just above its own surface, so the renderer needs to interleave a frame's two surfaces around its members. Conceptual order, per frame:
+
+1. **Frame background** — `frame.appearance.background` (Solid / Texture / Procedural). Drawn behind the frame's linked contents, clipped to frame bounds.
+2. **Linked frame contents** — every node bound to this frame (see [frame-membership.md](frame-membership.md)), drawn in `Transform.zIndex` order. Each child still draws its own `MediaAppearance`, including its own `MediaAppearance.overlays` list — child appearance is not mutated by the parent frame.
+3. **Frame content overlays** — `frame.appearance.contentOverlays: List<OverlayStyle>`, drawn above the rendered children in list order (entry `[i]` over entry `[i-1]`), clipped to frame bounds.
+4. **Frame decoration** — `frame.appearance.border`, `titleStyle`, selection handles / editor overlays (Edit mode only).
+5. **Frame content effect** *(future)* — `frame.appearance.contentEffect` is a true off-screen pass that re-renders the contents through a filter (sepia, blur, grayscale of everything inside). Sits between (2) and (3) when implemented. Not MVP.
+
+**Distinct from `contentOverlays`:** `contentOverlays` only composite new layers above the rendered children. `contentEffect` re-renders the children through a filter. Both leave child node data untouched; only the rendered frame output differs.
+
+**Why this is more than today's single-pass renderer.** The current `CanvasNodeRenderer` paints each visible node once, in `zIndex` order, treating frame and member as independent siblings (step 4 of §6 — the visible-node loop). Layered frame rendering needs to know *which* members belong to *which* frame and to draw step (3) (contentOverlays) only after their children have drawn. The model can be persisted and edited before this renderer slice lands — the field is just not painted until then.
+
+**Frame–content binding dependency.** Steps (2)–(3) only have meaning once frame–content binding is wired. Membership ([frame-membership.md](frame-membership.md)) is already designed; binding the renderer to it is the layered-rendering slice. Until then, `FrameAppearance.contentOverlays` and `contentEffect` deserialize and round-trip but render as no-ops.
+
+**Shared rendering helper.** Because `MediaAppearance.overlays` and `FrameAppearance.contentOverlays` are both `List<OverlayStyle>` with the same declaration-order compositing rule, a single helper — `DrawScope.drawOverlayStack(overlays, bounds)` — serves both scopes. The two outer fields differ in *bounds* and *pipeline position*, not in how an individual stack is drawn.
+
 ### 7. Node Creation
 
 `CanvasNodeFactory` creates nodes positioned relative to the current viewport. Both `createFrame` and `createMedia` follow the same scaling convention:

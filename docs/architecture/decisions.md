@@ -17,3 +17,6 @@ Structured metadata lives in Room; scene graph content lives in serialized JSON.
 
 ## 6. Android-first implementation
 The initial architecture is optimized for Android and Jetpack Compose rather than for full cross-platform support.
+
+## 7. Frame membership: per-frame overrides, geometry implicit
+Membership is `geometry − Excluded overrides + Included overrides`, where overrides live on the frame itself (no top-level binding table). Geometry is a source of proposals, not the source of truth. See [frame-membership.md](frame-membership.md).

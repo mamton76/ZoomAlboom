@@ -8,6 +8,14 @@ sealed class CanvasNode {
     abstract val transform: Transform
     abstract val visibilityPolicy: VisibilityPolicy?
 
+    /**
+     * Whether this node participates in frame membership computation. Default `true`.
+     * Override to `false` for backgrounds, camera-locked, or decoration-only nodes that
+     * should never be reported as members of any frame.
+     * See `docs/architecture/frame-membership.md`.
+     */
+    open val isFrameBindable: Boolean get() = true
+
     @Serializable
     data class Media(
         override val id: String,
@@ -28,7 +36,11 @@ sealed class CanvasNode {
         override val transform: Transform,
         val label: String = "",
         val color: String = "#888888",
-        val containsNodeIds: List<String> = emptyList(),
+        /**
+         * Manual membership overrides keyed by node id. Absent entries mean
+         * "geometry decides." See `docs/architecture/frame-membership.md`.
+         */
+        val overrides: Map<String, FrameMembershipOverride> = emptyMap(),
         /** Frame is implicitly the anchor — `BackgroundData` carries no [AnchorMode]. */
         val background: BackgroundData? = null,
         override val visibilityPolicy: VisibilityPolicy? = null,

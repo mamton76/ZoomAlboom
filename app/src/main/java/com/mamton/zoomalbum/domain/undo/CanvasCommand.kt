@@ -9,6 +9,7 @@ enum class CommandKind {
     ADD, REMOVE, DELETE, DUPLICATE, MOVE, RESIZE, ROTATE,
     SET_ALBUM_BACKGROUND,
     SET_FRAME_BACKGROUND,
+    SET_FRAME_OVERRIDES, // Pin / Detach — mutates Frame.overrides only (no transform change).
     REORDER, // BringToFront / SendToBack / BringForward / SendBackward — zIndex mutations.
 }
 
@@ -27,7 +28,7 @@ data class AlbumBackgroundChange(
  * - `before == null && after != null` → pure insert (ADD, DUPLICATE).
  * - `before != null && after == null` → pure delete (REMOVE, DELETE).
  *   `beforeIndices` is populated to restore deleted nodes at their original positions.
- * - `before != null && after != null` → node mutation (MOVE, RESIZE, ROTATE, SET_FRAME_BACKGROUND).
+ * - `before != null && after != null` → node mutation (MOVE, RESIZE, ROTATE, SET_FRAME_BACKGROUND, SET_FRAME_OVERRIDES).
  *   Same length, same ids, paired positionally.
  * - `albumBackgroundChange != null` → album-level mutation (SET_ALBUM_BACKGROUND). May
  *   coexist with node sides being null.

@@ -195,7 +195,7 @@ Managed via version catalog (`gradle/libs.versions.toml`). Compose libraries via
 See [project-memory.md](../product/project-memory.md) for the full decisions log.
 
 - **Unit System:** Canvas should use abstract `Units` instead of raw pixels. Needs a reliable `Units -> DP` formula accounting for zoom and screen density.
-- **Dynamic Containment:** Frame `containsNodeIds` must be recalculated on `Dispatchers.Default` when nodes move — avoid blocking the main thread.
+- **Frame Membership:** Membership is computed from geometry + per-frame `overrides` ([frame-membership.md](frame-membership.md)). Geometry recompute on `Dispatchers.Default` to avoid blocking the main thread.
 - **Persistence Evolution:** Current SQLite + JSON is local-only. Future consideration: CRDT or Protobuf for real-time cloud collaboration.
 - **Media Validation:** On album open, check `media_library` source URIs and substitute placeholders for missing files.
 

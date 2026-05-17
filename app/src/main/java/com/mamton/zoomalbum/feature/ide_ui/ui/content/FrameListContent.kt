@@ -8,14 +8,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -24,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
 import com.mamton.zoomalbum.domain.model.CanvasNode
+import com.mamton.zoomalbum.feature.ide_ui.ui.FrameNameLabel
 
 /**
  * Reusable frame list content — rendered inside both
@@ -81,7 +79,6 @@ private fun FrameListItem(
     onFocus: (() -> Unit)? = null,
 ) {
     val frameColor = Color(frame.color.toColorInt())
-    val displayName = frame.label.ifEmpty { frame.id }
     val transform = frame.transform
 
     Row(
@@ -97,19 +94,11 @@ private fun FrameListItem(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Color dot
-        Surface(
-            modifier = Modifier.size(12.dp),
-            shape = CircleShape,
-            color = frameColor,
-        ) {}
-
-        // Frame name in frame color
-        Text(
-            text = displayName,
-            style = MaterialTheme.typography.bodyMedium,
-            color = frameColor,
+        // Frame name + color dot — shared widget so all list/picker surfaces match.
+        FrameNameLabel(
+            frame = frame,
             modifier = Modifier.weight(1f),
+            dotSize = 12.dp,
         )
 
         // Frame transform — render dims, not base; aspect from rendered size

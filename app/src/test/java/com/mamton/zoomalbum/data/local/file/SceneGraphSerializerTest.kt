@@ -2,6 +2,9 @@ package com.mamton.zoomalbum.data.local.file
 
 import com.mamton.zoomalbum.core.math.Camera
 import com.mamton.zoomalbum.domain.model.CanvasNode
+import com.mamton.zoomalbum.domain.model.FrameMembershipOverride
+import com.mamton.zoomalbum.domain.model.MembershipOrigin
+import com.mamton.zoomalbum.domain.model.MembershipState
 import com.mamton.zoomalbum.domain.model.SceneGraph
 import com.mamton.zoomalbum.domain.model.Transform
 import kotlinx.serialization.json.Json
@@ -60,6 +63,38 @@ class SceneGraphSerializerTest {
         assertEquals(original.nodes[0].id, back.nodes[0].id)
         assertNull(back.profile)
         assertNull(back.background)
+    }
+
+    @Test
+    fun `round-trip preserves Frame overrides with state and origin per entry`() {
+        val frameWithOverrides = CanvasNode.Frame(
+            id = "f1",
+            transform = Transform(cx = 0f, cy = 0f, w = 100f, h = 100f),
+            overrides = mapOf(
+                "pinned" to FrameMembershipOverride(
+                    state = MembershipState.Included,
+                    origin = MembershipOrigin.User,
+                ),
+                "detached" to FrameMembershipOverride(
+                    state = MembershipState.Excluded,
+                    origin = MembershipOrigin.User,
+                ),
+                "frozen-in" to FrameMembershipOverride(
+                    state = MembershipState.Included,
+                    origin = MembershipOrigin.RebindSuppressed,
+                ),
+                "wizard-included" to FrameMembershipOverride(
+                    state = MembershipState.Included,
+                    origin = MembershipOrigin.Wizard,
+                ),
+            ),
+        )
+        val original = SceneGraph(albumId = 1L, nodes = listOf(frameWithOverrides))
+
+        val back = serializer.deserialize(serializer.serialize(original), albumId = 999L)
+
+        val restored = back.nodes.single() as CanvasNode.Frame
+        assertEquals(frameWithOverrides.overrides, restored.overrides)
     }
 
     @Test

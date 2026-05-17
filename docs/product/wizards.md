@@ -221,7 +221,7 @@ The wizard is a starting point, not a locked template.
 Wizard generation is post-MVP infrastructure. However, the canvas data model already supports everything a wizard needs:
 
 - `CanvasNode.Widget` with `WidgetDataSource` and `WidgetLink` (see [widgets.md](../architecture/widgets.md))
-- `CanvasNode.Frame` with `containsNodeIds` for nested structure
+- `CanvasNode.Frame` with computed membership + manual overrides ([frame-membership.md](../architecture/frame-membership.md)) — wizards write `(Included, Wizard)` overrides for generated content
 - `NavigationTarget` sealed class for portal links
 - `CanvasCommand` snapshot-based undo so wizard output is fully undoable as a batch
 

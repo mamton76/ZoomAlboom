@@ -101,7 +101,7 @@ fun Transform.toCamera(screenWidth: Float, screenHeight: Float, fillFraction: Fl
 
 | Variant | Extra fields | Purpose |
 |---------|-------------|---------|
-| `Frame` | `label`, `color` (hex string), `containsNodeIds` (dynamically calculated), `background: BackgroundData?` | Navigation area / logical grouping |
+| `Frame` | `label`, `color` (hex string), `overrides: Map<String, FrameMembershipOverride>`, `background: BackgroundData?` | Navigation area / logical grouping. Membership is computed (geometry + overrides) — see [frame-membership.md](frame-membership.md). |
 | `Media` | `mediaRefId` (FK to `media_library`), `mediaType`, `tags`, `intrinsicPixelWidth/Height`, `appearance: MediaAppearance?` | Any media asset (image, video, text; future: audio, sticker, animated photo, vector shape) |
 | `Widget` | `widgetType: WidgetType`, `config: WidgetConfig`, `dataSource: WidgetDataSource`, `links: List<WidgetLink>` | Canvas-native smart object with data binding and navigation (post-MVP) |
 
@@ -281,8 +281,8 @@ The scene graph is serialized as a `SceneGraph` root object wrapping `albumId`, 
       "id": "frame_1",
       "type": "FRAME",
       "color": "#FF5555",
-      "transform": { "cx": 450, "cy": 450, "w": 800, "h": 600, "scale": 1.0, "rotation": 0, "zIndex": 0 },
-      "containsNodeIds": ["node_1"]
+      "transform": { "cx": 450, "cy": 450, "w": 800, "h": 600, "scale": 1.0, "rotation": 0, "zIndex": 0 }
+      // "overrides" omitted when empty — see frame-membership.md
     }
   ]
 }
@@ -291,7 +291,7 @@ The scene graph is serialized as a `SceneGraph` root object wrapping `albumId`, 
 Key points:
 - `camera` saves last camera position (restored on album open) — full `Camera` shape with `cx`, `cy`, `scale`, `rotation`
 - `mediaRefId` links to `media_library` table instead of storing URI directly
-- `containsNodeIds` on frames is dynamically calculated during node movement
+- Frame membership is computed at read time from geometry plus per-frame `overrides` — see [frame-membership.md](frame-membership.md)
 - Serialized via kotlinx-serialization (`prettyPrint`, `ignoreUnknownKeys`)
 - Legacy bare-list files are upgraded transparently on first read
 
@@ -326,7 +326,7 @@ Implementations in `data/repository/`, bound via Hilt `@Binds`.
 | `Transform.zIndex` | separate field on `CanvasNode` | moved into `Transform` ✓ |
 | `Camera` | in `CanvasViewModel` | moved to `core/math/Camera.kt` ✓ |
 | `CanvasNode.Media.uri` | direct URI string | `mediaRefId` FK to `media_library` |
-| `Frame.childIds` | static list | `containsNodeIds` (dynamic) |
+| `Frame.containsNodeIds` | stored list (never wired) | removed; membership computed from geometry + `Frame.overrides` ([frame-membership.md](frame-membership.md)) |
 | `Frame.color` | Long (ARGB) | hex string |
 | `CanvasNode.tags` | not present | added |
 | `ide_workspaces` table | not present | new table |

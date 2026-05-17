@@ -27,6 +27,7 @@ import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
 import com.mamton.zoomalbum.domain.model.RenderDetail
 import com.mamton.zoomalbum.feature.canvas.view.CanvasScreen
 import com.mamton.zoomalbum.feature.canvas.view.SelectionDebugPanel
+import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.AddContentBottomSheet
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.AlbumSettingsBottomSheet
@@ -69,6 +70,49 @@ fun CanvasScaffold(
         else canvasState.visibleNodes
             .map { it.node }
             .firstOrNull { it.id == selectedNodeIds.first() } as? CanvasNode.Frame
+    }
+    // Frames in selection, in selection (insertion) order. Used by Pin/Detach and the
+    // target-picker dialog. `selectedNodeIds.toList()` preserves order because
+    // `Set<String>.plus` returns a LinkedHashSet (stdlib).
+    val selectedFramesInOrder: List<CanvasNode.Frame> = remember(
+        selectedNodeIds, canvasState.visibleNodes,
+    ) {
+        val byId = canvasState.visibleNodes.associate { it.node.id to it.node }
+        selectedNodeIds.toList().mapNotNull { byId[it] as? CanvasNode.Frame }
+    }
+    // Pin / Detach are available when the selection contains at least one frame and
+    // at least one other node (member candidate). The target frame is either the
+    // single selected frame (direct dispatch) or chosen via FrameTargetPickerDialog.
+    val pinDetachEnabled: Boolean =
+        selectedFramesInOrder.isNotEmpty() && selectedNodeIds.size > selectedFramesInOrder.size ||
+            selectedFramesInOrder.size >= 2  // ≥2 frames + 0 others → pin one frame into another
+
+    // "Auto" is offered only when at least one selected frame has an override entry
+    // for at least one of the candidate nodes — otherwise there's nothing to clear.
+    val anyOverrideExists: Boolean = remember(selectedNodeIds, selectedFramesInOrder) {
+        selectedFramesInOrder.any { frame ->
+            (selectedNodeIds - frame.id).any { it in frame.overrides }
+        }
+    }
+
+    // Pending pin/detach intent — when non-null, the FrameTargetPickerDialog is shown.
+    var pendingFrameMembershipIntent by remember {
+        mutableStateOf<FrameMembershipIntent?>(null)
+    }
+
+    // Dispatch helper: directly fire Pin/Detach when only one frame is in the selection,
+    // otherwise stash the intent and open the target-picker dialog.
+    fun dispatchFrameMembership(intent: FrameMembershipIntent) {
+        when (selectedFramesInOrder.size) {
+            0 -> Unit
+            1 -> {
+                val target = selectedFramesInOrder.first()
+                val candidates = selectedNodeIds - target.id
+                if (candidates.isEmpty()) return
+                canvasViewModel.onAction(intent.toAction(target.id, candidates))
+            }
+            else -> pendingFrameMembershipIntent = intent
+        }
     }
 
     Scaffold(
@@ -147,10 +191,27 @@ fun CanvasScaffold(
                 )
             }
 
+            FrameEditOptionsBar(
+                // Visible whenever the selection contains at least one frame — the
+                // toggles apply to every selected frame's gesture (move / resize / rotate).
+                visible = selectedFramesInOrder.isNotEmpty(),
+                options = canvasState.frameEditOptions,
+                onOptionsChange = {
+                    canvasViewModel.onAction(
+                        CanvasAction.SetFrameEditOptions(it),
+                    )
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 64.dp),
+            )
+
             ContextualActionBar(
                 hasSelection = selectedNodeIds.isNotEmpty(),
                 showBackgroundAction = singleSelectedFrame != null,
                 showZOrderActions = selectedNodeIds.size == 1,
+                showFrameMembershipActions = pinDetachEnabled,
+                showAutoAction = pinDetachEnabled && anyOverrideExists,
                 modifier = Modifier.align(Alignment.BottomCenter),
                 onAction = { label ->
                     when (label) {
@@ -161,6 +222,9 @@ fun CanvasScaffold(
                             com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.DuplicateSelection,
                         )
                         "Background" -> singleSelectedFrame?.let { frameBgEditing = it }
+                        "Pin" -> dispatchFrameMembership(FrameMembershipIntent.Pin)
+                        "Detach" -> dispatchFrameMembership(FrameMembershipIntent.Detach)
+                        "Auto" -> dispatchFrameMembership(FrameMembershipIntent.Reset)
                         "ToFront" -> selectedNodeIds.firstOrNull()?.let {
                             canvasViewModel.onAction(
                                 com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.BringToFront(it),
@@ -279,18 +343,44 @@ fun CanvasScaffold(
         )
     }
 
-    // Overlap picker dialog
+    // Overlap picker dialog — multi-select, additive (matches long-press semantics).
     if (overlapPickerNodes.isNotEmpty()) {
         OverlapPickerDialog(
             nodes = overlapPickerNodes,
-            onSelectNode = { nodeId ->
+            onConfirm = { ids ->
                 canvasViewModel.onAction(
-                    com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.SelectNode(nodeId),
+                    com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.AddNodesToSelection(ids),
                 )
                 overlapPickerNodes = emptyList()
             },
             onDismiss = { overlapPickerNodes = emptyList() },
         )
     }
-}
 
+    // Pin / Detach target picker — shown when ≥2 frames are in the selection.
+    pendingFrameMembershipIntent?.let { intent ->
+        val defaultId = remember(selectedFramesInOrder) {
+            selectedFramesInOrder.maxByOrNull {
+                it.transform.renderW.toDouble() * it.transform.renderH.toDouble()
+            }?.id ?: selectedFramesInOrder.firstOrNull()?.id
+        }
+        if (defaultId == null) {
+            // Race: selection changed between intent capture and recomposition.
+            pendingFrameMembershipIntent = null
+        } else {
+            FrameTargetPickerDialog(
+                title = intent.title,
+                frames = selectedFramesInOrder,
+                defaultFrameId = defaultId,
+                onConfirm = { frameId ->
+                    val candidates = selectedNodeIds - frameId
+                    if (candidates.isNotEmpty()) {
+                        canvasViewModel.onAction(intent.toAction(frameId, candidates))
+                    }
+                    pendingFrameMembershipIntent = null
+                },
+                onDismiss = { pendingFrameMembershipIntent = null },
+            )
+        }
+    }
+}

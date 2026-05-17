@@ -139,6 +139,70 @@ private fun NodeChrome(
 }
 
 /**
+ * Draws thin borders around every effective member of the currently-selected frame.
+ *
+ * Two visual tiers communicate *why* a node is a member:
+ *  - [autoMembers] — pure geometric membership (no override). Lighter, thinner.
+ *  - [manualMembers] — explicit `Included` override (User / BatchImport / Wizard /
+ *    RebindSuppressed). Darker, slightly thicker — signals "this is sticky, clearing
+ *    the override changes membership."
+ *
+ * See `docs/architecture/frame-membership.md`.
+ */
+@Composable
+fun MembershipBorderOverlay(
+    autoMembers: List<CanvasNode>,
+    manualMembers: List<CanvasNode>,
+    cameraScale: Float,
+) {
+    val autoStroke = 1.5f / cameraScale
+    val manualStroke = 2.5f / cameraScale
+
+    for (member in autoMembers) {
+        MembershipBorder(
+            transform = member.transform,
+            color = AccentCyan.copy(alpha = 0.40f),
+            strokeWidth = autoStroke,
+        )
+    }
+    for (member in manualMembers) {
+        MembershipBorder(
+            transform = member.transform,
+            color = AccentCyan.copy(alpha = 0.95f),
+            strokeWidth = manualStroke,
+        )
+    }
+}
+
+@Composable
+private fun MembershipBorder(
+    transform: Transform,
+    color: androidx.compose.ui.graphics.Color,
+    strokeWidth: Float,
+) {
+    Spacer(
+        modifier = Modifier
+            .graphicsLayer {
+                translationX = transform.cx
+                translationY = transform.cy
+                rotationZ = transform.rotation
+                transformOrigin = TransformOrigin(0f, 0f)
+                clip = false
+            }
+            .drawBehind {
+                val halfW = transform.renderW / 2f
+                val halfH = transform.renderH / 2f
+                drawRect(
+                    color = color,
+                    topLeft = Offset(-halfW, -halfH),
+                    size = Size(transform.renderW, transform.renderH),
+                    style = Stroke(width = strokeWidth),
+                )
+            },
+    )
+}
+
+/**
  * Semi-transparent rectangle drawn during drag-to-select.
  */
 @Composable

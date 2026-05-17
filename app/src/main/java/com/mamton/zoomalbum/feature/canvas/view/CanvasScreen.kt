@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -22,6 +23,8 @@ import com.mamton.zoomalbum.core.designsystem.CanvasLight
 import com.mamton.zoomalbum.core.math.TransformUtils
 import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
 import com.mamton.zoomalbum.domain.model.CanvasNode
+import com.mamton.zoomalbum.domain.model.MembershipState
+import com.mamton.zoomalbum.domain.usecase.FrameMembershipUseCase
 import com.mamton.zoomalbum.feature.canvas.gestures.infiniteCanvasGestures
 import com.mamton.zoomalbum.feature.canvas.gestures.nodeInteractionGestures
 import com.mamton.zoomalbum.feature.canvas.gestures.tapAndLongPressGestures
@@ -291,6 +294,44 @@ fun CanvasScreen(
                 )
             }
             state.selectionRect?.let { rect -> SelectionRectOverlay(rect) }
+
+            // Membership visualisation: for EVERY frame in the selection, draw thin
+            // borders around its effective members so the membership relation is visible.
+            // Two tiers: lighter for purely geometric, darker for nodes with an Included
+            // override on at least one of the selected frames (so the user can tell what
+            // will / won't change when they press Auto).
+            val selectedFrames = selectedNodes.filterIsInstance<CanvasNode.Frame>()
+            if (selectedFrames.isNotEmpty()) {
+                val membershipUseCase = remember { FrameMembershipUseCase() }
+                val allVisible = state.visibleNodes.map { it.node }
+                val classified = remember(selectedFrames, allVisible) {
+                    val allMemberIds = mutableSetOf<String>()
+                    val manualMemberIds = mutableSetOf<String>()
+                    for (frame in selectedFrames) {
+                        val members = membershipUseCase.effectiveMembers(frame, allVisible)
+                        allMemberIds += members
+                        manualMemberIds += frame.overrides
+                            .filterValues { it.state == MembershipState.Included }
+                            .keys
+                            .intersect(members)
+                    }
+                    MembershipClassification(
+                        allMembers = allMemberIds,
+                        manualMembers = manualMemberIds,
+                    )
+                }
+                if (classified.allMembers.isNotEmpty()) {
+                    val autoMembers = allVisible.filter {
+                        it.id in classified.allMembers && it.id !in classified.manualMembers
+                    }
+                    val manualMembers = allVisible.filter { it.id in classified.manualMembers }
+                    MembershipBorderOverlay(
+                        autoMembers = autoMembers,
+                        manualMembers = manualMembers,
+                        cameraScale = state.camera.scale,
+                    )
+                }
+            }
         }
 
         if (state.isLoading) {
@@ -298,3 +339,17 @@ fun CanvasScreen(
         }
     }
 }
+
+/**
+ * Result of classifying a frame selection's effective members into auto (purely
+ * geometric) vs manual (Included override on at least one selected frame).
+ *
+ * Declared `@Immutable` so Compose can skip recomposition when an unchanged
+ * instance flows through composables. A `Pair<Set<String>, Set<String>>` works
+ * but is treated as unstable (generic library type with interface-typed args).
+ */
+@Immutable
+private data class MembershipClassification(
+    val allMembers: Set<String>,
+    val manualMembers: Set<String>,
+)

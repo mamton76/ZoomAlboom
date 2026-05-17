@@ -36,12 +36,25 @@ private val zOrderActions = listOf(
     ActionItem("⤓", "ToBack"),    // ⤓  send to back
 )
 
+// Frame membership — visible only when selection contains a frame + ≥1 other node.
+// See docs/architecture/frame-membership.md.
+private val frameMembershipActions = listOf(
+    ActionItem("⊕", "Pin"),       // ⊕  pin selected nodes to the frame
+    ActionItem("⊖", "Detach"),    // ⊖  detach selected nodes from the frame
+)
+
+// "Auto" — clear any override entries for the candidate nodes; reverts to pure geometry.
+// Visible only when at least one selected candidate has an override on the target frame.
+private val autoAction = ActionItem("⟲", "Auto") // ⟲
+
 @Composable
 fun ContextualActionBar(
     hasSelection: Boolean,
     modifier: Modifier = Modifier,
     showBackgroundAction: Boolean = false,
     showZOrderActions: Boolean = false,
+    showFrameMembershipActions: Boolean = false,
+    showAutoAction: Boolean = false,
     onAction: (String) -> Unit = {},
 ) {
     AnimatedVisibility(
@@ -54,6 +67,8 @@ fun ContextualActionBar(
             addAll(baseActions)
             if (showBackgroundAction) add(backgroundAction)
             if (showZOrderActions) addAll(zOrderActions)
+            if (showFrameMembershipActions) addAll(frameMembershipActions)
+            if (showAutoAction) add(autoAction)
         }
         Surface(
             modifier = Modifier

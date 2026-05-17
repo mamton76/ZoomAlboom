@@ -19,7 +19,7 @@ Work from foundation toward features. Do not jump to widgets, export, or appeara
 2. **Save/restore camera position** (§1.3) — on album open/close.
 3. **Minimal media library** (§1.4–1.5) — `media_library` table: id, album_id, sourceUri, mediaType, status, intrinsic dimensions.
 4. **Media validation + missing placeholder** (§4.4) — check `sourceUri` on album open, show placeholder for `MISSING`.
-5. **Dynamic frame containment** (§4.3) — update `containsNodeIds` on node movement, run on `Dispatchers.Default`.
+5. **Frame membership** (§4.3) — computed from geometry + `Frame.overrides`; recompute on `Dispatchers.Default`. See [frame-membership.md](architecture/frame-membership.md).
 6. **Edit / View mode split** (§12) — gates gesture routing; unblocks View-mode navigation.
 7. **Multi-photo import + auto grid placement** (§16).
 8. **Group align / distribute** (§17).
@@ -139,9 +139,16 @@ Snapshot-based: each command captures `before`/`after` node state (not a sealed 
 - [x] Deselect on camera gesture (pan/zoom clears selection)
 - [x] Undo integration (snapshot-based `CanvasCommand` on move/resize/rotate/add/delete/duplicate — §2 done)
 
-### 4.3 Dynamic containment
-- [ ] Calculate `containsNodeIds` on node move (AABB intersection with frames)
-- [ ] Run on `Dispatchers.Default` to avoid blocking main thread
+### 4.3 Frame membership
+> See [architecture/frame-membership.md](architecture/frame-membership.md).
+- [x] Slice 1: replace `Frame.containsNodeIds` with computed `effectiveMembers`; add `Frame.overrides`; add `CanvasNode.isFrameBindable`
+- [x] Slice 2: *Pin* / *Detach* / *Auto* contextual bar entries; multi-frame target picker; multi-select overlap picker; two-tier border overlay (supersedes the originally-planned text badge); `FrameNameLabel` widget
+- [x] Slice 3: *Transform with content* / *Rebind after edit* toggles + `applyFrameEdit` use case; move / resize / rotate all honour transformContents; multi-frame selection participates
+- [ ] Excluded-membership visualisation: dashed border (or similar) for nodes that are geometrically inside but explicitly Excluded — closes the "stuck detached, invisible" gap
+- [ ] Scrub `overrides` on node delete (cascade inside the existing delete command)
+- [ ] Hygiene pass on album load: drop orphan overrides (target node missing or `isFrameBindable=false`)
+- [ ] Run geometry recompute on `Dispatchers.Default` (currently runs on main; cheap for MVP album sizes)
+- [ ] Spatial-index narrowing for `FrameMembershipUseCase.effectiveMembers` and `applyPendingRebindSuppression`: only consider nodes whose AABB intersects (frame.aabb ∪ frameAfter.aabb) instead of scanning all nodes. Use `core/math/SpatialIndex.kt`. Cheap to ignore at MVP album sizes; matters at thousands of nodes.
 
 ### 4.4 Media validation
 - [ ] On album open, iterate `media_library` and check `sourceUri` availability

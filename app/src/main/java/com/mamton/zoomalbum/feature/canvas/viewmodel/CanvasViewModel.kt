@@ -24,7 +24,10 @@ import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
 import com.mamton.zoomalbum.domain.model.EasingType
+import com.mamton.zoomalbum.domain.model.FrameEditOptions
 import com.mamton.zoomalbum.domain.model.FrameFitMode
+import com.mamton.zoomalbum.domain.model.MembershipOrigin
+import com.mamton.zoomalbum.domain.model.MembershipState
 import com.mamton.zoomalbum.domain.model.RenderDetail
 import com.mamton.zoomalbum.domain.model.SceneGraph
 import com.mamton.zoomalbum.domain.model.Transform
@@ -32,6 +35,9 @@ import com.mamton.zoomalbum.domain.model.TransitionPreset
 import com.mamton.zoomalbum.domain.model.withTransform
 import com.mamton.zoomalbum.domain.repository.HistoryRepository
 import com.mamton.zoomalbum.domain.repository.MediaRepository
+import com.mamton.zoomalbum.domain.usecase.ApplyFrameEditUseCase
+import com.mamton.zoomalbum.domain.usecase.FrameMembershipUseCase
+import com.mamton.zoomalbum.domain.usecase.FrameOverrideUseCase
 import com.mamton.zoomalbum.domain.undo.AlbumBackgroundChange
 import com.mamton.zoomalbum.domain.undo.CanvasCommand
 import com.mamton.zoomalbum.domain.undo.CommandHistory
@@ -78,6 +84,11 @@ data class CanvasState(
     /** Transient in-flight focus animation. Cancelled by any pan/pinch gesture. */
     val cameraAnimation: CameraAnimation? = null,
     val albumBackground: AlbumBackground? = null,
+    /**
+     * Transient toggles for frame transform gestures. See `frame-membership.md`.
+     * Defaults are session-level, not persisted with the album.
+     */
+    val frameEditOptions: FrameEditOptions = FrameEditOptions(),
 )
 
 // ── Actions ───────────────────────────────────────────────────────────
@@ -86,6 +97,8 @@ sealed interface CanvasAction : Intent {
     // Selection
     data class SelectNode(val nodeId: String) : CanvasAction
     data class ToggleNodeSelection(val nodeId: String) : CanvasAction
+    /** Union the given ids into the current selection. Insertion order preserved. */
+    data class AddNodesToSelection(val nodeIds: Set<String>) : CanvasAction
     /**
      * Rectangle selection result.
      *
@@ -137,6 +150,15 @@ sealed interface CanvasAction : Intent {
         val background: BackgroundData?,
     ) : CanvasAction
 
+    // Frame membership — explicit pin / detach / clear overrides. See frame-membership.md.
+    data class PinToFrame(val frameId: String, val nodeIds: Set<String>) : CanvasAction
+    data class DetachFromFrame(val frameId: String, val nodeIds: Set<String>) : CanvasAction
+    /** Drop override entries for [nodeIds] on [frameId]; membership reverts to geometry. */
+    data class ClearFrameOverrides(val frameId: String, val nodeIds: Set<String>) : CanvasAction
+
+    /** Transient toggles for the next frame transform gesture. */
+    data class SetFrameEditOptions(val options: FrameEditOptions) : CanvasAction
+
     // Z-order — single-node only for MVP. Multi-select disables the button.
     data class BringToFront(val nodeId: String) : CanvasAction
     data class SendToBack(val nodeId: String) : CanvasAction
@@ -156,6 +178,21 @@ class CanvasViewModel @Inject constructor(
     private val albumId: Long = savedStateHandle.get<Long>("albumId") ?: 0L
 
     private val _allNodes = MutableStateFlow<List<CanvasNode>>(emptyList())
+
+    private val frameOverrideUseCase = FrameOverrideUseCase()
+    private val frameMembershipUseCase = FrameMembershipUseCase()
+    private val applyFrameEditUseCase = ApplyFrameEditUseCase(frameMembershipUseCase)
+
+    /**
+     * For frame-edit gestures: ids of nodes the gesture should move/transform together.
+     * Captured at BeginInteraction when the selection is exactly one Frame and
+     * `transformContents=true`. Null otherwise (gesture uses `selectedNodeIds`).
+     */
+    private var pendingGestureNodeIds: Set<String>? = null
+    /** Frames whose membership may need post-gesture rebind handling. Populated at
+     *  BeginInteraction for every Frame in the selection; rebind-suppression runs
+     *  per frame on FinishInteraction. */
+    private var pendingEditedFrameIds: Set<String> = emptySet()
 
     // Undo/Redo
     private val history = CommandHistory()
@@ -321,6 +358,14 @@ class CanvasViewModel @Inject constructor(
                 recomputeGroupTransform(_state.value.selectedNodeIds)
             }
 
+            is CanvasAction.AddNodesToSelection -> {
+                if (action.nodeIds.isEmpty()) return
+                val merged = _state.value.selectedNodeIds + action.nodeIds
+                if (merged.size == _state.value.selectedNodeIds.size) return
+                _state.update { it.copy(selectedNodeIds = merged) }
+                recomputeGroupTransform(merged)
+            }
+
             is CanvasAction.SelectNodesInRect -> {
                 val rectHits = _allNodes.value
                     .filter { TransformUtils.toBoundingBox(it.transform).intersects(action.worldRect) }
@@ -340,7 +385,10 @@ class CanvasViewModel @Inject constructor(
             }
 
             is CanvasAction.MoveSelection -> {
-                val ids = _state.value.selectedNodeIds
+                // During a frame-edit move-with-content gesture, `pendingGestureNodeIds`
+                // expands the moved set to include the frame's effective members captured
+                // at BeginInteraction. Outside such a gesture, plain selection moves.
+                val ids = pendingGestureNodeIds ?: _state.value.selectedNodeIds
                 _allNodes.update { nodes ->
                     nodes.map { node ->
                         if (node.id in ids) {
@@ -370,7 +418,9 @@ class CanvasViewModel @Inject constructor(
             }
 
             is CanvasAction.ResizeSelection -> {
-                val ids = _state.value.selectedNodeIds
+                // Frame-edit resize-with-content uses the augmented set captured at
+                // BeginInteraction; the pivot is supplied by the gesture detector.
+                val ids = pendingGestureNodeIds ?: _state.value.selectedNodeIds
                 val selected = _allNodes.value.filter { it.id in ids }
                 if (selected.isEmpty()) return
 
@@ -413,17 +463,22 @@ class CanvasViewModel @Inject constructor(
             }
 
             is CanvasAction.RotateSelection -> {
-                val ids = _state.value.selectedNodeIds
+                // Frame-edit rotate-with-content: rotate the augmented set, but the pivot
+                // must come from the user's selection (the frame center) — using the
+                // centroid of (frame + members) would orbit the wrong point.
+                val ids = pendingGestureNodeIds ?: _state.value.selectedNodeIds
+                val pivotIds = _state.value.selectedNodeIds
                 val selected = _allNodes.value.filter { it.id in ids }
                 if (selected.isEmpty()) return
 
                 // Use group transform center if available (stable during rotation),
-                // otherwise compute from current node positions.
+                // otherwise compute from the user-selected node positions.
                 val gt = _state.value.groupSelectionTransform
                 val (gcx, gcy) = if (gt != null) {
                     gt.cx to gt.cy
                 } else {
-                    TransformUtils.groupCenter(selected)
+                    val pivotNodes = _allNodes.value.filter { it.id in pivotIds }
+                    TransformUtils.groupCenter(pivotNodes.ifEmpty { selected })
                 }
 
                 _allNodes.update { nodes ->
@@ -543,11 +598,32 @@ class CanvasViewModel @Inject constructor(
                 if (pendingSnapshot != null) return
                 val ids = _state.value.selectedNodeIds
                 if (ids.isEmpty()) return
-                pendingSnapshot = _allNodes.value.filter { it.id in ids }
+
+                // Frame-edit augmentation: for EVERY Frame in the selection, optionally
+                // expand the gesture's touched set to include its effective members.
+                // Applies to MOVE / RESIZE / ROTATE — all three share the gesture-set
+                // mechanism. Rebind suppression below runs per frame regardless of
+                // `transformContents` (geometry can change for frame-only edits too).
+                val allNodes = _allNodes.value
+                val selectedFrames = allNodes.filter { it.id in ids }.filterIsInstance<CanvasNode.Frame>()
+                val opts = _state.value.frameEditOptions
+                val gestureIds: Set<String> = if (selectedFrames.isNotEmpty() && opts.transformContents) {
+                    val members = selectedFrames.flatMap {
+                        frameMembershipUseCase.effectiveMembers(it, allNodes)
+                    }.toSet()
+                    ids + members
+                } else {
+                    ids
+                }
+
+                pendingSnapshot = allNodes.filter { it.id in gestureIds }
                 pendingKind = action.kind
+                pendingGestureNodeIds = if (gestureIds != ids) gestureIds else null
+                pendingEditedFrameIds = selectedFrames.map { it.id }.toSet()
             }
 
             is CanvasAction.FinishInteraction -> {
+                applyPendingRebindSuppression()
                 commitPendingInteraction()
                 // Do NOT recompute group rect here — it would snap back to
                 // screen-aligned. The rect is kept in sync during Move/Resize/Rotate
@@ -643,11 +719,100 @@ class CanvasViewModel @Inject constructor(
                 )
             }
 
+            is CanvasAction.PinToFrame -> applyFrameOverride(
+                action.frameId, action.nodeIds, MembershipState.Included,
+            )
+
+            is CanvasAction.DetachFromFrame -> applyFrameOverride(
+                action.frameId, action.nodeIds, MembershipState.Excluded,
+            )
+
+            is CanvasAction.ClearFrameOverrides -> applyClearFrameOverrides(
+                action.frameId, action.nodeIds,
+            )
+
+            is CanvasAction.SetFrameEditOptions -> {
+                _state.update { it.copy(frameEditOptions = action.options) }
+            }
+
             is CanvasAction.BringToFront -> applyZIndexReorder(action.nodeId, ZReorder.ToFront)
             is CanvasAction.SendToBack -> applyZIndexReorder(action.nodeId, ZReorder.ToBack)
             is CanvasAction.BringForward -> applyZIndexReorder(action.nodeId, ZReorder.Forward)
             is CanvasAction.SendBackward -> applyZIndexReorder(action.nodeId, ZReorder.Backward)
         }
+    }
+
+    // ── Frame membership overrides ────────────────────────────────────
+
+    /**
+     * Pin / detach helper. Writes `(state, MembershipOrigin.User)` overrides for [nodeIds]
+     * on the frame [frameId]. No-op if the frame doesn't exist, isn't a Frame, or the
+     * override map is unchanged. Undo round-trips via [CommandKind.SET_FRAME_OVERRIDES].
+     */
+    private fun applyFrameOverride(
+        frameId: String,
+        nodeIds: Set<String>,
+        state: MembershipState,
+    ) {
+        if (nodeIds.isEmpty()) return
+        val current = _allNodes.value
+        val idx = current.indexOfFirst { it.id == frameId }
+        if (idx < 0) return
+        val frame = current[idx] as? CanvasNode.Frame ?: return
+        val updated = frameOverrideUseCase.applyOverride(
+            frame = frame,
+            nodeIds = nodeIds,
+            state = state,
+            origin = MembershipOrigin.User,
+        )
+        if (updated === frame) return
+        _allNodes.update { nodes -> nodes.map { if (it.id == frameId) updated else it } }
+        _state.update { s ->
+            s.copy(
+                visibleNodes = s.visibleNodes.map { vn ->
+                    if (vn.node.id == frameId) vn.copy(node = updated) else vn
+                },
+            )
+        }
+        commit(
+            CanvasCommand(
+                before = listOf(frame),
+                after = listOf(updated),
+                kind = CommandKind.SET_FRAME_OVERRIDES,
+                timestampMs = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    /**
+     * Clear-overrides helper. Drops `Frame.overrides` entries for [nodeIds]; membership
+     * reverts to pure geometry. No-op if the frame doesn't exist, isn't a Frame, or the
+     * override map is unchanged. Undo round-trips via [CommandKind.SET_FRAME_OVERRIDES].
+     */
+    private fun applyClearFrameOverrides(frameId: String, nodeIds: Set<String>) {
+        if (nodeIds.isEmpty()) return
+        val current = _allNodes.value
+        val idx = current.indexOfFirst { it.id == frameId }
+        if (idx < 0) return
+        val frame = current[idx] as? CanvasNode.Frame ?: return
+        val updated = frameOverrideUseCase.clearOverrides(frame, nodeIds)
+        if (updated === frame) return
+        _allNodes.update { nodes -> nodes.map { if (it.id == frameId) updated else it } }
+        _state.update { s ->
+            s.copy(
+                visibleNodes = s.visibleNodes.map { vn ->
+                    if (vn.node.id == frameId) vn.copy(node = updated) else vn
+                },
+            )
+        }
+        commit(
+            CanvasCommand(
+                before = listOf(frame),
+                after = listOf(updated),
+                kind = CommandKind.SET_FRAME_OVERRIDES,
+                timestampMs = System.currentTimeMillis(),
+            ),
+        )
     }
 
     // ── Z-order ───────────────────────────────────────────────────────
@@ -1053,13 +1218,20 @@ class CanvasViewModel @Inject constructor(
      * (before == after — e.g. user pressed a handle and lifted without moving).
      */
     private fun commitPendingInteraction() {
-        val before = pendingSnapshot ?: return
+        val before = pendingSnapshot ?: run {
+            // No snapshot in flight — clear gesture-augment fields defensively and exit.
+            pendingGestureNodeIds = null
+            pendingEditedFrameIds = emptySet()
+            return
+        }
         val kind = pendingKind ?: InteractionKind.MOVE  // shouldn't happen; safe default
         // Order `after` to match `before`'s id ordering — positional pairing.
         val byId: Map<String, CanvasNode> = _allNodes.value.associateBy { it.id }
         val after = before.mapNotNull { byId[it.id] }
         pendingSnapshot = null
         pendingKind = null
+        pendingGestureNodeIds = null
+        pendingEditedFrameIds = emptySet()
         if (after.size != before.size) return  // some ids vanished — drop the snapshot
         val noop = before.zip(after).all { (b, a) -> b == a }
         if (noop) return
@@ -1071,6 +1243,54 @@ class CanvasViewModel @Inject constructor(
                 timestampMs = System.currentTimeMillis(),
             ),
         )
+    }
+
+    /**
+     * Frame-edit rebind suppression. Runs at FinishInteraction, BEFORE
+     * [commitPendingInteraction], so override changes are captured in the same
+     * compound CanvasCommand as the transform changes.
+     *
+     * When `rebindAfterEdit=false`, iterates every frame in [pendingEditedFrameIds]
+     * and writes `RebindSuppressed` overrides so each frame's pre-edit logical
+     * membership survives. See `docs/architecture/frame-membership.md`.
+     */
+    private fun applyPendingRebindSuppression() {
+        if (pendingEditedFrameIds.isEmpty()) return
+        val snapshot = pendingSnapshot ?: return
+        if (_state.value.frameEditOptions.rebindAfterEdit) return
+
+        val current = _allNodes.value
+        val snapshotById = snapshot.associateBy { it.id }
+        // Reconstruct the pre-gesture world by overlaying snapshot versions onto current nodes.
+        val allNodesBefore = current.map { node -> snapshotById[node.id] ?: node }
+        val options = _state.value.frameEditOptions
+
+        val updatedById = mutableMapOf<String, CanvasNode.Frame>()
+        for (frameId in pendingEditedFrameIds) {
+            val frameBefore = snapshot.firstOrNull { it.id == frameId } as? CanvasNode.Frame ?: continue
+            val frameAfter = current.firstOrNull { it.id == frameId } as? CanvasNode.Frame ?: continue
+            val updated = applyFrameEditUseCase.applyFrameEdit(
+                frameBefore = frameBefore,
+                frameAfter = frameAfter,
+                allNodesBefore = allNodesBefore,
+                allNodesAfter = current,
+                options = options,
+            )
+            if (updated !== frameAfter) updatedById[frameId] = updated
+        }
+        if (updatedById.isEmpty()) return
+
+        _allNodes.update { nodes ->
+            nodes.map { updatedById[it.id] ?: it }
+        }
+        _state.update { s ->
+            s.copy(
+                visibleNodes = s.visibleNodes.map { vn ->
+                    val u = updatedById[vn.node.id]
+                    if (u != null) vn.copy(node = u) else vn
+                },
+            )
+        }
     }
 
     /**

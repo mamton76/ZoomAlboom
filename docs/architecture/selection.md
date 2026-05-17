@@ -122,7 +122,7 @@ Two-or-more-finger camera pan / pinch-zoom / rotate. Single-finger events pass t
 
 The gesture stack is **selection-aware**, not directly mode-aware. `CanvasAction.SetMode(target)` clears `selectedNodeIds` (and `groupSelectionTransform`, `selectionRect`) whenever `target != Edit`. Every layer then behaves correctly without per-mode branches inside the detectors:
 
-| Layer | Edit | View / Pesentation |
+| Layer | Edit | View / Presentation |
 |-------|------|---------------------|
 | 1 — `nodeInteractionGestures` | Active on non-empty selection | Dormant — selection always empty, the modifier early-returns at the top of its `pointerInput` block |
 | 2 — `tapAndLongPressGestures` | Tap → `SelectNode` / `DeselectAll`; long-press → toggle / overlap picker / rect-select | Tap → `FocusNode(hit.id)` if there's a hit, no-op otherwise; long-press is swallowed (returns `true`) — no overlap picker, no rect-select fallthrough |
@@ -132,6 +132,6 @@ The branch lives in `CanvasScreen.kt`'s `onTap` / `onLongPress` callbacks, not i
 
 **Selection chrome auto-hides in non-Edit modes** because `SelectionOverlay`, the resize/rotation handle overlays, and `ContextualActionBar` all key off `selectedNodeIds.isNotEmpty()`. No mode flag needed in their composables.
 
-**`FrameListBottomSheet` tap-to-focus works in both Edit and View** — the row-click handler dispatches `FocusNode(frameId)` and dismisses the sheet, regardless of mode. The TopBar toggle currently cycles Edit ↔ View; `Pesentation` is reachable only via `SetMode` programmatically (reserved for a future Present surface).
+**`FrameListBottomSheet` tap-to-focus works in both Edit and View** — the row-click handler dispatches `FocusNode(frameId)` and dismisses the sheet, regardless of mode. The TopBar toggle currently cycles Edit ↔ View; `Presentation` is reachable only via `SetMode` programmatically (reserved for a future Present surface).
 
 See [navigation.md § Animated Frame Focus](navigation.md#animated-frame-focus) for what `FocusNode` does after dispatch.

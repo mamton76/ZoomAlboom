@@ -117,7 +117,7 @@ On top of those contextual modes sits a **global interaction mode** that gates *
 |--------------------------|-------------|------------------|-------|
 | `Edit` (default) | Replace selection | Visible | Full editor; all of the above contextual modes apply. |
 | `View` | Animated focus (`FocusNode`) | Hidden (selection always empty) | Read-only navigation; long-press / rect-select are no-ops. |
-| `Pesentation` | Same as `View` | Hidden | Reserved for the post-MVP Present surface (no UI yet). |
+| `Presentation` | Same as `View` | Hidden | Reserved for the post-MVP Present surface (no UI yet). |
 
 The TopBar Edit/View toggle drives the global mode. See [navigation.md § Canvas Interaction Mode](navigation.md#canvas-interaction-mode) and [selection.md § 7](selection.md#7-mode-interaction).
 

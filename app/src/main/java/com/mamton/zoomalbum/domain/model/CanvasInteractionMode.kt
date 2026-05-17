@@ -13,4 +13,4 @@ import kotlinx.serialization.Serializable
  * Persisted to `ide_workspaces` (UI state, not album content).
  */
 @Serializable
-enum class CanvasInteractionMode { Edit, View, Pesentation }
+enum class CanvasInteractionMode { Edit, View, Presentation }

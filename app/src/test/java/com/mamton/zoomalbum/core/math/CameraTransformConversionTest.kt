@@ -119,6 +119,40 @@ class CameraTransformConversionTest {
     }
 
     /**
+     * Non-square rotated frame off-origin: verifies rotation inversion AND that the
+     * frame center lands at the screen center for a 2:1 aspect frame at 30°.
+     *
+     * 400×200 frame at world (100, 200), rotation = 30°, screen 1000×800, inset 0.1.
+     *  CONTAIN scale = min(1000*0.8/400, 800*0.8/200) = min(2.0, 3.2) = 2.0.
+     */
+    @Test
+    fun `toCamera centers rotated non-square frame at screen center`() {
+        val transform = Transform(
+            cx = 100f,
+            cy = 200f,
+            w = 400f,
+            h = 200f,
+            scale = 1f,
+            rotation = 30f,
+        )
+        val camera = transform.toCamera(
+            screenWidth = 1000f,
+            screenHeight = 800f,
+            fitMode = FrameFitMode.CONTAIN,
+            safeAreaInset = 0.1f,
+        )
+
+        assertEquals(-30f, camera.rotation, eps)
+        assertEquals(2.0f, camera.scale, eps)
+
+        val (screenX, screenY) = TransformUtils.worldToScreen(
+            transform.cx, transform.cy, camera,
+        )
+        assertEquals(500f, screenX, 0.05f)
+        assertEquals(400f, screenY, 0.05f)
+    }
+
+    /**
      * Smaller safeAreaInset → less padding → larger camera scale.
      * scale = screenWidth * (1 - 2*inset) / renderW.
      */

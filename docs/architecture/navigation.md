@@ -61,16 +61,16 @@ MainActivity
 |------|---------------|--------------------------|----------------------|------------------|
 | `Edit` (default) | Replace selection (`SelectNode`) | Toggle / overlap picker / rect-select | Active | Visible |
 | `View` | Animated focus on the node (`FocusNode`) | Swallowed (no-op) | Active | Hidden (selection always empty) |
-| `Pesentation` | Same as `View`. Reserved for read-only published-album surfaces (post-MVP — no dedicated UI yet) | Swallowed | Active | Hidden |
+| `Presentation` | Same as `View`. Reserved for read-only published-album surfaces (post-MVP — no dedicated UI yet) | Swallowed | Active | Hidden |
 
 Entering any non-Edit mode clears `selectedNodeIds`, `groupSelectionTransform`, and `selectionRect`. Selection-keyed chrome (`SelectionOverlay`, handles, `ContextualActionBar`) auto-hides as a result — no per-mode branching needed in those composables.
 
-The toggle lives in `CanvasTopBar`; it currently cycles **Edit ↔ View** only. `Pesentation` is reachable programmatically via `CanvasAction.SetMode(Pesentation)` and is reserved for the future Present surface.
+The toggle lives in `CanvasTopBar`; it currently cycles **Edit ↔ View** only. `Presentation` is reachable programmatically via `CanvasAction.SetMode(Presentation)` and is reserved for the future Present surface.
 
 ## Animated Frame Focus
 
 ```
-Tap a node in View / Pesentation, OR
+Tap a node in View / Presentation, OR
 Tap a frame row in FrameListBottomSheet (Edit or View)
         ↓
 CanvasAction.FocusNode(nodeId)

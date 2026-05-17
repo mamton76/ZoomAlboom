@@ -373,7 +373,7 @@ See [selection.md § 5](architecture/selection.md#5-gesture-stack):
 - [ ] `mode` saved to `ide_workspaces` (UI state)
 
 ### 12.6 Future
-- A "Present" mode for shared/published albums (read-only, no album-list overflow). Out of MVP — see [open-questions.md § 5](architecture/open-questions.md). Enum value (`Pesentation`) reserved on `CanvasInteractionMode`; UI surface deferred.
+- A "Present" mode for shared/published albums (read-only, no album-list overflow). Out of MVP — see [open-questions.md § 5](architecture/open-questions.md). Enum value (`Presentation`) reserved on `CanvasInteractionMode`; UI surface deferred.
 
 ---
 

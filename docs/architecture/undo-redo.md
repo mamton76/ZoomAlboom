@@ -102,7 +102,7 @@ The following actions do **not** push `CanvasCommand` entries — they are trans
 
 - **Selection** — `SelectNode`, `ToggleNodeSelection`, `DeselectAll`, `SelectNodesInRect`.
 - **Camera** — pan / pinch-zoom / rotate via `onGesture`, double-tap `reset()`, and `FocusNode(nodeId)` (animated frame focus). Camera state is persisted in the scene graph root, but its evolution within a session is not history.
-- **Mode** — `SetMode(target)` toggles between `Edit` / `View` / `Pesentation`. Clears selection as a side effect, but the cleared selection wasn't undoable in the first place.
+- **Mode** — `SetMode(target)` toggles between `Edit` / `View` / `Presentation`. Clears selection as a side effect, but the cleared selection wasn't undoable in the first place.
 
 Rule of thumb: a `CanvasCommand` is pushed iff the action mutates `_allNodes` (or the count thereof).
 

@@ -165,7 +165,7 @@ fun CanvasScreen(
                             }
                         }
                         CanvasInteractionMode.View,
-                        CanvasInteractionMode.Pesentation -> {
+                        CanvasInteractionMode.Presentation -> {
                             // View / Presentation: tap a node to focus it. Miss = no-op.
                             if (hit != null) viewModel.onAction(CanvasAction.FocusNode(hit.id))
                         }

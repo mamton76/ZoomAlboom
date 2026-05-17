@@ -143,13 +143,16 @@ private fun FullFrameRenderer(
                 val topLeft = Offset(-renderW / 2f, -renderH / 2f)
                 val nodeSize = Size(renderW, renderH)
                 val radius = CornerRadius(4f, 4f)
-                background?.let { drawFrameBackground(it, renderW, renderH, textureBitmap) }
-                drawRoundRect(
-                    color = fillColor.copy(alpha = 0.2f),
-                    topLeft = topLeft,
-                    size = nodeSize,
-                    cornerRadius = radius,
-                )
+                if (background == null) {
+                    drawRoundRect(
+                        color = fillColor.copy(alpha = 0.2f),
+                        topLeft = topLeft,
+                        size = nodeSize,
+                        cornerRadius = radius,
+                    )
+                } else {
+                    drawFrameBackground(background, renderW, renderH, textureBitmap)
+                }
                 drawRoundRect(
                     color = borderColor,
                     topLeft = topLeft,

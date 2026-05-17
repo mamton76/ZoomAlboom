@@ -71,7 +71,7 @@ fun CanvasTopBar(
                     text = when (mode) {
                         CanvasInteractionMode.Edit -> "Edit"
                         CanvasInteractionMode.View -> "View"
-                        CanvasInteractionMode.Pesentation -> "Pres"
+                        CanvasInteractionMode.Presentation -> "Pres"
                     },
                     fontSize = 11.sp,
                 )

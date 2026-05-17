@@ -195,19 +195,6 @@ fun BackgroundEditor(
     }
     var opacity by remember { mutableFloatStateOf(initial?.opacity ?: 1f) }
 
-    val texturePicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia(),
-    ) { uri ->
-        uri ?: return@rememberLauncherForActivityResult
-        runCatching {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION,
-            )
-        }
-        textureBackgroundDataRefId = uri.toString()
-    }
-
     fun emit() {
         val result: BackgroundData? = when (choice) {
             BackgroundSourceChoice.None -> null
@@ -237,6 +224,20 @@ fun BackgroundEditor(
             )
         }
         onValueChange(result)
+    }
+
+    val texturePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+        textureBackgroundDataRefId = uri.toString()
+        emit()
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
@@ -315,7 +316,7 @@ fun BackgroundEditor(
                     Slider(
                         value = tileSize,
                         onValueChange = { tileSize = it; emit() },
-                        valueRange = 50f..1000f,
+                        valueRange = 50f..10000f,
                     )
                 }
             }

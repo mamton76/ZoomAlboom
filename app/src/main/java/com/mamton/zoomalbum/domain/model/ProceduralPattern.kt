@@ -16,7 +16,7 @@ import kotlinx.serialization.Serializable
  *
  * - For an [AlbumBackground] with [AnchorMode.CameraLocked] → screen pixels.
  * - For an [AlbumBackground] with [AnchorMode.WorldLocked] → world units.
- * - For a frame background (`Frame.background`) → world units (frame-local).
+ * - For a frame background (`FrameAppearance.background`) → world units (frame-local).
  *
  * That way line thickness stays visually constant on screen for camera-locked
  * and scales with zoom for world-locked / frame backgrounds, which matches

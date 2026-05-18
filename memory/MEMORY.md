@@ -13,6 +13,7 @@ Discovered facts, framework gotchas, and project notes that don't yet have a hom
 
 ### Subsystems not yet in `docs/architecture/`
 - [IDE panel system](ide_panels.md) — `PanelPosition` / `PanelState` / `IdeUiState` model and the `DockedPanel` / `FloatingPanel` / `PanelSlot` split.
+- [SceneGraphSerializer gotchas](scene_graph_serializer.md) — `CanvasNode` discriminator is the FQCN (not `"FRAME"` / `"MEDIA"`); test legacy shapes by mutating `JsonObject`s rather than hand-writing JSON; `ignoreUnknownKeys = true` covers additive schema changes.
 
 ### Project status
 - [Test status](test_status.md) — known-failing tests unrelated to active work.

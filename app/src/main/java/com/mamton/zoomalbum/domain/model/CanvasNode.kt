@@ -27,6 +27,12 @@ sealed class CanvasNode {
         // Used by LOD to compute source-px-per-screen-px; not used for layout.
         val intrinsicPixelWidth: Int = 0,
         val intrinsicPixelHeight: Int = 0,
+        /**
+         * Non-destructive visual styling for this media: overlays, border,
+         * shadow, crop, color adjustments, decorative frame, caption.
+         * `null` = renderer defaults (cropped source only).
+         */
+        val appearance: MediaAppearance? = null,
         override val visibilityPolicy: VisibilityPolicy? = null,
     ) : CanvasNode()
 
@@ -41,10 +47,24 @@ sealed class CanvasNode {
          * "geometry decides." See `docs/architecture/frame-membership.md`.
          */
         val overrides: Map<String, FrameMembershipOverride> = emptyMap(),
-        /** Frame is implicitly the anchor — `BackgroundData` carries no [AnchorMode]. */
-        val background: BackgroundData? = null,
+        /**
+         * Non-destructive visual styling for the frame: background, content
+         * overlays, border, shadow, title, etc. `null` = renderer defaults.
+         *
+         * The frame is implicitly its own anchor — the [BackgroundData] inside
+         * [FrameAppearance.background] carries no [AnchorMode].
+         *
+         * Legacy scene-graph JSON stored `background` directly on the frame;
+         * the deserializer migrates it into `appearance.background` on read —
+         * see `SceneGraphSerializer`.
+         */
+        val appearance: FrameAppearance? = null,
         override val visibilityPolicy: VisibilityPolicy? = null,
-    ) : CanvasNode()
+    ) : CanvasNode() {
+
+        /** Convenience accessor: the frame's background, if any. */
+        val background: BackgroundData? get() = appearance?.background
+    }
 }
 
 @Serializable

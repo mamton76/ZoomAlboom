@@ -33,8 +33,8 @@ data class TileData(
  * Polymorphic payload of a background — the *what*, decoupled from the *where*.
  *
  * Used both for album backgrounds (via [AlbumBackground], which adds an anchor)
- * and for frame backgrounds (via `Frame.background: BackgroundData?`, where the
- * frame *is* the anchor).
+ * and for frame backgrounds (via `FrameAppearance.background`, where the frame
+ * *is* the anchor — no [AnchorMode] is stored).
  *
  * @SerialName values are stable on-disk identifiers. Do not rename without a migration.
  */
@@ -77,8 +77,8 @@ sealed class BackgroundData {
 /**
  * Album-level background: source data + anchor mode (camera-locked / world-locked).
  *
- * Frame-level backgrounds use [BackgroundData] directly on `Frame.background` —
- * the frame is implicitly the anchor.
+ * Frame-level backgrounds use [BackgroundData] via `FrameAppearance.background` —
+ * the frame is implicitly the anchor (no anchor mode stored).
  */
 @Serializable
 data class AlbumBackground(

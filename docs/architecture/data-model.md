@@ -317,6 +317,7 @@ The scene graph is serialized as a `SceneGraph` root object wrapping `albumId`, 
       "mediaRefId": "media_abc",
       "transform": { "cx": 300, "cy": 350, "w": 400, "h": 300, "scale": 1.0, "rotation": 0, "zIndex": 1 },
       "tags": ["vacation", "2024"]
+      // "appearance" omitted when null — see appearance.md (MediaAppearance: overlays, border, shadow, …)
     },
     {
       "id": "frame_1",
@@ -370,10 +371,11 @@ Implementations in `data/repository/`, bound via Hilt `@Binds`.
 | `CanvasNode.Media.uri` | direct URI string | `mediaRefId` FK to `media_library` |
 | `Frame.containsNodeIds` | stored list (never wired) | removed; membership computed from geometry + `Frame.overrides` ([frame-membership.md](frame-membership.md)) |
 | `Frame.color` | Long (ARGB) | hex string |
-| `Frame.background` | `BackgroundData?` directly on `Frame` | moved under `Frame.appearance.background` as part of the [appearance system](appearance.md). Wire format: same `BackgroundData` payload, now nested inside the frame's `appearance` object. |
-| `Frame.appearance` | not present | new `FrameAppearance?` container (background + `contentOverlays: List<OverlayStyle>` + border/shadow + titleStyle). See [appearance.md § 3](appearance.md#3-frameappearance--containercontent-level-styling). |
-| `MediaAppearance` shape | `overlays: List<MediaOverlay>` + `OverlayKind`/`OverlayBlendMode` enums | replaced by `overlays: List<OverlayStyle>` using the shared `OverlayStyle` / `OverlaySource` / `NodeBlendMode` types from [appearance.md § 7](appearance.md#7-shared-value-types). Element type changes; list shape is preserved. |
-| `MediaAppearance.frameOverlay` / `FrameOverlay` type / `FrameRenderMode` enum | `frameOverlay: FrameOverlay?` with `FrameRenderMode { Stretch, NineSlice }` | renamed to `frameDecoration: MediaFrameDecoration?` with `MediaFrameDecorationMode { Stretch, NineSlice }` to finish disambiguating "frame" (decorative photo-frame around one media is not a `CanvasNode.Frame`). Wire format identical; only the field name and `@SerialName` change. |
+| `Frame.background` | `BackgroundData?` directly on `Frame` | moved under `Frame.appearance.background` as part of the [appearance system](appearance.md). `SceneGraphSerializer` rewrites legacy top-level `background` into `appearance.background` on read; new writes always nest. ✓ |
+| `Frame.appearance` | not present | new `FrameAppearance?` container (background + `contentOverlays: List<OverlayStyle>` + border/shadow + titleStyle + contentEffect). See [appearance.md § 3](appearance.md#3-frameappearance--containercontent-level-styling). ✓ |
+| `Media.appearance` | not present | new `MediaAppearance?` container (crop + colorAdjustments + `overlays: List<OverlayStyle>` + frameDecoration + caption + border/shadow). See [appearance.md § 2](appearance.md#2-mediaappearance--object-level-styling). ✓ |
+| `MediaAppearance` shape | hypothetical `overlays: List<MediaOverlay>` + `OverlayKind`/`OverlayBlendMode` enums (never landed) | `overlays: List<OverlayStyle>` using the shared `OverlayStyle` / `OverlaySource` / `NodeBlendMode` types from [appearance.md § 7](appearance.md#7-shared-value-types). ✓ |
+| Decorative photo-frame on media | hypothetical `frameOverlay: FrameOverlay?` with `FrameRenderMode { Stretch, NineSlice }` | landed as `frameDecoration: MediaFrameDecoration?` with `MediaFrameDecorationMode { Stretch, NineSlice }` to finish disambiguating "frame" (decorative photo-frame around one media is not a `CanvasNode.Frame`). ✓ |
 | `CanvasNode.tags` | not present | added |
 | `ide_workspaces` table | not present | new table |
 | `media_library` table | not present | new table |

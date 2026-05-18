@@ -97,7 +97,7 @@ Notes:
 7. Selection overlays, guidelines, snapping indicators
 8. IDE UI overlay
 
-Steps 3 and 5 are the two halves of the layered frame render: background goes under the contents, `contentOverlays` go over them in list order. With today's single-pass `CanvasNodeRenderer`, step 3 is implemented and step 5 is persisted-but-not-painted; the renderer slice that closes the gap is tracked in todo.
+Steps 3 and 5 are the two halves of the layered frame render: background goes under the contents, `contentOverlays` go over them in list order. Both halves are painted by the event-driven paint loop in `CanvasScreen` — see [rendering.md § 6b](rendering.md#6b-layered-frame-rendering). Plain frames (no `contentOverlays`) still paint single-pass.
 
 ---
 

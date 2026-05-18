@@ -27,6 +27,9 @@ private val baseActions = listOf(
 // Frame fill toggle. Short-term entry point — moves to Object Properties Panel later.
 private val backgroundAction = ActionItem("▣", "Background") // ▣
 
+// Media-only entry point for the MediaAppearance editor.
+private val mediaAppearanceAction = ActionItem("✦", "Appearance") // ✦
+
 // Z-order actions. Single-node selections only; multi-select would need group
 // semantics that aren't worth designing yet.
 private val zOrderActions = listOf(
@@ -52,6 +55,7 @@ fun ContextualActionBar(
     hasSelection: Boolean,
     modifier: Modifier = Modifier,
     showBackgroundAction: Boolean = false,
+    showMediaAppearanceAction: Boolean = false,
     showZOrderActions: Boolean = false,
     showFrameMembershipActions: Boolean = false,
     showAutoAction: Boolean = false,
@@ -66,6 +70,7 @@ fun ContextualActionBar(
         val actions = buildList {
             addAll(baseActions)
             if (showBackgroundAction) add(backgroundAction)
+            if (showMediaAppearanceAction) add(mediaAppearanceAction)
             if (showZOrderActions) addAll(zOrderActions)
             if (showFrameMembershipActions) addAll(frameMembershipActions)
             if (showAutoAction) add(autoAction)

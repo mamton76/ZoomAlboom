@@ -31,7 +31,8 @@ import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.AddContentBottomSheet
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.AlbumSettingsBottomSheet
-import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.FrameBackgroundBottomSheet
+import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.FrameAppearanceBottomSheet
+import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.MediaAppearanceBottomSheet
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.FrameListBottomSheet
 import com.mamton.zoomalbum.feature.ide_ui.viewmodel.IdeViewModel
 
@@ -61,6 +62,7 @@ fun CanvasScaffold(
     var showPanelConfig by remember { mutableStateOf(false) }
     var showAlbumSettings by remember { mutableStateOf(false) }
     var frameBgEditing by remember { mutableStateOf<CanvasNode.Frame?>(null) }
+    var mediaApprEditing by remember { mutableStateOf<CanvasNode.Media?>(null) }
     var overlapPickerNodes by remember { mutableStateOf<List<CanvasNode>>(emptyList()) }
 
     val selectedNodeIds = canvasState.selectedNodeIds
@@ -70,6 +72,13 @@ fun CanvasScaffold(
         else canvasState.visibleNodes
             .map { it.node }
             .firstOrNull { it.id == selectedNodeIds.first() } as? CanvasNode.Frame
+    }
+    // Single-Media selection enables the Appearance button in the action bar.
+    val singleSelectedMedia: CanvasNode.Media? = remember(selectedNodeIds, canvasState.visibleNodes) {
+        if (selectedNodeIds.size != 1) null
+        else canvasState.visibleNodes
+            .map { it.node }
+            .firstOrNull { it.id == selectedNodeIds.first() } as? CanvasNode.Media
     }
     // Frames in selection, in selection (insertion) order. Used by Pin/Detach and the
     // target-picker dialog. `selectedNodeIds.toList()` preserves order because
@@ -209,6 +218,7 @@ fun CanvasScaffold(
             ContextualActionBar(
                 hasSelection = selectedNodeIds.isNotEmpty(),
                 showBackgroundAction = singleSelectedFrame != null,
+                showMediaAppearanceAction = singleSelectedMedia != null,
                 showZOrderActions = selectedNodeIds.size == 1,
                 showFrameMembershipActions = pinDetachEnabled,
                 showAutoAction = pinDetachEnabled && anyOverrideExists,
@@ -222,6 +232,7 @@ fun CanvasScaffold(
                             com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.DuplicateSelection,
                         )
                         "Background" -> singleSelectedFrame?.let { frameBgEditing = it }
+                        "Appearance" -> singleSelectedMedia?.let { mediaApprEditing = it }
                         "Pin" -> dispatchFrameMembership(FrameMembershipIntent.Pin)
                         "Detach" -> dispatchFrameMembership(FrameMembershipIntent.Detach)
                         "Auto" -> dispatchFrameMembership(FrameMembershipIntent.Reset)
@@ -319,18 +330,34 @@ fun CanvasScaffold(
     }
 
     frameBgEditing?.let { frame ->
-        FrameBackgroundBottomSheet(
-            initial = frame.background,
-            onApply = { bg ->
+        FrameAppearanceBottomSheet(
+            initial = frame.appearance,
+            onApply = { nextAppearance ->
                 canvasViewModel.onAction(
-                    com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.SetFrameBackground(
+                    com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.SetFrameAppearance(
                         nodeId = frame.id,
-                        background = bg,
+                        appearance = nextAppearance,
                     ),
                 )
                 frameBgEditing = null
             },
             onDismiss = { frameBgEditing = null },
+        )
+    }
+
+    mediaApprEditing?.let { media ->
+        MediaAppearanceBottomSheet(
+            initial = media.appearance,
+            onApply = { nextAppearance ->
+                canvasViewModel.onAction(
+                    com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.SetMediaAppearance(
+                        nodeId = media.id,
+                        appearance = nextAppearance,
+                    ),
+                )
+                mediaApprEditing = null
+            },
+            onDismiss = { mediaApprEditing = null },
         )
     }
 

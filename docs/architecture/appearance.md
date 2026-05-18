@@ -186,7 +186,9 @@ A frame with any `contentOverlays` (or, in the future, a `contentEffect`) can no
 
 The simple per-node `CanvasNodeRenderer` pass used today handles step (2) trivially (it's the existing `Frame.background` render), and step (5) trivially (border + label), but not (3) + (4) together: the renderer needs to know which children belong to the frame and must draw them between the frame's two own layers. This is what makes `contentOverlays` strictly more than a node-local effect.
 
-**MVP latitude.** The model in this doc can be introduced before the layered renderer exists. `FrameAppearance.contentOverlays` is just a serializable field until the renderer learns to draw it. Until then it is persisted, edited, and serialized but not painted — and the docs make that explicit. Frame–content binding ([frame-membership.md](frame-membership.md)) is the prerequisite for actually rendering it.
+**Status — what's wired today.** The layered renderer ships with this slice. `CanvasScreen` walks `FramePaintEvent`s built from the visible-nodes set: every layered frame paints its background on the Surface phase at `frame.zIndex`, members draw in z-order, then the overlay phase paints `contentOverlays + border` just past `max(memberZ, frame.zIndex)`. Membership uses [frame-membership.md](frame-membership.md). Plain frames (no `contentOverlays`) still paint in a single pass.
+
+`FrameContentEffect` is the one piece still field-only: the sealed class has no variants yet and the off-screen filter pass is post-MVP. `contentEffect` deserializes and round-trips but renders as a no-op until that slice lands.
 
 ---
 
@@ -288,18 +290,27 @@ Polymorphism uses kotlinx-serialization's standard `@SerialName` discriminator. 
 
 ---
 
-## 10. Non-goals (for this slice)
+## 10. Implementation status
 
-This doc captures the **target model** and the **render-pipeline contract**. It does not yet ship:
+What this slice landed:
 
-- A complete frame–content binding implementation (membership is already designed; see [frame-membership.md](frame-membership.md)).
-- A layered frame renderer (current `CanvasRenderer` paints frames in one pass).
-- Off-screen `FrameContentEffect` rendering.
-- A media crop editor / full visual-filter engine.
-- UI for editing overlays, blend modes, or preset libraries.
-- Rendering every `NodeBlendMode` value — the renderer can start with `Normal` and grow.
+- Shared types: `NodeAppearance`, `OverlayStyle`, `OverlaySource` (Solid / Texture / Procedural), `NodeBlendMode` (all 7 values mapped to Compose `BlendMode`), `BorderStyle`, `ShadowStyle`.
+- `FrameAppearance` and `MediaAppearance` data classes with their per-type fields; nullable `appearance` field on `CanvasNode.Frame` and `CanvasNode.Media`.
+- Scene-graph serializer migration that lifts legacy top-level `Frame.background` into `appearance.background` on read.
+- Media renderer paints `overlays`, `border`, `shadow`, `cornerRadius`, surface `opacity`, and `crop.mode` (Fit / Fill / Stretch).
+- Layered frame renderer paints background → members → `contentOverlays` → border, driven by `FrameMembershipUseCase.effectiveMembers`.
+- `DrawScope.drawOverlayStack` helper shared between the two scopes.
 
-Each of these has (or will have) its own todo entry. The model is introduced first so that downstream work — editor UI, renderer slices, presets, serialization — can land against a stable shape.
+Still pending (each has its own todo entry under [§ 20](../todo.md#20-appearance-system-non-destructive-styling)):
+
+- Renderer for `MediaAppearance.frameDecoration` (NineSlice asset draw) and `MediaAppearance.caption` (editor UI persists both today).
+- Renderer for `MediaColorAdjustments` — `Compose ColorMatrix` or shader; editor sliders persist values for it.
+- `CropMode.Manual` pan/zoom inside bounds — editor sliders persist values; renderer falls back to Fill.
+- Variants and rendering for `FrameContentEffect` (sepia / blur / grayscale off-screen pass).
+- In-canvas crop handle (the manual-mode sliders live in the sheet; gesture-based pan/zoom inside the rect is post-MVP).
+- `frameDecoration` asset picker (current editor is asset-URI text field + mode dropdown).
+- Style-preset library (`MediaStylePreset` storage, copy/paste appearance, save-as-preset action).
+- LOD-aware overlay drop-out at intermediate zoom.
 
 ---
 

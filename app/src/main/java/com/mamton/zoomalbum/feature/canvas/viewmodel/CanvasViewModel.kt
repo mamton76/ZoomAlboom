@@ -19,12 +19,13 @@ import com.mamton.zoomalbum.core.math.toCamera
 import com.mamton.zoomalbum.core.mvi.Intent
 import com.mamton.zoomalbum.domain.model.AlbumBackground
 import com.mamton.zoomalbum.domain.model.AlbumPresentationProfile
-import com.mamton.zoomalbum.domain.model.BackgroundData
 import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
 import com.mamton.zoomalbum.domain.model.EasingType
+import com.mamton.zoomalbum.domain.model.FrameAppearance
 import com.mamton.zoomalbum.domain.model.FrameEditOptions
+import com.mamton.zoomalbum.domain.model.MediaAppearance
 import com.mamton.zoomalbum.domain.model.FrameFitMode
 import com.mamton.zoomalbum.domain.model.MembershipOrigin
 import com.mamton.zoomalbum.domain.model.MembershipState
@@ -145,9 +146,23 @@ sealed interface CanvasAction : Intent {
 
     // Backgrounds (§19)
     data class SetAlbumBackground(val background: AlbumBackground?) : CanvasAction
-    data class SetFrameBackground(
+
+    // Appearance (§20). Replaces a frame's entire FrameAppearance — covers
+    // background, contentOverlays, border, shadow, etc.
+    // `null` resets the frame to default rendering.
+    data class SetFrameAppearance(
         val nodeId: String,
-        val background: BackgroundData?,
+        val appearance: FrameAppearance?,
+    ) : CanvasAction
+
+    /**
+     * Replaces a media node's entire `MediaAppearance` — overlays, border, shadow,
+     * crop, color adjustments, decoration, caption, opacity, cornerRadius.
+     * `null` resets the media to default rendering.
+     */
+    data class SetMediaAppearance(
+        val nodeId: String,
+        val appearance: MediaAppearance?,
     ) : CanvasAction
 
     // Frame membership — explicit pin / detach / clear overrides. See frame-membership.md.
@@ -690,14 +705,17 @@ class CanvasViewModel @Inject constructor(
                 )
             }
 
-            is CanvasAction.SetFrameBackground -> {
+            is CanvasAction.SetFrameAppearance -> {
                 val current = _allNodes.value
                 val idx = current.indexOfFirst { it.id == action.nodeId }
                 if (idx < 0) return
                 val node = current[idx]
                 if (node !is CanvasNode.Frame) return
-                if (node.background == action.background) return
-                val updated = node.copy(background = action.background)
+                // Collapse an all-default appearance back to `null` so the JSON
+                // stays tidy when the user clears every field.
+                val nextAppearance = action.appearance?.takeUnless { it == FrameAppearance() }
+                if (node.appearance == nextAppearance) return
+                val updated = node.copy(appearance = nextAppearance)
                 _allNodes.update { nodes ->
                     nodes.map { if (it.id == action.nodeId) updated else it }
                 }
@@ -714,6 +732,35 @@ class CanvasViewModel @Inject constructor(
                         before = listOf(node),
                         after = listOf(updated),
                         kind = CommandKind.SET_FRAME_BACKGROUND,
+                        timestampMs = System.currentTimeMillis(),
+                    ),
+                )
+            }
+
+            is CanvasAction.SetMediaAppearance -> {
+                val current = _allNodes.value
+                val idx = current.indexOfFirst { it.id == action.nodeId }
+                if (idx < 0) return
+                val node = current[idx]
+                if (node !is CanvasNode.Media) return
+                val nextAppearance = action.appearance?.takeUnless { it == MediaAppearance() }
+                if (node.appearance == nextAppearance) return
+                val updated = node.copy(appearance = nextAppearance)
+                _allNodes.update { nodes ->
+                    nodes.map { if (it.id == action.nodeId) updated else it }
+                }
+                _state.update { s ->
+                    s.copy(
+                        visibleNodes = s.visibleNodes.map { vn ->
+                            if (vn.node.id == action.nodeId) vn.copy(node = updated) else vn
+                        },
+                    )
+                }
+                commit(
+                    CanvasCommand(
+                        before = listOf(node),
+                        after = listOf(updated),
+                        kind = CommandKind.SET_MEDIA_APPEARANCE,
                         timestampMs = System.currentTimeMillis(),
                     ),
                 )

@@ -8,7 +8,15 @@ import kotlinx.serialization.Serializable
 enum class CommandKind {
     ADD, REMOVE, DELETE, DUPLICATE, MOVE, RESIZE, ROTATE,
     SET_ALBUM_BACKGROUND,
+    /**
+     * Frame appearance mutation — covers the entire `FrameAppearance` (background,
+     * contentOverlays, border, shadow, titleStyle, opacity, cornerRadius).
+     * Wire name kept as `SET_FRAME_BACKGROUND` so existing on-disk history files
+     * keep deserializing; semantics broadened with the appearance system.
+     */
     SET_FRAME_BACKGROUND,
+    /** Media appearance mutation — the entire `MediaAppearance`. */
+    SET_MEDIA_APPEARANCE,
     SET_FRAME_OVERRIDES, // Pin / Detach — mutates Frame.overrides only (no transform change).
     REORDER, // BringToFront / SendToBack / BringForward / SendBackward — zIndex mutations.
 }

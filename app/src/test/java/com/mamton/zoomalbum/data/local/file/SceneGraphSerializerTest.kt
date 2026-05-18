@@ -1,16 +1,33 @@
 package com.mamton.zoomalbum.data.local.file
 
 import com.mamton.zoomalbum.core.math.Camera
+import com.mamton.zoomalbum.domain.model.BackgroundData
+import com.mamton.zoomalbum.domain.model.BorderStyle
 import com.mamton.zoomalbum.domain.model.CanvasNode
+import com.mamton.zoomalbum.domain.model.FrameAppearance
 import com.mamton.zoomalbum.domain.model.FrameMembershipOverride
+import com.mamton.zoomalbum.domain.model.MediaAppearance
+import com.mamton.zoomalbum.domain.model.MediaFrameDecoration
+import com.mamton.zoomalbum.domain.model.MediaFrameDecorationMode
 import com.mamton.zoomalbum.domain.model.MembershipOrigin
 import com.mamton.zoomalbum.domain.model.MembershipState
+import com.mamton.zoomalbum.domain.model.NodeBlendMode
+import com.mamton.zoomalbum.domain.model.OverlaySource
+import com.mamton.zoomalbum.domain.model.OverlayStyle
 import com.mamton.zoomalbum.domain.model.SceneGraph
+import com.mamton.zoomalbum.domain.model.ShadowStyle
 import com.mamton.zoomalbum.domain.model.Transform
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SceneGraphSerializerTest {
@@ -95,6 +112,158 @@ class SceneGraphSerializerTest {
 
         val restored = back.nodes.single() as CanvasNode.Frame
         assertEquals(frameWithOverrides.overrides, restored.overrides)
+    }
+
+    @Test
+    fun `round-trip preserves FrameAppearance background`() {
+        val frame = CanvasNode.Frame(
+            id = "f1",
+            transform = Transform(cx = 0f, cy = 0f, w = 100f, h = 100f),
+            appearance = FrameAppearance(
+                background = BackgroundData.SolidBackgroundData(color = "#FF0000", opacity = 0.8f),
+            ),
+        )
+        val original = SceneGraph(albumId = 1L, nodes = listOf(frame))
+
+        val back = serializer.deserialize(serializer.serialize(original), albumId = 999L)
+
+        val restored = back.nodes.single() as CanvasNode.Frame
+        assertEquals(frame.appearance, restored.appearance)
+        // The convenience accessor still resolves the migrated value.
+        assertEquals(frame.background, restored.background)
+    }
+
+    /**
+     * Build a legacy-shape JSON object for a frame: discriminator + fields produced by
+     * the *current* serializer, then `background` moved out of `appearance` to the top
+     * level — mimicking what was written before the appearance system existed.
+     */
+    private fun legacyFrameJsonObject(
+        frame: CanvasNode.Frame,
+        background: BackgroundData,
+    ): JsonObject {
+        val realJson = legacyJson.encodeToJsonElement(CanvasNode.serializer(), frame).jsonObject
+        val bgJson = legacyJson.encodeToJsonElement(BackgroundData.serializer(), background)
+        return buildJsonObject {
+            for ((k, v) in realJson) {
+                if (k == "appearance") continue  // drop the new container
+                put(k, v)
+            }
+            put("background", bgJson)             // …and put background at the top level
+        }
+    }
+
+    @Test
+    fun `legacy top-level Frame background migrates into appearance background on read`() {
+        val bareFrame = CanvasNode.Frame(
+            id = "f1",
+            transform = Transform(cx = 0f, cy = 0f, w = 100f, h = 100f),
+        )
+        val legacyBg = BackgroundData.SolidBackgroundData(color = "#00FF00", opacity = 1f)
+
+        val rootJson = buildJsonObject {
+            put("albumId", JsonPrimitive(5L))
+            put("camera", legacyJson.encodeToJsonElement(Camera.serializer(), Camera()))
+            put("nodes", buildJsonArray { add(legacyFrameJsonObject(bareFrame, legacyBg)) })
+        }
+        val legacyRaw = legacyJson.encodeToString(JsonObject.serializer(), rootJson)
+
+        val sg = serializer.deserialize(legacyRaw, albumId = 999L)
+
+        val restored = sg.nodes.single() as CanvasNode.Frame
+        assertNotNull(restored.appearance)
+        val bg = restored.appearance!!.background as BackgroundData.SolidBackgroundData
+        assertEquals("#00FF00", bg.color)
+        assertEquals(1f, bg.opacity, 0f)
+        // Re-serializing should now write the migrated shape — appearance container present.
+        val reserialized = serializer.serialize(sg)
+        assertTrue(
+            "Re-serialized JSON should nest the background under appearance",
+            reserialized.contains("\"appearance\""),
+        )
+    }
+
+    @Test
+    fun `legacy Frame background in bare-list format also migrates`() {
+        val bareFrame = CanvasNode.Frame(
+            id = "f1",
+            transform = Transform(cx = 0f, cy = 0f, w = 100f, h = 100f),
+        )
+        val legacyBg = BackgroundData.SolidBackgroundData(color = "#0000FF")
+
+        val bareList: JsonArray = buildJsonArray { add(legacyFrameJsonObject(bareFrame, legacyBg)) }
+        val legacyRaw = legacyJson.encodeToString(JsonArray.serializer(), bareList)
+
+        val sg = serializer.deserialize(legacyRaw, albumId = 42L)
+
+        assertEquals(42L, sg.albumId)
+        val restored = sg.nodes.single() as CanvasNode.Frame
+        val bg = restored.appearance?.background as BackgroundData.SolidBackgroundData
+        assertEquals("#0000FF", bg.color)
+    }
+
+    @Test
+    fun `round-trip preserves MediaAppearance with overlays border shadow and decoration`() {
+        val media = CanvasNode.Media(
+            id = "m1",
+            transform = Transform(cx = 0f, cy = 0f, w = 200f, h = 200f),
+            mediaRefId = "asset-1",
+            appearance = MediaAppearance(
+                opacity = 0.9f,
+                cornerRadius = 8f,
+                border = BorderStyle(color = "#FFAA00", widthPx = 3f, opacity = 0.8f),
+                shadow = ShadowStyle(
+                    color = "#000000", opacity = 0.4f,
+                    offsetX = 4f, offsetY = 6f, blurRadius = 12f,
+                ),
+                overlays = listOf(
+                    OverlayStyle(
+                        source = OverlaySource.SolidColor(color = "#80000000"),
+                        opacity = 0.3f,
+                        blendMode = NodeBlendMode.Multiply,
+                    ),
+                    OverlayStyle(
+                        source = OverlaySource.Texture(textureRefId = "grain-1"),
+                        opacity = 0.5f,
+                        blendMode = NodeBlendMode.Screen,
+                    ),
+                ),
+                frameDecoration = MediaFrameDecoration(
+                    assetUri = "polaroid.png",
+                    mode = MediaFrameDecorationMode.NineSlice,
+                    sliceLeft = 12f, sliceTop = 12f, sliceRight = 12f, sliceBottom = 80f,
+                ),
+            ),
+        )
+        val original = SceneGraph(albumId = 11L, nodes = listOf(media))
+
+        val back = serializer.deserialize(serializer.serialize(original), albumId = 999L)
+
+        val restored = back.nodes.single() as CanvasNode.Media
+        assertEquals(media.appearance, restored.appearance)
+    }
+
+    @Test
+    fun `round-trip preserves OverlayStyle Procedural source on FrameAppearance contentOverlays`() {
+        val frame = CanvasNode.Frame(
+            id = "f1",
+            transform = Transform(cx = 0f, cy = 0f, w = 100f, h = 100f),
+            appearance = FrameAppearance(
+                contentOverlays = listOf(
+                    OverlayStyle(
+                        source = OverlaySource.SolidColor("#40FFFFFF"),
+                        opacity = 0.25f,
+                        blendMode = NodeBlendMode.SoftLight,
+                    ),
+                ),
+            ),
+        )
+        val original = SceneGraph(albumId = 12L, nodes = listOf(frame))
+
+        val back = serializer.deserialize(serializer.serialize(original), albumId = 999L)
+
+        val restored = back.nodes.single() as CanvasNode.Frame
+        assertEquals(frame.appearance, restored.appearance)
     }
 
     @Test

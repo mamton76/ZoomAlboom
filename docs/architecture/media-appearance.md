@@ -219,10 +219,25 @@ Stored in `filesDir/media/<albumId>/rendered/`.
 
 ---
 
-## MVP Scope
+## Implementation status
 
-**Required:** opacity, crop (Fit/Fill/Manual), cornerRadius, border, shadow, `overlays: List<OverlayStyle>` (1–2 entries common; Texture source, `Normal` or `Multiply` blend), `frameDecoration` (Stretch mode), copy/paste appearance, save as preset, save rendered derivative.
+**Landed (model + renderer + editor):**
+- `MediaAppearance` data class + `appearance: MediaAppearance?` on `CanvasNode.Media`.
+- All shared types: `BorderStyle`, `ShadowStyle`, `OverlayStyle`, `OverlaySource` (Solid / Texture / Procedural), all 7 `NodeBlendMode` values.
+- All media-specific value types: `CropSettings`+`CropMode`, `MediaColorAdjustments`, `MediaFrameDecoration`+`MediaFrameDecorationMode`, `CaptionStyle`, `MediaStylePreset`.
+- `FullMediaRenderer` paints: surface opacity, cornerRadius (rounded clip), shadow, cropped source (`CropMode` → `ContentScale`), overlay stack, border. Texture overlays load through `rememberOverlayTextureBitmaps` (Coil `SingletonImageLoader.execute` with `allowHardware(false)`, keyed on the unique `textureRefId` set).
+- `MediaAppearanceBottomSheet` covers every field: opacity / cornerRadius / crop (mode + focal / manual) / color adjustments / border / shadow / overlays (shared `OverlayListEditor`) / frame decoration / caption. Reached from a `✦ Appearance` entry in `ContextualActionBar` when a single Media is selected. Backed by `CanvasAction.SetMediaAppearance` + `CommandKind.SET_MEDIA_APPEARANCE`; undoable like any other snapshot command.
 
-**Nice to have in MVP:** NineSlice decoration rendering, basic color adjustments, additional `NodeBlendMode` values, longer overlay stacks in the editor, `CreateRenderedCopyOnCanvas`, `ReplaceWithRenderedImage`, `ResetAppearance`.
+**Model + editor land, renderer pending:**
+- `MediaColorAdjustments` rendering — needs a `ColorMatrix` or shader pass. (Editor sliders persist values.)
+- `MediaFrameDecoration` rendering (Stretch + NineSlice asset draw, `contentInsets`). (Editor takes an asset URI + mode + opacity.)
+- `CaptionStyle` rendering. (Editor takes text + font + color + show toggle.)
+- `CropMode.Manual` pan/zoom (falls back to `Crop` for now; editor sliders persist values).
+- LOD-aware overlay drop-out (today: Full = everything, Simplified+ = placeholders).
 
-**Post-MVP:** AI auto-enhance, background removal, animated overlays, batch preset application, advanced masks, caption styling.
+**No code yet:**
+- `frameDecoration` asset picker (current UI is an asset-URI text field rather than a visual browser).
+- In-canvas manual-crop handle (the sliders work; gesture-based pan/zoom inside the rect is post-MVP).
+- `MediaStylePreset` storage and the `SaveAsPreset` / `ApplyPreset` / `CopyAppearance` / `PasteAppearance` / `ResetAppearance` canvas actions.
+- Rendered derivatives (`SaveRenderedDerivative`, `CreateRenderedCopyOnCanvas`, `ReplaceWithRenderedImage`, `SaveToDeviceGallery`).
+- AI auto-enhance, background removal, animated overlays, batch preset application, advanced masks.

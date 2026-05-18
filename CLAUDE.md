@@ -27,6 +27,10 @@ Working memory / discovered implementation notes:
 
 - `memory/MEMORY.md` — index of per-topic files in `memory/` (framework gotchas, subsystem notes not yet in `docs/architecture/`).
 
+Pending discussions (scratch, not source-of-truth — may overlap with or contradict architecture docs until reconciled):
+
+- `docs/to_discuss.md` — open design questions: UI editing redesign (tablet/phone split), context menus, appearance/mask/overlay separation, presentation profiles (overlaps with `docs/architecture/presentation-profile.md` — reconcile before promoting).
+
 ## How to work in this repo
 
 - Do not invent a second architecture if docs already define one.

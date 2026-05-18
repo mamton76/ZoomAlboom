@@ -1,545 +1,91 @@
-# ZoomAlboom UI Editing & Presentation Profiles Notes
+# ZoomAlboom — Open Design Discussions
 
-## 1. Presentation Profiles for Albums and Frames
-
-We discussed the future need for **presentation profiles**: different viewing configurations for different device classes and orientations.
-
-Possible profiles:
-
-- `phone_portrait` — phone in portrait orientation, usually 9:16
-- `phone_landscape` — phone in landscape orientation, usually 16:9
-- `tablet_portrait`
-- `tablet_landscape`
-- later: `web_desktop`, `tv`, `print/export`
-
-### Album-level presentation profiles
-
-In the future, an album may define:
-
-- which presentation profiles it supports;
-- which profile is the primary/default one;
-- fallback behavior if the current device does not match any profile;
-- preferred profile order;
-- frame fitting behavior:
-    - `fit`
-    - `fill`
-    - `crop`
-    - `show surrounding canvas`
-    - `blurred backdrop`
-
-Example future model:
-
-```kotlin
-data class AlbumPresentationSettings(
-    val supportedProfiles: List<PresentationProfile>,
-    val defaultProfileId: PresentationProfileId,
-    val fallbackMode: PresentationFallbackMode
-)
-```
-
-### Frame-level presentation profiles
-
-In the future, a frame may define:
-
-- in which presentation profiles it is visible;
-- profile-specific camera/crop/transform;
-- profile-specific object visibility;
-- later, multiple presentation shots for a single logical frame.
-
-Example future model:
-
-```kotlin
-data class FramePresentationVariant(
-    val profileId: PresentationProfileId,
-    val cameraBounds: RectWorld,
-    val visibleNodeIds: Set<NodeId>? = null,
-    val hiddenNodeIds: Set<NodeId>? = null
-)
-```
-
-### MVP decision
-
-Full presentation profile support is **not required for MVP**.
-
-For MVP, it is enough to keep frames as spatial objects on the infinite canvas:
-
-```kotlin
-Frame = rectangular scene on the infinite canvas
-```
-
-When navigating to a frame, the camera simply fits the frame into the current viewport:
-
-```kotlin
-cameraTarget = fitFrameIntoCurrentViewport(frame.bounds, viewport)
-```
-
-The important architectural rule:
-
-> Do not hardcode the assumption that a frame always matches the current device screen or aspect ratio.
-
-### Minimal future-proofing for MVP
-
-Add a small abstraction layer for camera resolution:
-
-```kotlin
-interface FrameCameraResolver {
-    fun resolveCameraTarget(
-        frame: Frame,
-        viewport: Viewport
-    ): CameraTarget
-}
-```
-
-For MVP, the resolver can be simple:
-
-```kotlin
-class DefaultFrameCameraResolver : FrameCameraResolver {
-    override fun resolveCameraTarget(
-        frame: Frame,
-        viewport: Viewport
-    ): CameraTarget {
-        return fitFrameIntoViewport(frame.bounds, viewport)
-    }
-}
-```
-
-Later, this resolver can use presentation profiles without changing the core navigation flow.
-
-Optional lightweight fields for future compatibility:
-
-```kotlin
-enum class FrameFitMode {
-    FIT,
-    FILL,
-    CUSTOM_CAMERA // future
-}
-
-enum class FrameAspectHint {
-    FREE,
-    CURRENT_SCREEN,
-    PHONE_PORTRAIT_9_16,
-    LANDSCAPE_16_9,
-    TABLET_4_3,
-    SQUARE_1_1
-}
-```
-
-Current recommendation:
-
-- Do **not** implement full profiles in MVP.
-- Do keep the architecture open for them.
-- Do not bind frame geometry to a specific device screen.
-- Do version the scene graph so profiles can be added later.
+> This file is for **unresolved** design questions only. Reconciled topics live in `docs/architecture/`.
+>
+> Recently graduated out of this file:
+> - Presentation profiles → `docs/architecture/presentation-profile.md` (per-frame multi-profile variants captured in § 9 / § 11 Deferred).
+> - Long-press context menu + selection rules → `docs/architecture/context-menu.md` (status: proposal, not yet implemented).
+> - Appearance / overlays / frame decoration separation → `docs/architecture/appearance.md` + `docs/architecture/media-appearance.md`.
+> - Mask as a first-class concept distinct from crop → `docs/architecture/appearance.md § 12` (status: proposal, not yet implemented). Resolves to `clip: ClipShape` + `alphaMask: AlphaMask?` as separate composable fields; image / gradient / procedural mask sources.
+> - Long-press context-menu proposal *committed* → `docs/todo.md § 15` (implementation scheduled, including the `AddNodeToSelection` gesture-rule rewrite as the first slice in § 15.4).
 
 ---
 
-## 2. UI Editing Redesign Is Becoming Necessary
+## 1. Tablet vs. phone editor split
 
-The current editing UI based mostly on bottom sheets feels insufficient for serious editing.
+Currently the editor relies almost entirely on bottom sheets. That ceiling is fine for viewing and quick edits but not for serious composition. The likely answer is two different surfaces with shared content composables underneath, plus a refactor of the existing monolithic `MediaAppearanceBottomSheet` into per-concept editors.
 
-The product likely needs two different editing approaches:
+### 1.1 Tablet-first full editor
 
-1. **Tablet-first full editor**
-2. **Phone-compatible quick editor**
+Direction: IDE / Figma / Miro-style workspace, canvas central, tools and inspectors around it.
 
-The tablet should be the primary target for full album editing.
-
-The phone should support viewing, quick edits, and contextual actions, but should not try to replicate the full tablet workspace.
-
----
-
-## 3. Tablet Editing UI
-
-The tablet UI should move toward an IDE/Figma/Miro-style editor.
-
-Possible panels:
+Candidate panels:
 
 - Media Library
 - Frame Navigator
 - Properties Panel
-- History / Undo-Redo
+- History / Undo–Redo
 - Appearance Editor
 - Selection Tools
 - Background Editor
-- Layers, later
 - Frame Settings
+- Layers (post §13)
 
-The tablet UI may use:
+Panel mechanics to decide:
 
-- docked panels;
-- floating panels;
-- collapsible side panels;
-- tabbed panel groups;
-- customizable workspace layout.
+- docked vs. floating vs. collapsible vs. tabbed groups;
+- whether layout is customizable per user;
+- which panels are open by default per device class.
 
-The canvas remains the central editing surface, while tools and inspectors live around it.
+### 1.2 Phone-compatible quick editor
 
----
+Direction: lightweight, contextual, no large permanent panels.
 
-## 4. Phone Editing UI
-
-The phone UI should remain lightweight and contextual.
-
-The phone is mainly for:
-
-- viewing albums;
-- quick media adding;
-- simple object edits;
-- contextual actions;
-- simple selection operations;
-- quick frame creation or navigation.
-
-The phone should avoid large permanent panels.
-
-Instead, it may use:
+Surfaces:
 
 - floating action buttons;
-- contextual popups near the finger;
+- contextual popups near the finger (covered by `context-menu.md`);
 - compact menus;
-- bottom sheets only for deeper editing forms;
+- bottom sheets reserved for deeper editing forms only;
 - clean full-screen viewing mode.
 
-Important conclusion:
+Conclusion: bottom sheets should not be the only editing mechanism. Primary object actions should live in the context menu (`context-menu.md`), with bottom sheets only for forms that need real estate (media editor with picker UI).
 
-> Bottom sheets should not be the only editing mechanism. Primary object actions should likely be available through contextual popup menus.
+### 1.3 Per-concept editor popups
 
----
+The current `MediaAppearanceBottomSheet` is a single sheet covering every field (opacity / cornerRadius / crop / color adjustments / border / shadow / overlays / frame decoration / caption). The proposed direction is to split it into ~9 per-concept content composables — one per concept — wrappable as:
 
-## 5. Current Gesture Logic
+- **Popup** (phone): launched from the context menu, modal, opened near the touch point.
+- **Panel section** (tablet): stacked inside a docked Properties Panel; all visible at once.
+- **Sheet section** (legacy): the existing bottom sheet stays as a "show everything" wrapper if a power-user surface is wanted.
 
-The current selection behavior should be respected.
+Settled design points (confirmed 2026-05-18):
 
-### Short tap
+- **Modal popups.** Canvas underneath is non-interactive while a popup is open. Simpler implementation, no concurrent gesture handling.
+- **Compound undo per popup session.** Open a `commandSessionId` when the popup opens, dispatch live actions tagged with it, finalize as one `Compound` undo entry on close. Lines up with how brush-stroke / drag commands group today.
+- **Nested popups within a single editor.** A border popup can open a color picker which can open an asset picker — drilling down within the same editor is fine.
+- **Cross-editor switching closes.** Clicking "Edit shadow" from the context menu while "Edit border" is open closes border, opens shadow — popups do not stack across editors.
+- **Same content composable, different wrappers.** Tablet Properties Panel shows the editor stacked vertically; phone popup shows the same editor in single-focus mode. Same MVVM, different layout wrapper.
 
-A short tap changes/replaces the current selection.
+### 1.4 Open questions
 
-Example:
-
-```text
-Short tap on object A -> object A becomes the selected object.
-Short tap on object B -> selection moves from A to B.
-```
-
-### Long tap + drag
-
-Long tap followed by drag creates a selection area.
-
-This is used for selecting multiple objects on the canvas.
-
-### Long tap on object
-
-If the user long-taps an object:
-
-- if there is one object under the finger, it is added to the current selection;
-- if there are multiple objects under the finger, an overlap picker is shown so the user can choose which objects to add to the selection.
-
-This is important because long tap is already part of the selection system.
-
-Therefore, contextual menus should appear **after the selection action is resolved**, not before it.
+- Do we ship the phone editor and tablet editor as one codebase with a `WindowSizeClass` switch in the IDE shell, or as two feature modules sharing `feature/canvas` + domain?
+- What is the minimal phone editor scope for MVP — viewing + add media + context-menu actions, with no panel surface at all?
+- When the tablet panel system lands, does it replace the current `IdeUiState.panels` model or extend it?
+- File layout — does `feature/<name>/ui/popups/` become a new directory parallel to `content/panels/sheets/`?
 
 ---
 
-## 6. Context Menu Principle
+## 2. Multi-selection appearance editing
 
-The context menu should be based on the **current selection**, not only on the object under the finger.
+`appearance.md` describes the single-object case clearly but does not specify what `Edit common appearance` means on a multi-selection (`context-menu.md § 4.4`).
 
-Flow:
+Open questions:
 
-1. User long-taps an object.
-2. Selection is created or updated.
-3. A contextual popup appears near the finger or selected object.
-4. The menu content depends on the selection type.
-
-Selection types:
-
-- no selection;
-- single media object selected;
-- single frame selected;
-- multiple objects selected;
-- mixed selection: media + frames.
+- For a homogeneous selection (all media, or all frames), shared fields (border, shadow, clip, opacity, alphaMask) should edit as a group with **indeterminate** state for fields that differ across selected nodes. What's the editor's representation of "indeterminate"?
+- For a mixed selection (media + frames), do we (a) show only the intersection of editable fields (`opacity`, `clip`, `alphaMask`, `border`, `shadow` — the `NodeAppearance` base), (b) split into a media tab + frame tab, or (c) disallow the menu item and require homogeneous selection?
+- Type-specific fields — `MediaAppearance.overlays` vs. `FrameAppearance.contentOverlays` — are they editable in multi-edit at all? The semantics differ (per-object vs. container-level), so a unified "add overlay to all" is conceptually wrong for mixed selections.
+- How do appearance presets (post-MVP, `media-appearance.md`) interact with multi-edit? Apply same preset to all? Apply per-type presets?
 
 ---
 
-## 7. Context Menu Use Cases
-
-### Case 1: Nothing is selected + long tap on a single media object
-
-Result:
-
-- the media object becomes selected;
-- a contextual popup appears.
-
-Possible actions:
-
-- `Edit media`
-- `Edit appearance`
-- `Edit mask / crop`
-- `Add / edit overlay`
-- `Edit border`
-- `Edit shadow`
-- `Replace media`
-- `Duplicate`
-- `Delete`
-
-### Case 2: Nothing is selected + long tap on a frame
-
-Result:
-
-- the frame becomes selected;
-- a contextual popup appears.
-
-Possible actions:
-
-- `Edit frame`
-- `Edit frame appearance`
-- `Edit frame background`
-- `Navigate to frame`
-- `Create / edit frame contents`
-- `Duplicate frame`
-- `Delete frame`
-
-### Case 3: One object is selected + long tap on another object
-
-Result:
-
-- the second object is added to the current selection;
-- selection becomes a multi-selection;
-- a group context menu appears.
-
-Possible actions:
-
-- `Edit common appearance`
-- `Create frame around selection`
-- `Align`
-- `Distribute`
-- `Duplicate selection`
-- `Delete selection`
-- `Clear selection`
-
-### Case 4: One object is selected + long tap on the same object
-
-Result:
-
-- the selection stays the same;
-- a context menu for that object appears.
-
-For media:
-
-- `Edit media`
-- `Edit appearance`
-- `Edit mask / crop`
-- `Add / edit overlay`
-- `Replace media`
-- `Duplicate`
-- `Delete`
-
-For frame:
-
-- `Edit frame`
-- `Edit frame appearance`
-- `Edit frame background`
-- `Navigate to frame`
-- `Duplicate frame`
-- `Delete frame`
-
-### Case 5: Multiple objects are selected + long tap on a new object
-
-Result:
-
-- the new object is added to the current selection;
-- the group context menu appears.
-
-Possible actions:
-
-- `Edit common appearance`
-- `Create frame around selection`
-- `Align`
-- `Distribute`
-- `Duplicate selection`
-- `Delete selection`
-- `Clear selection`
-
-### Case 6: Multiple objects are selected + long tap on an object already inside the selection
-
-Result:
-
-- the selection remains unchanged;
-- the group context menu appears.
-
-Possible actions:
-
-- `Edit common appearance`
-- `Create frame around selection`
-- `Remove this object from selection`
-- `Edit this object only`
-- `Duplicate selection`
-- `Delete selection`
-- `Clear selection`
-
----
-
-## 8. Important Group Action: Create Frame Around Selection
-
-When multiple objects are selected, the context menu should include:
-
-```text
-Create frame around selection
-```
-
-Behavior:
-
-- calculate the bounding box of all selected objects;
-- create a new frame around that bounding box;
-- add configurable padding;
-- assign a default title;
-- optionally assign a default frame color;
-- after creation, the new frame may become selected;
-- objects will belong to the frame through the normal frame/object intersection logic.
-
-This is a very natural workflow:
-
-```text
-Add photos -> arrange them -> select them -> create frame around selection
-```
-
-This action should probably be included fairly early, because it makes frame creation feel much more practical.
-
----
-
-## 9. Appearance, Masking, and Overlays
-
-We need to separate three related ideas:
-
-1. Appearance
-2. Mask / masking
-3. Overlay
-
-### Appearance
-
-Appearance is the general visual style of an object.
-
-It may include:
-
-- border;
-- border radius;
-- shadow;
-- opacity;
-- background color;
-- frame color;
-- blend mode, later;
-- visual preset/style.
-
-### Mask / masking
-
-A mask controls **which part of the object is visible**.
-
-Examples:
-
-- crop;
-- rounded rectangle clipping;
-- circle or oval mask;
-- custom shape mask;
-- clipping inside a frame;
-- hiding part of an image.
-
-Masking answers the question:
-
-> Which part of the object should be shown, and which part should be hidden?
-
-### Overlay
-
-An overlay is **something placed visually on top of an object**.
-
-Examples:
-
-- film dust and scratches;
-- paper texture;
-- watercolor wash;
-- vignette;
-- color tint;
-- decorative frame;
-- semi-transparent pattern;
-- visual aging effect.
-
-Overlay answers the question:
-
-> What should be visually added on top of this object?
-
----
-
-## 10. Context Menu Actions for Visual Editing
-
-For one or more selected objects, context menus should support visual editing actions.
-
-Possible actions:
-
-- `Edit appearance`
-- `Edit border`
-- `Edit shadow`
-- `Edit mask`
-- `Add / edit overlay`
-- `Remove overlay`
-- `Reset appearance`
-
-For multi-selection, these actions should apply to all selected compatible objects.
-
-Examples:
-
-- add the same border to several photos;
-- apply the same overlay to several media objects;
-- set the same corner radius;
-- apply the same shadow;
-- reset appearance for a group.
-
-The appearance editor should therefore support:
-
-- single-object editing;
-- multi-object editing;
-- mixed selection with partial/indeterminate values.
-
----
-
-## 11. Suggested Near-Term Direction
-
-### Post-MVP / future architecture
-
-Keep presentation profiles as a future feature:
-
-- album-level supported profiles;
-- default profile;
-- profile-specific frame visibility;
-- profile-specific camera crop/transform;
-- later: logical frames and presentation shots.
-
-Do not implement full profile editing in MVP.
-
-### Near-term UI work
-
-Prioritize restructuring the editing UI:
-
-- tablet: panel-based editor;
-- phone: contextual popup actions + floating buttons;
-- preserve current long-tap selection logic;
-- show context menu after selection is resolved;
-- make the context menu depend on selection type;
-- add `Create frame around selection`;
-- separate appearance, mask, and overlay editing.
-
----
-
-## 12. Key Product Decision
-
-The product should not try to dynamically reflow spatial canvas content for every device during MVP.
-
-Instead:
-
-```text
-MVP:
-Frame = spatial scene on the infinite canvas.
-Navigation = fit frame into current viewport.
-
-Future:
-Presentation profiles define how the same album/frame is viewed on different devices.
-```
-
-This keeps MVP manageable while leaving a clean path toward phone/tablet-specific presentation behavior later.

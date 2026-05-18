@@ -22,6 +22,8 @@ sealed class NodeAppearance {
 
 `NodeAppearance` carries only the four properties that mean the same thing on every node: opacity of the node's own surface, corner rounding of the node's rectangle, border drawn on the node's rectangle, drop shadow cast by the node's rectangle.
 
+> **Proposed evolution.** `cornerRadius: Float` will be replaced by two new fields — `clip: ClipShape` (geometric clip; supersedes rounded-rect corner radius, adds ellipse and per-corner radii) and `alphaMask: AlphaMask?` (continuous-alpha mask: image, linear gradient, radial gradient, procedural). See [§ 12 — Proposed: clip + alphaMask](#12-proposed-evolution--clip--alphamask). Not yet implemented; the model below describes shipped state.
+
 `NodeAppearance` **intentionally does not** have a generic `overlay` field. See [§5 — Why no generic overlay](#5-why-no-generic-overlay-on-the-base).
 
 ---
@@ -320,3 +322,199 @@ Still pending (each has its own todo entry under [§ 20](../todo.md#20-appearanc
 > `FrameAppearance.contentOverlays` are container/content-level overlays.
 > Both are `List<OverlayStyle>` with declaration-order compositing.
 > They share the element type. They are not the same field.
+
+---
+
+## 12. Proposed evolution — `clip` + `alphaMask`
+
+> **Status — proposal.** Not yet implemented. Replaces `NodeAppearance.cornerRadius: Float`. Migration is a one-shot read-time lift in `SceneGraphSerializer`; no runtime feature flag.
+
+### 12.1 Why two fields, not one
+
+`cornerRadius` answers a single question: "give the node's rectangle rounded corners." A general visibility model needs to answer two questions, and they have different costs:
+
+1. **What shape is the rendered output clipped to?** (Binary on/off per pixel — `clipRect` / `clipPath`. Cheap.)
+2. **What continuous alpha is applied within that shape?** (0..1 per pixel — requires an offscreen compositing layer with `BlendMode.DstIn`. Expensive.)
+
+A unified field would conflate the cheap geometric case (picking `Ellipse` for a circular photo) with the expensive continuous case (adding a vignette mask) — easy to confuse, easy to accidentally upgrade rendering cost. Keeping them as separate fields means the geometric path never pays for an offscreen layer, and the alpha path is an explicit second knob that composes on top: clip first, then alpha mask operates within the clipped region.
+
+### 12.2 Model
+
+```kotlin
+@Serializable
+sealed class NodeAppearance {
+    abstract val opacity: Float
+    abstract val clip: ClipShape           // default = RoundedRect(0); supersedes cornerRadius
+    abstract val alphaMask: AlphaMask?     // null = no alpha mask (default)
+    abstract val border: BorderStyle?
+    abstract val shadow: ShadowStyle?
+}
+
+@Serializable
+sealed class ClipShape {
+    @Serializable @SerialName("RoundedRect")
+    data class RoundedRect(val cornerRadius: Float = 0f) : ClipShape()
+
+    @Serializable @SerialName("PerCornerRoundedRect")
+    data class PerCornerRoundedRect(
+        val topLeft: Float = 0f,
+        val topRight: Float = 0f,
+        val bottomRight: Float = 0f,
+        val bottomLeft: Float = 0f,
+    ) : ClipShape()
+
+    @Serializable @SerialName("Ellipse")
+    data object Ellipse : ClipShape()
+}
+
+@Serializable
+data class AlphaMask(
+    val source: AlphaMaskSource,
+    val invert: Boolean = false,           // flip "white = opaque" ↔ "white = transparent"
+)
+
+@Serializable
+sealed class AlphaMaskSource {
+    @Serializable @SerialName("Image")
+    data class Image(
+        val maskRefId: String,                              // FK to media_library — reuses existing table
+        val channel: MaskChannel = MaskChannel.Luminance,   // Luminance: BW PNG; Alpha: transparent PNG
+        val fitMode: MaskFitMode = MaskFitMode.Stretch,
+    ) : AlphaMaskSource()
+
+    @Serializable @SerialName("LinearGradient")
+    data class LinearGradient(
+        val angleDeg: Float = 0f,                           // 0 = left→right, 90 = top→bottom
+        val stops: List<GradientStop>,
+    ) : AlphaMaskSource()
+
+    @Serializable @SerialName("RadialGradient")
+    data class RadialGradient(
+        val centerX: Float = 0.5f,                          // 0..1 relative to bounds
+        val centerY: Float = 0.5f,
+        val radiusX: Float = 0.5f,                          // 0..1 relative to bounds.width
+        val radiusY: Float = 0.5f,                          // 0..1 relative to bounds.height
+        val stops: List<GradientStop>,
+    ) : AlphaMaskSource()
+
+    @Serializable @SerialName("Procedural")
+    data class Procedural(val pattern: ProceduralPattern) : AlphaMaskSource()
+}
+
+@Serializable
+data class GradientStop(
+    val position: Float,    // 0..1
+    val alpha: Float,       // 0..1 (the mask value at this stop)
+)
+
+@Serializable enum class MaskChannel { Luminance, Alpha }
+@Serializable enum class MaskFitMode { Stretch, Fit, Fill }
+```
+
+`AlphaMaskSource` deliberately mirrors `OverlaySource` (see [§ 7.1](#71-overlaystyle)). The shape — sealed `source` discriminator with Image / Gradient / Procedural variants — is the third place in the codebase using this pattern (`BackgroundData`, `OverlaySource`, `AlphaMaskSource`). `ProceduralPattern` is the **same** sealed type already used by overlays and backgrounds (see [background.md § Procedural Patterns](background.md#procedural-patterns)) — the mask renderer extracts luminance from the rendered pattern. No new procedural type.
+
+`MaskChannel` is meaningful only for `Image` sources. Gradients specify alpha directly via `GradientStop`; procedural patterns produce grayscale that the renderer reads as alpha.
+
+### 12.3 MVP variants and cost
+
+| Combination | Renderer | Cost |
+|---|---|---|
+| `clip = RoundedRect(0)`, no alphaMask | `clipRect` | Free — same as today |
+| `clip = RoundedRect(r > 0)`, no alphaMask | `clipPath(addRoundRect)` | Cheap — same as today |
+| `clip = PerCornerRoundedRect(...)`, no alphaMask | `clipPath(addRoundRect)` with per-corner ctor | Cheap |
+| `clip = Ellipse`, no alphaMask | `clipPath(addOval)` | Cheap |
+| Any clip + `alphaMask.LinearGradient` / `RadialGradient` | Offscreen layer + `Brush.*Gradient` + `BlendMode.DstIn` | One layer per node, no asset load |
+| Any clip + `alphaMask.Image` | Offscreen layer + bitmap (Coil) + `BlendMode.DstIn` | One layer + asset load |
+| Any clip + `alphaMask.Procedural` | Offscreen layer + procedural pattern render + `BlendMode.DstIn` | One layer, no asset load |
+
+The fast path (no alphaMask) is unchanged from today. Offscreen-layer cost is the floor for any non-binary alpha and only paid when `alphaMask != null`.
+
+### 12.4 Renderer
+
+`CanvasRenderer.kt:465` `withRoundedClip` becomes `withClipAndMask`:
+
+```kotlin
+private inline fun DrawScope.withClipAndMask(
+    bounds: Rect, clip: ClipShape, alphaMask: AlphaMask?,
+    maskBitmap: ImageBitmap?,          // pre-resolved by the renderer for Image sources
+    block: DrawScope.() -> Unit,
+) {
+    val drawClipped: DrawScope.() -> Unit = {
+        when (clip) {
+            is RoundedRect if clip.cornerRadius == 0f -> clipRect(bounds) { block() }
+            is RoundedRect              -> clipPath(roundRectPath(bounds, clip.cornerRadius)) { block() }
+            is PerCornerRoundedRect     -> clipPath(perCornerRoundRectPath(bounds, clip)) { block() }
+            Ellipse                     -> clipPath(ovalPath(bounds)) { block() }
+        }
+    }
+    if (alphaMask == null) {
+        drawClipped()
+    } else {
+        // CompositingStrategy.Offscreen forces a layer so DstIn operates on the just-drawn node,
+        // not the canvas behind it.
+        drawIntoOffscreenLayer(bounds) {
+            drawClipped()
+            drawAlphaMask(alphaMask, bounds, maskBitmap)
+        }
+    }
+}
+
+private fun DrawScope.drawAlphaMask(mask: AlphaMask, bounds: Rect, bmp: ImageBitmap?) {
+    val brushOrBitmap = when (val s = mask.source) {
+        is Image -> /* draw bmp with optional luminance-to-alpha ColorFilter and BlendMode.DstIn */
+        is LinearGradient -> Brush.linearGradient(s.stops.toColorStops(mask.invert),
+                                                  start = startFromAngle(s.angleDeg, bounds),
+                                                  end   = endFromAngle(s.angleDeg, bounds))
+        is RadialGradient -> Brush.radialGradient(s.stops.toColorStops(mask.invert),
+                                                  center = Offset(s.centerX * bounds.width + bounds.left,
+                                                                  s.centerY * bounds.height + bounds.top),
+                                                  radius = (s.radiusX * bounds.width).coerceAtLeast(1f))
+        is Procedural    -> proceduralBrush(s.pattern, bounds)
+    }
+    /* drawRect(brush = ..., blendMode = DstIn, ...) */
+}
+```
+
+Elliptical radial gradient (`radiusX ≠ radiusY`) wraps the brush draw in `scale(1f, radiusY / radiusX)` to stretch the circular brush into an ellipse along Y. Minor extra step.
+
+`GradientStop.alpha` maps to `Color.White.copy(alpha = stop.alpha)` when building the brush — the DstIn blend uses the color's alpha channel.
+
+### 12.5 Knock-ons
+
+- **Border** — today strokes a rounded rect. With non-rect clips, the border follows the clip path (`drawPath(path, style = Stroke(...))`). Cheap. For nodes with `alphaMask != null`, the border still strokes the **clip** outline (not the mask silhouette) — image masks don't have a vector outline to stroke.
+- **Shadow** — built from the clip path's outline, blurred via `BlurMaskFilter`. For image/procedural alpha masks, the shadow uses the clip rect (no silhouette extraction in MVP). Users can disable shadow when it looks wrong; silhouette shadows are post-MVP.
+- **Hit-test** — stays AABB. Tapping a pixel that the mask hides should still select the node. Mask is purely visual.
+- **LOD** — at `Preview` / `Simplified` tiers, drop the offscreen layer entirely and render the unmasked node. Alpha mask only at `Full` tier. Same dropout pattern as overlays.
+- **Mask asset storage** — `Image.maskRefId` is the same FK type as `Media.mediaRefId`. Reuses `media_library`; no new table.
+- **Mask asset loading** — Coil through `SingletonImageLoader.execute(request)` with `allowHardware(false)`, keyed on `maskRefId`. Same path as overlay textures and frame-decoration assets.
+- **`MediaAppearance.crop` is unaffected.** Crop selects source pixels; clip + alphaMask shape the output. They compose: crop first, clip second, alphaMask third.
+
+### 12.6 Migration
+
+Legacy JSON `{ "cornerRadius": 12.0, ... }` lifts on read in `SceneGraphSerializer` to `{ "clip": { "type": "RoundedRect", "cornerRadius": 12.0 }, ... }`. Same pattern as the existing `Frame.background → appearance.background` migration described in [data-model.md § Migration Notes](data-model.md#migration-notes).
+
+After migration, `cornerRadius: Float` is removed from `NodeAppearance`, `MediaAppearance`, `FrameAppearance`, and the renderer. No deprecated alias.
+
+### 12.7 Editor UX
+
+Lines up with the proposed per-concept popup direction (see [to_discuss.md § 1](../to_discuss.md#1-tablet-vs-phone-editor-split)):
+
+- `Edit clip shape` popup — shape picker (RoundedRect / PerCornerRoundedRect / Ellipse) with conditional sub-fields (uniform radius vs. four per-corner radii vs. nothing).
+- `Edit alpha mask` popup — source picker (Image / LinearGradient / RadialGradient / Procedural) with per-source sub-editors:
+  - `Image` → asset thumbnail picker from media library, channel toggle, fit-mode dropdown.
+  - `LinearGradient` → angle dial, stops list (add / remove / drag positions, alpha sliders).
+  - `RadialGradient` → center XY sliders, radiusX/radiusY sliders, stops list.
+  - `Procedural` → reuse `ProceduralPatternEditor.kt` (already exists for backgrounds/overlays).
+  - `invert` checkbox at the top level.
+
+Both popups use the shared content composable pattern (`feature/<name>/ui/content/`), wrappable as panel section (tablet) or popup (phone).
+
+### 12.8 Implementation order
+
+1. **Model + serializer migration.** Add `ClipShape`, `AlphaMask`, `AlphaMaskSource`, `GradientStop`, `MaskChannel`, `MaskFitMode` to `domain/model/`. Replace `cornerRadius` on the three appearance classes. Add migration lift in `SceneGraphSerializer`. Behavior-preserving — existing albums look identical.
+2. **Geometric clip variants.** `Ellipse` and `PerCornerRoundedRect` rendering (cheap clip-path calls). Editor: shape picker. No alpha mask yet.
+3. **Gradient alpha masks.** `LinearGradient` and `RadialGradient` — offscreen layer + brush draw with DstIn. Editor: gradient stops editor. The cheap procedurals: no asset loading.
+4. **Image alpha mask.** Coil-loaded bitmap + DstIn. Editor: asset picker, channel toggle.
+5. **Procedural alpha mask.** Reuse `ProceduralPattern` + `ProceduralPatternEditor.kt`.
+6. **Border / shadow path-aware rendering.** Stroke the clip path instead of a hardcoded rounded rect.
+7. **LOD dropout.** Skip offscreen layer below `Full` tier.

@@ -468,19 +468,33 @@ Guidelines are **editor metadata, not `CanvasNode`**. They belong to the Guideli
 
 ## 15. Context Menu
 
-Distinct from `ContextualActionBar` — the action bar is persistent on selection; the context menu is transient on long-press.
+Distinct from `ContextualActionBar` — the action bar is persistent on selection; the context menu is transient on long-press. Full design in [context-menu.md](architecture/context-menu.md) (committed 2026-05-18; pending implementation).
 
 ### 15.1 Edit mode
 - [ ] Long-press on a node → context menu popover at touch point
-- [ ] Initial actions: Delete, Duplicate, Edit, Move to Layer (post §13.2), Bring Forward / Send Backward
+- [ ] Menu model: `(selection, anchorNodeId, anchorPosScreen)`. Selection-scoped items + anchor-scoped items per [context-menu.md § 2](architecture/context-menu.md#2-menu-model)
+- [ ] Single-media menu: Edit media / Edit appearance / Edit mask / crop (split into clip + alpha mask + crop when §1.3 popup direction lands) / Edit overlay / Replace media / Duplicate / Delete
+- [ ] Single-frame menu: Edit frame / Edit frame appearance / Navigate to frame / Edit frame contents (post-MVP) / Duplicate frame / Delete frame
+- [ ] Group menu (selection ≥ 2): Edit common appearance / Create frame around selection / Align / Distribute / Duplicate / Delete / Clear selection
+- [ ] Anchor-scoped items (selection ≥ 2, anchor in selection): Remove this from selection / Edit this only
 - [ ] Long-press on empty space → context menu with Add Photo / Add Frame / Add Text / Paste / Add Guideline
 
 ### 15.2 View mode
 - [ ] Long-press on media → viewer menu (Open / Share / Info)
 - [ ] Long-press on frame → frame menu (Focus / Open as Album View)
 
-### 15.3 Conflict with current long-press semantics
-- Today long-press = toggle selection or rect-select start ([selection.md § 2](architecture/selection.md#2-gesture-mapping)). Context menu replaces single-node long-press; rect-select start still fires on empty space + drag.
+### 15.3 Conflict with current long-press semantics — resolved
+- Today long-press = toggle selection ([selection.md § 2](architecture/selection.md#2-gesture-mapping)). Decision: long-press becomes **add-or-keep + open menu on UP**; the "remove this from selection" intent moves into the menu's anchor-scoped items. See §15.4.
+
+### 15.4 Gesture rule rewrite (lands first, before the popover)
+Pure-gesture slice that verifies the rule shift in isolation. Behavior-preserving for empty-selection users; replaces "long-press = toggle off" with "long-press = add-or-keep" for non-empty selection.
+
+- [ ] `CanvasAction.AddNodeToSelection(nodeId: String)` — idempotent; `selection - {nodeId}` if absent, no-op if already in. Replaces `ToggleNodeSelection` as the long-press dispatcher.
+- [ ] `ToggleNodeSelection` stays in the codebase as the implementation of the future menu's "Remove this from selection" item; no gesture dispatches it.
+- [ ] `tapAndLongPressGestures` Layer 2 (`feature/canvas/gestures/`) — long-press handler dispatches `AddNodeToSelection(hit.id)` on Phase 1; UP after no drag dispatches `OpenContextMenu(...)` (stubbed initially)
+- [ ] Overlap picker switches from `SelectNode` (replace) to `AddNodeToSelection` (add). Closes [selection.md § 6](architecture/selection.md#6-open-issues) open issue.
+- [ ] Update `selection.md § 2` long-press row to **Add-or-keep**; remove `ToggleNodeSelection` from the dispatcher list.
+- [ ] Update `selection.md § 6` to remove the resolved overlap-picker bullet.
 
 ---
 
@@ -529,6 +543,32 @@ Extends [§4.7 Media adding & editing](#47-media-adding--editing) (single-photo 
 ### 17.3 UI
 - [ ] Layout toolbar in `CanvasTopBar` (Edit mode only)
 - [ ] Buttons disabled when selection size insufficient
+
+---
+
+## 18. Create Frame Around Selection
+
+See [context-menu.md § 5](architecture/context-menu.md#5-create-frame-around-selection-net-new-action). Independent of the rest of the context-menu redesign — can ship on `ContextualActionBar` first.
+
+### 18.1 Pure function
+- [ ] `core/math/FrameAroundSelection.kt` — pure function, not a use case class
+- [ ] `fun frameAroundSelection(transforms: List<Transform>, padding: Float): Transform` — AABB of `renderW / renderH` (rotated nodes use AABB; same rule as `AlignDistribute`), inflated by `padding`
+
+### 18.2 Action wiring
+- [ ] `CanvasAction.CreateFrameAroundSelection(padding: Float)`
+- [ ] Requires 1+ selected node (1 selected = padded frame around single node; useful for "frame this photo")
+- [ ] Build `CanvasNode.Frame` at the computed rect with default title + default `FrameAppearance`
+- [ ] Z-order: insert below the contents so members render above the frame background
+- [ ] Members attach via geometric containment (no explicit wiring) — see [frame-membership.md](architecture/frame-membership.md)
+- [ ] After creation, selection becomes the new frame
+- [ ] One `Compound` undo entry per command (depends on §2)
+
+### 18.3 UI
+- [ ] Button in `ContextualActionBar` (visible when selection size ≥ 1)
+- [ ] Migrate into context menu when §15 lands (group-actions section)
+
+### 18.4 Open
+- [ ] `framePadding` default — world-unit constant or derived from selection bounds?
 
 ---
 
@@ -742,6 +782,46 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 MVP-adjacent: shared `NodeAppearance` base + `OverlayStyle` value type; `MediaAppearance` with opacity, crop (Fit/Fill/Manual), cornerRadius, border, shadow, `overlays: List<OverlayStyle>` (1–2 entries common), `frameDecoration` (Stretch), copy/paste appearance, save as preset, ResetAppearance; `FrameAppearance` with migrated `background` field plus an empty default `contentOverlays` list (model only; layered rendering can land later).
 Post-MVP: layered frame renderer (`FrameAppearance.contentOverlays`), additional `NodeBlendMode` values, NineSlice decoration, parametric color adjustments, rendered derivatives, `FrameContentEffect`, animated overlays.
 
+### 20.6 Clip + alpha mask (replaces `cornerRadius`)
+
+See [appearance.md § 12](architecture/appearance.md#12-proposed-evolution--clip--alphamask). Status: proposal. Replaces `NodeAppearance.cornerRadius: Float` with two composable fields — `clip: ClipShape` (geometric) and `alphaMask: AlphaMask?` (continuous).
+
+#### 20.6.1 Domain model
+- [ ] `ClipShape` sealed — `RoundedRect(cornerRadius)`, `PerCornerRoundedRect(tl, tr, br, bl)`, `Ellipse`
+- [ ] `AlphaMask(source, invert)` data class
+- [ ] `AlphaMaskSource` sealed — `Image(maskRefId, channel, fitMode)`, `LinearGradient(angleDeg, stops)`, `RadialGradient(centerX, centerY, radiusX, radiusY, stops)`, `Procedural(pattern: ProceduralPattern)` — `ProceduralPattern` reused from §19
+- [ ] `GradientStop(position, alpha)`, `MaskChannel { Luminance, Alpha }`, `MaskFitMode { Stretch, Fit, Fill }` enums
+- [ ] Replace `cornerRadius: Float` on `NodeAppearance` / `MediaAppearance` / `FrameAppearance` with `clip: ClipShape` (default `RoundedRect(0)`) + `alphaMask: AlphaMask?` (default `null`)
+- [ ] `SceneGraphSerializer` migration: read-time lift of legacy `cornerRadius` into `clip = RoundedRect(value)`
+
+#### 20.6.2 Renderer
+- [ ] Rename `withRoundedClip` → `withClipAndMask` in `CanvasRenderer.kt`
+- [ ] `ClipShape.RoundedRect(0)` → fast path `clipRect` (free)
+- [ ] `ClipShape.RoundedRect(r > 0)` → `clipPath(addRoundRect)` (today's behavior)
+- [ ] `ClipShape.PerCornerRoundedRect` → `clipPath(addRoundRect)` with per-corner ctor
+- [ ] `ClipShape.Ellipse` → `clipPath(addOval)`
+- [ ] `AlphaMask` path: `CompositingStrategy.Offscreen` layer + `BlendMode.DstIn` + brush/bitmap source
+- [ ] `AlphaMaskSource.LinearGradient` → `Brush.linearGradient` with stops mapped to `Color.White.copy(alpha = stop.alpha)`
+- [ ] `AlphaMaskSource.RadialGradient` → `Brush.radialGradient`; elliptical case (`radiusX != radiusY`) via `scale` transform
+- [ ] `AlphaMaskSource.Image` → Coil-loaded bitmap, optional luminance-to-alpha `ColorFilter` for `MaskChannel.Luminance`
+- [ ] `AlphaMaskSource.Procedural` → reuse `drawProceduralPattern` from §19; luminance read as alpha
+- [ ] `mask.invert` applied uniformly (color filter for image; stop reversal for gradients)
+- [ ] Border / shadow stroke the clip path (not a hardcoded rounded rect); image-masked nodes use clip rect for shadow
+- [ ] LOD: skip offscreen layer below `Full` tier
+
+#### 20.6.3 Editor UI (depends on §1.3 popup direction)
+- [ ] `ClipShapeEditor` content composable — shape picker with conditional sub-fields
+- [ ] `AlphaMaskEditor` content composable — source picker with per-source sub-editors
+- [ ] Image source picker: thumbnail browser from `media_library`, channel toggle, fit-mode dropdown
+- [ ] Gradient source picker: angle dial (linear) / center+radii (radial), stops list editor
+- [ ] Procedural source picker: reuse `ProceduralPatternEditor.kt` from §19
+- [ ] Wire into `MediaAppearanceBottomSheet` (replaces uniform-radius slider) AND popup wrappers (per §1.3)
+
+#### 20.6.4 Action wiring
+- [ ] `CanvasAction.SetClip(clip: ClipShape)` — selection-scoped
+- [ ] `CanvasAction.SetAlphaMask(mask: AlphaMask?)` — selection-scoped
+- [ ] Compound undo entry per popup session (open `commandSessionId` on popup open, finalize on close)
+
 ### Post-MVP
 - [ ] Layered frame renderer + `FrameAppearance.contentOverlays` rendering
 - [ ] `FrameAppearance.contentEffect` — off-screen filter pass (sepia / blur / grayscale of rendered frame contents)
@@ -749,7 +829,8 @@ Post-MVP: layered frame renderer (`FrameAppearance.contentOverlays`), additional
 - [ ] Animated overlays (Live Photo / Harry Potter newspaper style)
 - [ ] Batch preset application across selection or entire album
 - [ ] Batch rendering
-- [ ] Advanced masks (non-rectangular crop)
+- [ ] Silhouette-aware shadow for image/procedural alpha masks (extract outline from mask alpha)
+- [ ] Vector polygon / SVG path masks (additional `AlphaMaskSource` or `ClipShape` variants)
 - [ ] Caption styling (`CaptionStyle` field)
 
 ---

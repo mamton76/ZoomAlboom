@@ -85,6 +85,8 @@ data class FramePresentationOverride(
 
 Effective fit mode for a frame: `frame.presentation?.fitMode ?: album.profile.defaultFitMode`.
 
+`FramePresentationOverride` is a **single** override against the album's primary profile. The richer per-frame model — a list of variants keyed by profile ID, each with its own camera bounds (and possibly its own crop / transform / visibility) — is deferred. See § 9 and § 11.
+
 ## 3. Persistence
 
 `AlbumPresentationProfile` lives in the **scene graph JSON root** alongside `albumBackground` (§1.3 + §19 work).
@@ -219,6 +221,7 @@ View mode (§12) is the primary consumer. Until presentation profile lands, View
 
 - **Frame aspect lock on resize.** Decision 2 says new frames default to album ratio; decision 3 says frames stay free-ratio. Resize gestures therefore **don't** lock to the ratio — the album ratio is only the *initial* shape. Confirm before implementation.
 - **Multiple profiles.** Decision 1 mentions a *primary* profile, implying secondary profiles may exist. MVP stores one profile (the primary). Multi-profile storage and switching is post-MVP.
+- **Per-frame, per-profile variants.** Today's `FramePresentationOverride` is a single override against the primary profile. A frame may eventually need a *list* of variants keyed by `PresentationProfileId`, each carrying its own `cameraBounds` (a per-profile camera framing/crop of the same logical frame) and optional `visibleNodeIds` / `hiddenNodeIds` (so a frame can show different content on phone vs. tablet, or be hidden entirely in some profiles). The explored shape (`FramePresentationVariant`) lives in `docs/to_discuss.md § 1.2`. Unsolved; deferred. Depends on multi-profile storage landing first.
 - **Profile change → existing frames.** When the user changes album profile, existing frames are *not* touched. (No reflow per MVP scope.) Confirm.
 - **Where the "current device" comes from.** `LocalConfiguration` provides the editor's canvas pixel size — that's our "current device viewport." Whether to also show physical inches / DPI is a UX call.
 - **Settings entry point.** No "Album Settings" surface exists today. Options: TopBar menu, a new bottom sheet, or extend `PanelConfigDialog`. Probably a dedicated sheet since it's album content, not panel/IDE state.
@@ -236,9 +239,15 @@ Depends on §1.3 (scene graph root wrapper) — must land first.
 7. Per-frame override (`FramePresentationOverride`) — post-MVP.
 8. `BLURRED_BACKDROP` rendering — post-MVP.
 
-## 11. Out of Scope (Post-MVP / Never)
+## 11. Out of Scope
 
-- Adaptive layouts that rearrange nodes for different screens.
-- Multiple independent layouts per frame.
-- Smart AI recomposition.
-- Responsive behaviour beyond camera-fit at view time.
+### Deferred (post-MVP, may revisit)
+
+- **Multiple presentation profiles per album** (see § 9). MVP stores only the primary; the storage shape is intentionally compatible with later multi-profile work.
+- **Per-frame, per-profile variants** — a frame carrying different `cameraBounds` / `visibleNodeIds` per profile (see § 9 and `to_discuss.md § 1.2`). Depends on multi-profile storage landing first.
+
+### Not planned
+
+- **Adaptive layouts that rearrange nodes for different screens.** The canvas is spatial; we navigate to it, we don't reflow it.
+- **Smart AI recomposition.**
+- **Responsive behaviour beyond camera-fit at view time.**

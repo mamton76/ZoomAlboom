@@ -13,6 +13,8 @@ The same source photo can appear multiple times with different visual styles (no
 
 `MediaAppearance` is one of the two concrete `NodeAppearance` subclasses (alongside `FrameAppearance`). The shared base class, the shared `OverlayStyle` type, and the rule for *why media overlay and frame content overlay are different fields* live in [appearance.md](appearance.md). This doc covers the media-specific surface.
 
+> **Proposed evolution.** The inherited `cornerRadius: Float` will be replaced by `clip: ClipShape` + `alphaMask: AlphaMask?`. See [appearance.md § 12](appearance.md#12-proposed-evolution--clip--alphamask). Not yet implemented.
+
 ---
 
 ## MediaAppearance

@@ -1,6 +1,6 @@
 # Selection
 
-> Related: [overview](overview.md) | [coordinates](coordinates.md) | [rendering](rendering.md)
+> Related: [overview](overview.md) | [coordinates](coordinates.md) | [rendering](rendering.md) | [context-menu](context-menu.md) *(proposal — will replace § 2's long-press row when it lands)*
 
 Selection is the canvas's interaction focus — the set of nodes that group operations (move, resize, rotate, delete, duplicate) apply to. This doc covers what's selected (state), how the user changes it (gestures and actions), and the gesture-stack rules that make it work consistently across viewport changes.
 

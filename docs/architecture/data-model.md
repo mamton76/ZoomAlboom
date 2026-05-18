@@ -163,6 +163,8 @@ enum class MediaType {
 
 Non-destructive visual styling for canvas nodes. Each variant of `CanvasNode` that supports styling carries its own typed appearance container — `MediaAppearance` on `CanvasNode.Media`, `FrameAppearance` on `CanvasNode.Frame` — both extending a shared sealed `NodeAppearance` base. The base owns only properties that have the same meaning on every node (`opacity`, `cornerRadius`, `border`, `shadow`). Shared *value* types (`OverlayStyle`, `OverlaySource`, `NodeBlendMode`, `BorderStyle`, `ShadowStyle`) are defined once and reused.
 
+> **Proposed evolution.** `cornerRadius: Float` will be replaced by `clip: ClipShape` + `alphaMask: AlphaMask?` (continuous-alpha mask: image, gradient, or procedural source). See [appearance.md § 12](appearance.md#12-proposed-evolution--clip--alphamask). Not yet implemented; the model below describes shipped state.
+
 ```kotlin
 @Serializable
 sealed class NodeAppearance {

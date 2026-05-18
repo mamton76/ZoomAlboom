@@ -20,6 +20,8 @@ Source-of-truth docs:
 - `docs/architecture/navigation.md`
 - `docs/architecture/appearance.md` — shared `NodeAppearance` model, `MediaAppearance` vs `FrameAppearance`, `OverlayStyle`
 - `docs/architecture/media-appearance.md` — media-specific appearance surface (crop, color, frame decoration, presets, derivatives)
+- `docs/architecture/context-menu.md` — long-press context menu proposal; `(selection, anchor)` model. Status: proposal, not implemented.
+- `docs/architecture/presentation-profile.md` — album/frame presentation form factor
 - - `docs/architecture/decisions.md` (if present)
 - `docs/architecture/conventions.md`
 
@@ -29,7 +31,7 @@ Working memory / discovered implementation notes:
 
 Pending discussions (scratch, not source-of-truth — may overlap with or contradict architecture docs until reconciled):
 
-- `docs/to_discuss.md` — open design questions: UI editing redesign (tablet/phone split), context menus, appearance/mask/overlay separation, presentation profiles (overlaps with `docs/architecture/presentation-profile.md` — reconcile before promoting).
+- `docs/to_discuss.md` — open design questions: tablet vs. phone editor split, mask as a first-class concept distinct from crop, multi-selection appearance editing.
 
 ## How to work in this repo
 

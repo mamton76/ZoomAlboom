@@ -220,9 +220,11 @@ Replaces current FAB [+] + BottomSheet. Planned immediately after photo node add
 
 A dedicated surface for editing properties of a selected node. Today these controls live in the Contextual Action Bar (Delete / Duplicate / Edit) plus ad-hoc bottom sheets (Frame Background — §19.6). The action bar is the wrong long-term home for these — too cramped to hold label, color, background, opacity, transform readouts, tags, layer assignment, appearance preset, per-frame presentation override, etc.
 
+> **Status note (2026-05-19):** This section predates the per-concept popup decision. The phone half (`ObjectPropertiesBottomSheet`) is obsolete — phone now uses context-menu popups (`context-menu.md`) as the primary properties surface, with each concept (border, shadow, clip, alpha mask, etc.) opening its own popup. The tablet half (`ObjectPropertiesPanel`) remains the deferred tablet enhancement; see [§ 5d](#5d-tablet-properties-panel-deferred). Per-type sections below still apply — they become the panel's stacked content composables when the panel lands.
+
 ### 5c.1 Surface
-- [ ] `ObjectPropertiesPanel` — docked panel slot (right side, fits IDE panel system §6) for tablets/landscape
-- [ ] `ObjectPropertiesBottomSheet` — compact alternative for phone/portrait; opens when any node is selected
+- [ ] `ObjectPropertiesPanel` — docked panel slot (right side, fits IDE panel system §6) for tablets/landscape — **deferred**, see § 5d
+- [ ] ~~`ObjectPropertiesBottomSheet` — compact alternative for phone/portrait~~ — **obsolete**, replaced by context-menu popups (`context-menu.md`)
 - [ ] Either surface is hidden when selection is empty or in View/Presentation mode
 
 ### 5c.2 Per-type sections (drive by `CanvasNode` variant)
@@ -238,6 +240,31 @@ A dedicated surface for editing properties of a selected node. Today these contr
 - §13 layers (for "Move to Layer" control)
 - §15 context menu (long-press → "Properties" entry)
 - §20 MediaAppearance (Media section needs the appearance UI to be defined)
+
+---
+
+## 5d. Tablet Properties Panel (deferred)
+
+> **Status:** Placeholder. Decided 2026-05-19 — MVP ships popup-first for both phone and tablet (`to_discuss.md` resolved direction). Tablet docked panels are explicitly post-MVP. This entry exists so the deferred tablet work is visible in the backlog and doesn't become invisible.
+
+The tablet enhancement reuses the per-concept content composables shipped under §15 + §20.6 + popups. The panel is a wrapper that stacks them vertically; nothing in the panel is new content.
+
+### 5d.1 Surface
+- [ ] `ObjectPropertiesPanel` docked panel — right-side slot, integrates with IDE panel system (§6)
+- [ ] Visible when selection is non-empty AND a tablet-class window size is detected
+- [ ] Aggregates the per-concept content composables (`BorderEditorContent`, `ShadowEditorContent`, `ClipShapeEditorContent`, `AlphaMaskEditorContent`, `OverlayListEditorContent`, `ColorAdjustmentsEditorContent`, `CropEditorContent`, etc.) stacked vertically with collapsible sections
+- [ ] Hidden in View / Presentation modes
+
+### 5d.2 Behavior
+- [ ] Panel-mode editors share state with their popup-mode counterparts — opening a popup from the context menu while the panel is open should not cause divergent edits
+- [ ] Tablet still supports popups (e.g., from context menu) — panel is additive, not replacement
+- [ ] Compound undo grouping applies to panel sessions the same way as popup sessions
+
+### 5d.3 Open
+- [ ] `WindowSizeClass` threshold for "tablet-class" — `Expanded` width? Or based on shortest dimension?
+- [ ] Default-on or default-off on tablet?
+- [ ] Coexistence with the existing `IdeUiState.panels` model (Media Library, Frame List) — same panel system or parallel slot?
+- [ ] Reconciliation with §5c (Object Properties Panel planned) — likely §5d supersedes §5c's surface design once it lands.
 
 ---
 
@@ -709,7 +736,7 @@ Shared non-destructive styling for canvas nodes. Each variant owns its own `*App
 - `source media + MediaAppearance = rendered media object on canvas`
 - `frame rect + FrameAppearance + linked contents = rendered frame on canvas`
 
-See [appearance.md](architecture/appearance.md) for the shared model, the render-pipeline contract, and the rule that `MediaAppearance.overlays` (object-level) and `FrameAppearance.contentOverlays` (container/content-level) share the `OverlayStyle` element type but stay as separate `List<OverlayStyle>` fields.  
+See [appearance.md](architecture/appearance.md) for the shared model and the render-pipeline contract. Shipped state has `MediaAppearance.overlays` and `FrameAppearance.contentOverlays` as separate `List<OverlayStyle>` fields; the **committed direction** is to unify these onto `NodeAppearance` base as a single `overlays` field — see [§ 20.7](#207-overlay-field-unification-mediaappearanceoverlays--frameappearancecontentoverlays--baseoverlays) and [appearance.md § 13](architecture/appearance.md#13-proposed-evolution--unified-overlays-on-the-base).  
 See [media-appearance.md](architecture/media-appearance.md) for media-specific surface.  
 See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD § 11.8](product/PRD.md#118-media-appearance-non-destructive-editing) for product requirements.
 
@@ -822,8 +849,39 @@ See [appearance.md § 12](architecture/appearance.md#12-proposed-evolution--clip
 - [ ] `CanvasAction.SetAlphaMask(mask: AlphaMask?)` — selection-scoped
 - [ ] Compound undo entry per popup session (open `commandSessionId` on popup open, finalize on close)
 
+### 20.7 Overlay field unification (`MediaAppearance.overlays` + `FrameAppearance.contentOverlays` → `base.overlays`)
+
+See [appearance.md § 13](architecture/appearance.md#13-proposed-evolution--unified-overlays-on-the-base). Status: committed 2026-05-19, pending implementation. Behavior-preserving rename.
+
+#### 20.7.1 Domain model
+- [ ] Move `overlays: List<OverlayStyle>` to `NodeAppearance` base abstract; default `emptyList()`
+- [ ] Remove `MediaAppearance.overlays` declaration (keep override on the subclass)
+- [ ] Remove `FrameAppearance.contentOverlays` field; override `overlays` on the subclass
+
+#### 20.7.2 Serializer migration
+- [ ] `SceneGraphSerializer` read-time lift: when reading a `FrameAppearance`, if `contentOverlays` is present in the JSON, populate `overlays` instead
+- [ ] `MediaAppearance.overlays` already has the right name — no JSON change needed
+- [ ] Write path emits `overlays` for both subtypes; `contentOverlays` is removed from the wire format
+
+#### 20.7.3 Renderer rename
+- [ ] `buildFramePaintEvents` (`feature/canvas/view/FramePaintEvents.kt`) — read `appearance.overlays` for the layered-frame check (was `appearance.contentOverlays`)
+- [ ] `FullFrameRenderer` overlay pass — read `appearance.overlays`
+- [ ] `FullMediaRenderer` — no change (field name unchanged for media)
+- [ ] `drawOverlayStack` call sites — no change (helper takes a `List<OverlayStyle>` regardless of which field it came from)
+
+#### 20.7.4 Editor rename
+- [ ] `FrameAppearanceBottomSheet` — `OverlayListEditor` now binds to `appearance.overlays` (was `appearance.contentOverlays`)
+- [ ] `MediaAppearanceBottomSheet` — no change
+- [ ] `CanvasAction.SetFrameAppearance` / `SetMediaAppearance` payloads — already carry the whole `FrameAppearance` / `MediaAppearance`, so payload shape changes only through the model rename
+- [ ] If popup-based per-concept editors (§5d / context-menu) land first, the unified field naturally fits the unified "Edit overlays" popup
+
+#### 20.7.5 Doc cleanup (after code lands)
+- [ ] Collapse `appearance.md §§ 4–5` into a one-line historical note
+- [ ] Update `appearance.md § 6` (render pipeline), § 8 (terminology), § 10 (impl status), § 11 (short rule) to use the single `overlays` name throughout
+- [ ] Update `rendering.md § 6b` (`buildFramePaintEvents` description), `background.md § 5` (frame-overlays bullet), `data-model.md § NodeAppearance` to use the unified field
+- [ ] Remove the "proposed evolution" banner on `appearance.md` once shipped
+
 ### Post-MVP
-- [ ] Layered frame renderer + `FrameAppearance.contentOverlays` rendering
 - [ ] `FrameAppearance.contentEffect` — off-screen filter pass (sepia / blur / grayscale of rendered frame contents)
 - [ ] AI auto-enhance, background removal, old photo restoration, B&W colorization
 - [ ] Animated overlays (Live Photo / Harry Potter newspaper style)

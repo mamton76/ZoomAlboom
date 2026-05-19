@@ -101,28 +101,44 @@ Triggered by long-press on empty space *without* dragging. (Drag = rect-select, 
 
 Anchor is the same node. No anchor section needed.
 
-- `Edit media` — opens media editor (replace source, intrinsic metadata)
-- `Edit appearance` — opens [appearance](appearance.md) editor (border / shadow / radius / opacity / overlays)
-- `Edit mask / crop` — opens crop + mask editor (see [open question § 8](#8-open-issues))
-- `Edit overlay` — direct shortcut into the overlays subsection
+Per-concept popups (each opens a focused editor — `to_discuss.md`-decided popup direction):
+
+- `Edit media` — replace source, intrinsic metadata
+- `Edit clip shape` — RoundedRect / PerCornerRoundedRect / Ellipse (appearance.md § 12)
+- `Edit alpha mask` — Image / LinearGradient / RadialGradient / Procedural (appearance.md § 12)
+- `Edit overlays` — list editor for `appearance.overlays` (appearance.md § 13)
+- `Edit crop` — media-specific
+- `Edit color adjustments` — media-specific
+- `Edit border` / `Edit shadow` / `Edit opacity`
+- `Edit frame decoration` — media-specific
 - `Replace media`
-- `Duplicate`
-- `Delete`
+- `Duplicate` / `Delete`
 
 ### 4.3 `selection.size == 1` — single frame
 
-- `Edit frame` — opens frame editor (title, bounds, …)
-- `Edit frame appearance` — [`FrameAppearance`](appearance.md#3-frameappearance--containercontent-level-styling) (background, contentOverlays, border, title)
+- `Edit frame` — title, bounds, …
+- `Edit frame background` — frame-specific
+- `Edit clip shape` / `Edit alpha mask` / `Edit overlays` / `Edit border` / `Edit shadow` / `Edit opacity` — base-level concepts, same popups as in § 4.2 (different host node)
+- `Edit title style` — frame-specific
 - `Navigate to frame`
 - `Edit frame contents` — opens the frame as an editing context (post-MVP)
-- `Duplicate frame`
-- `Delete frame`
+- `Duplicate frame` / `Delete frame`
 
 ### 4.4 `selection.size >= 2` — group (any mix of media + frames)
 
-Selection-scoped:
+There is **no** "Edit common appearance" umbrella popup. The per-concept popups handle multi-selection natively (see [appearance.md § 14](appearance.md#14-multi-selection-editing)). Menu items shown:
 
-- `Edit common appearance` — multi-edit with indeterminate fields (see [open question § 8](#8-open-issues))
+Base-level concepts (always shown — work on every selected node):
+
+- `Edit clip shape` / `Edit alpha mask` / `Edit overlays` / `Edit border` / `Edit shadow` / `Edit opacity`
+
+Type-specific concepts (shown only when selection is **homogeneous** in the right type):
+
+- All-media selection → `Edit crop` / `Edit color adjustments` / `Edit frame decoration`
+- All-frame selection → `Edit frame background` / `Edit title style`
+
+Multi-only group actions:
+
 - `Create frame around selection` — see [§ 5](#5-create-frame-around-selection-net-new-action)
 - `Align` → submenu: left / center-x / right / top / middle-y / bottom
 - `Distribute` → submenu: horizontally / vertically
@@ -206,7 +222,7 @@ When this lands, update:
 ## 8. Open issues
 
 - **Mask as a first-class concept distinct from crop — resolved.** `appearance.md § 12` (proposal) splits this into two composable fields: `clip: ClipShape` (geometric — RoundedRect / PerCornerRoundedRect / Ellipse) and `alphaMask: AlphaMask?` (continuous-alpha — image / linear gradient / radial gradient / procedural source). Menu item `Edit mask / crop` accordingly splits into three concept-popups once the popup direction lands (`to_discuss.md § 1.3`): `Edit clip shape`, `Edit alpha mask`, `Edit crop`. Until then, a single `Edit mask / crop` entry stays.
-- **Multi-selection appearance editing.** `Edit common appearance` on a mixed selection (e.g. media + frame) needs a precise rule: do shared fields (border, shadow, radius, opacity) edit as a group with indeterminate state, while type-specific fields (e.g. `FrameAppearance.contentOverlays`) hide? `appearance.md` doesn't yet address multi-edit. Unresolved.
+- **Multi-selection appearance editing — resolved.** Rules captured in [appearance.md § 14](appearance.md#14-multi-selection-editing): no "Edit common appearance" umbrella; per-concept popups handle multi-edit natively; Figma-style "Mixed" label for indeterminate fields; type-specific popups gated by homogeneous selection; preset application is type-scoped.
 - **Menu dismissal interaction with rect-select.** If the menu is open and the user touches outside it, that touch should close the menu *and not* be interpreted as the start of a new rect-select drag. (Standard popover dismissal — call out so it's not skipped.)
 - **Menu position when anchor is off-screen.** When the menu is requested with an anchor that lives outside the viewport (e.g. opened via keyboard shortcut on a culled selection — post-MVP), use the on-screen projection of the selection's group rect; if that's also off-screen, anchor to the viewport center.
 

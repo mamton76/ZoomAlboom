@@ -22,7 +22,11 @@ sealed class NodeAppearance {
 
 `NodeAppearance` carries only the four properties that mean the same thing on every node: opacity of the node's own surface, corner rounding of the node's rectangle, border drawn on the node's rectangle, drop shadow cast by the node's rectangle.
 
-> **Proposed evolution.** `cornerRadius: Float` will be replaced by two new fields — `clip: ClipShape` (geometric clip; supersedes rounded-rect corner radius, adds ellipse and per-corner radii) and `alphaMask: AlphaMask?` (continuous-alpha mask: image, linear gradient, radial gradient, procedural). See [§ 12 — Proposed: clip + alphaMask](#12-proposed-evolution--clip--alphamask). Not yet implemented; the model below describes shipped state.
+> **Proposed evolution.** Two changes pending implementation:
+> - `cornerRadius: Float` → `clip: ClipShape` + `alphaMask: AlphaMask?` ([§ 12](#12-proposed-evolution--clip--alphamask)).
+> - `MediaAppearance.overlays` and `FrameAppearance.contentOverlays` collapse into a single `overlays: List<OverlayStyle>` on `NodeAppearance` base ([§ 13](#13-proposed-evolution--unified-overlays-on-the-base)). Supersedes §§ 4–5.
+>
+> The model in §§ 1–11 below describes shipped state.
 
 `NodeAppearance` **intentionally does not** have a generic `overlay` field. See [§5 — Why no generic overlay](#5-why-no-generic-overlay-on-the-base).
 
@@ -126,6 +130,8 @@ Use cases: subtle old-paper tint over every photo inside a frame; translucent wa
 
 ## 4. Why media `overlays` and frame `contentOverlays` are separate fields
 
+> **Note (2026-05-19):** This section describes the **shipped** rationale. The committed direction is to unify the two into a single `overlays: List<OverlayStyle>` on `NodeAppearance` base. See [§ 13](#13-proposed-evolution--unified-overlays-on-the-base). The reasoning below remains accurate for current code; it will be superseded when the migration ships.
+
 They share the same element type (`OverlayStyle`) and the same shader-level concept ("draw this layer with this blend mode"), but they sit at different points in the render pipeline and answer different questions.
 
 > `MediaAppearance.overlays` are object-level overlays.
@@ -148,6 +154,8 @@ Keeping the two fields apart in the model keeps the renderer's job unambiguous a
 ---
 
 ## 5. Why no generic overlay(s) on the base
+
+> **Note (2026-05-19):** Same as § 4 — describes shipped rationale only. The committed direction puts `overlays` on the base; see [§ 13](#13-proposed-evolution--unified-overlays-on-the-base) for the unified design.
 
 `NodeAppearance` deliberately does not declare an abstract `overlay` or `overlays`. The proper hook lives on each concrete subclass:
 
@@ -518,3 +526,181 @@ Both popups use the shared content composable pattern (`feature/<name>/ui/conten
 5. **Procedural alpha mask.** Reuse `ProceduralPattern` + `ProceduralPatternEditor.kt`.
 6. **Border / shadow path-aware rendering.** Stroke the clip path instead of a hardcoded rounded rect.
 7. **LOD dropout.** Skip offscreen layer below `Full` tier.
+
+---
+
+## 13. Proposed evolution — unified `overlays` on the base
+
+> **Status — committed (2026-05-19), pending implementation.** Replaces the separate `MediaAppearance.overlays` and `FrameAppearance.contentOverlays` fields with a single `overlays: List<OverlayStyle>` on `NodeAppearance` base. Supersedes the rationale in §§ 4–5 (which described the shipped two-field design).
+
+### 13.1 The unified semantic
+
+> **`overlays` paints above whatever the node renders, clipped to the node's rect.**
+
+For a media node, "whatever the node renders" is the cropped photo pixels — so `overlays` paints above those, bounded by the media rect (today's `MediaAppearance.overlays` behavior).
+
+For a frame node, "whatever the node renders" is the frame's *complete* output: background + every member node + each member's own per-media overlays, composed. `overlays` paints above all of that, bounded by the frame rect (today's `FrameAppearance.contentOverlays` behavior).
+
+The semantic is uniform: **above the node's own rendered output**. The renderer's pipeline position differs per node type, but the data-model field is one.
+
+### 13.2 Model
+
+```kotlin
+@Serializable
+sealed class NodeAppearance {
+    abstract val opacity: Float
+    abstract val cornerRadius: Float                     // pending replacement — see § 12
+    abstract val overlays: List<OverlayStyle>            // unified; default emptyList()
+    abstract val border: BorderStyle?
+    abstract val shadow: ShadowStyle?
+}
+
+@Serializable
+@SerialName("MediaAppearance")
+data class MediaAppearance(
+    override val opacity: Float = 1f,
+    override val cornerRadius: Float = 0f,
+    override val overlays: List<OverlayStyle> = emptyList(),    // inherited; no per-type rename
+    override val border: BorderStyle? = null,
+    override val shadow: ShadowStyle? = null,
+
+    val crop: CropSettings = CropSettings(),
+    val visualFilter: VisualFilter? = null,
+    val adjustments: ImageAdjustments = ImageAdjustments(),
+    // ... media-specific only fields stay
+) : NodeAppearance()
+
+@Serializable
+@SerialName("FrameAppearance")
+data class FrameAppearance(
+    override val opacity: Float = 1f,
+    override val cornerRadius: Float = 0f,
+    override val overlays: List<OverlayStyle> = emptyList(),    // formerly contentOverlays
+    override val border: BorderStyle? = null,
+    override val shadow: ShadowStyle? = null,
+
+    val background: BackgroundData? = null,
+    val contentEffect: FrameContentEffect? = null,
+    val titleStyle: FrameTitleStyle? = null,
+) : NodeAppearance()
+```
+
+No new value types. `OverlayStyle`, `OverlaySource`, `NodeBlendMode` are unchanged (§ 7).
+
+### 13.3 Render pipeline position (unchanged per-type behavior)
+
+Field is uniform; renderer dispatches by node type, same as today.
+
+**Media node** — single-pass `FullMediaRenderer`:
+```
+crop source → adjustments → overlays (in list order) → border (per § 12 clip path)
+```
+
+**Frame node** — layered renderer (`buildFramePaintEvents`):
+```
+1. background (FrameAppearance.background)
+2. members in z-order — each child draws its own MediaAppearance.overlays
+3. overlays (in list order, clipped to frame rect)        ← was contentOverlays
+4. border, titleStyle
+```
+
+The unification is naming/data only. No rendering behavior changes.
+
+### 13.4 Migration
+
+`SceneGraphSerializer` reads legacy JSON:
+
+```jsonc
+// Legacy FrameAppearance (pre-unification)
+{ "type": "FrameAppearance", "contentOverlays": [ ... ], ... }
+// New
+{ "type": "FrameAppearance", "overlays": [ ... ], ... }
+```
+
+Migration: on read of a `FrameAppearance`, if `contentOverlays` is present, lift it into `overlays`. `MediaAppearance.overlays` keeps its name and needs no migration.
+
+Same one-shot read-time-lift pattern as `Frame.background → appearance.background` and the planned `cornerRadius → clip` (§ 12.6). No deprecated alias; old field name disappears from the data model.
+
+### 13.5 Why this works
+
+The shipped rationale (§§ 4–5) argued separation kept the renderer's pipeline position visible in the data model. After consideration: the renderer dispatches by node type anyway (`FullMediaRenderer` vs. layered frame renderer), and the dispatch is unambiguous from the node type alone — the field name doesn't add information the renderer needs. Meanwhile the **uniformity** wins:
+
+- **One concept** to teach: "overlays paint above the node's output."
+- **One field name** in the multi-edit popup ("Add overlay" appends to `appearance.overlays` regardless of type).
+- **No special-case** in editor UI for type-specific overlay-field lookup.
+- **Future variants** (e.g. widget appearance) automatically inherit `overlays` with the natural semantic ("above this widget's own surface").
+
+The renderer-pipeline-position argument is preserved by the **per-type rendering code** — `FullMediaRenderer` and the layered frame renderer each know where overlays sit in their pipeline. The data model doesn't need to encode the distinction.
+
+### 13.6 Implementation order
+
+1. **Model rename.** Move `overlays` to `NodeAppearance` base abstract. Remove `FrameAppearance.contentOverlays`. Both subclasses override the inherited `overlays` field.
+2. **Serializer migration.** Read-time lift of legacy `contentOverlays` → `overlays`.
+3. **Renderer rename.** Layered frame renderer reads `appearance.overlays` instead of `appearance.contentOverlays`. `buildFramePaintEvents`, `FullFrameRenderer`, `drawOverlayStack` call sites.
+4. **Editor rename.** `MediaAppearanceBottomSheet` and `FrameAppearanceBottomSheet` already use a shared `OverlayListEditor` — just update the field reference. No new UI work.
+5. **Doc cleanup.** Collapse §§ 4–5 into a single short note pointing at this section. Update § 6, § 8, § 10, § 11 to use the single `overlays` field name throughout.
+
+Behavior-preserving end-to-end. Existing albums look identical after migration.
+
+---
+
+## 14. Multi-selection editing
+
+> **Status — committed (2026-05-19), pending implementation.** Captures the rules for what happens when per-concept appearance popups operate on a multi-node selection. Builds on the per-concept popup direction (`to_discuss.md` resolved, `context-menu.md`) and the unified-overlays decision (§ 13).
+
+### 14.1 No "Edit common appearance" mega-popup
+
+The per-concept popup decomposition makes a single multi-edit umbrella popup unnecessary. Each per-concept popup handles multi-selection natively by operating on its own field across every relevant node in the selection. The context menu lists the per-concept items directly (`Edit clip shape`, `Edit alpha mask`, `Edit border`, `Edit shadow`, `Edit overlay`, …) — there is no separate "Edit common appearance" entry.
+
+### 14.2 Indeterminate values within a homogeneous-by-concept selection
+
+When a field's value differs across the selected nodes (e.g. clip cornerRadius is 12 on A, 0 on B, 20 on C), the editor shows a **Figma-style "Mixed" label**:
+
+- Numeric fields display `Mixed` as the text value.
+- Sliders show no thumb at a value (or a desaturated thumb at the median position purely for layout — value text reads `Mixed`).
+- Dropdowns / pickers show `Mixed` as the selected entry.
+- Editing the field commits the new value to **every** node in the selection — on the next read, the field reads as homogeneous. This is the destructive-unify behavior; the user pays for it explicitly by acting on a `Mixed` field.
+
+No confirmation dialog. Standard Figma / Sketch convention.
+
+### 14.3 Type-applicable popups
+
+Per-concept popups split into two categories based on which `NodeAppearance` subtype they edit:
+
+| Concept | Field lives on | Shown in menu when |
+|---|---|---|
+| **Opacity / Clip / Alpha mask / Border / Shadow / Overlays** | `NodeAppearance` base | Any selection (homogeneous or mixed). Edits the base field on every selected node uniformly. |
+| **Crop / Color adjustments / Frame decoration / Caption** | `MediaAppearance` only | Selection is **homogeneous all-media** |
+| **Background / Title style / Content effect** | `FrameAppearance` only | Selection is **homogeneous all-frame** |
+
+Type-specific popups are hidden from the context menu when the selection contains the wrong type or is mixed. There is no "tabs" or "intersection" view — the menu shows you what's actually editable for *this* selection.
+
+### 14.4 Overlays on a mixed selection
+
+With overlays unified onto the base (§ 13), this case becomes trivial: "Add overlay" appends a new `OverlayStyle` to **every** selected node's `appearance.overlays` list. The renderer paints each entry in the right pipeline position per node type — for media nodes, above the photo pixels; for frame nodes, above the frame contents. The user gets the visually-uniform layer they asked for; the per-type render-pipeline semantics still apply.
+
+Before § 13 unification, this case required either "add to two different fields" or "disallow." After unification, it's one field, one append.
+
+### 14.5 Preset application
+
+Presets (post-MVP, `MediaStylePreset` shipping first; `FrameStylePreset` later) are inherently type-scoped — a preset captures a full appearance of a specific type. On a multi-selection:
+
+- **`MediaStylePreset.apply`** → applies to every selected **media** node. Frames and other types in the selection are skipped.
+- **`FrameStylePreset.apply`** (post-MVP) → applies to every selected **frame** node. Other types skipped.
+- The action UI labels the operation honestly: *"Apply Sepia preset to 3 of 5 selected nodes (2 skipped — wrong type)."*
+- Cross-type preset application is not a thing. There is no "universal appearance preset."
+
+### 14.6 Action dispatch and undo
+
+Every per-concept popup session, regardless of selection size, produces **one `Compound` undo entry** per popup session (per the popup design points). Internally:
+
+- Open popup → open `commandSessionId`.
+- Each control change → dispatch a live `CanvasAction` that operates on the full selection. Action is internally a fan-out: per-node mutation × N selected nodes.
+- Close popup → finalize one `Compound` entry covering every change in the session, across every node.
+
+Undo replays the whole compound as a single user-perceived operation.
+
+### 14.7 Open
+
+- **Frame decoration on multi-selected media.** `MediaAppearance.frameDecoration` is currently a single value (one decoration per node). "Apply this decoration to all 5 selected photos" works trivially. No issue here.
+- **`MediaAppearance.crop` on multi-selected media.** Crop is per-source-aspect — the same `focalX/focalY` makes sense across nodes, but `offsetX/offsetY/zoom` in `CropMode.Manual` may not. Mark per-field as `Mixed` if they differ; let user unify on edit (same rule as § 14.2). Probably fine.

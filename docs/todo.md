@@ -736,7 +736,7 @@ Shared non-destructive styling for canvas nodes. Each variant owns its own `*App
 - `source media + MediaAppearance = rendered media object on canvas`
 - `frame rect + FrameAppearance + linked contents = rendered frame on canvas`
 
-See [appearance.md](architecture/appearance.md) for the shared model and the render-pipeline contract. Shipped state has `MediaAppearance.overlays` and `FrameAppearance.contentOverlays` as separate `List<OverlayStyle>` fields; the **committed direction** is to unify these onto `NodeAppearance` base as a single `overlays` field — see [§ 20.7](#207-overlay-field-unification-mediaappearanceoverlays--frameappearancecontentoverlays--baseoverlays) and [appearance.md § 13](architecture/appearance.md#13-proposed-evolution--unified-overlays-on-the-base).  
+See [appearance.md](architecture/appearance.md) for the shared model and the render-pipeline contract. `overlays: List<OverlayStyle>` is a unified field on `NodeAppearance` base; the renderer dispatches per node type. The pre-2026-05-19 design had separate `MediaAppearance.overlays` / `FrameAppearance.contentOverlays` fields — see [§ 20.7](#207-overlay-field-unification-mediaappearanceoverlays--frameappearancecontentoverlays--baseoverlays) for the rename slice and [appearance.md § 13](architecture/appearance.md#13-design-history--overlay-unification) for the design-history note.  
 See [media-appearance.md](architecture/media-appearance.md) for media-specific surface.  
 See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD § 11.8](product/PRD.md#118-media-appearance-non-destructive-editing) for product requirements.
 
@@ -758,14 +758,14 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 - [x] `appearance: MediaAppearance?` on `CanvasNode.Media`
 
 ### 20.1b Domain model — `FrameAppearance`
-- [x] `FrameAppearance : NodeAppearance` — `background: BackgroundData?` (migrated from `Frame.background`), `contentOverlays: List<OverlayStyle> = emptyList()` (ordered; entry `[i]` over entry `[i-1]`), `titleStyle: FrameTitleStyle?`, `contentEffect: FrameContentEffect?` (sealed stub; no variants yet — see §20.2)
+- [x] `FrameAppearance : NodeAppearance` — `background: BackgroundData?` (migrated from `Frame.background`), `overlays: List<OverlayStyle> = emptyList()` (inherited from base post-§20.7; ordered; entry `[i]` over entry `[i-1]`), `titleStyle: FrameTitleStyle?`, `contentEffect: FrameContentEffect?` (sealed stub; no variants yet — see §20.2)
 - [x] `appearance: FrameAppearance?` on `CanvasNode.Frame` — replaces direct `Frame.background` field; legacy JSON migration in `SceneGraphSerializer` lifts top-level `background` into `appearance.background` on read.
 - [x] `FrameTitleStyle` — typography for the frame label (data shape only; title rendering pending)
 - [ ] `FrameContentEffect` variants — sealed-class stub exists; concrete variants (Sepia / Grayscale / Blur) plus the off-screen pass rendering are post-MVP.
 
 ### 20.2 Rendering pipeline
 - [x] **Media rendering** (`FullMediaRenderer`): shadow → cropped source (`CropMode` → `ContentScale`) → `overlays` (in list order, clipped to a rounded rect when `cornerRadius > 0`) → border → surface opacity via `graphicsLayer.alpha`. `colorAdjustments`, `frameDecoration`, `caption` persist but render as no-ops for now.
-- [x] **Layered frame rendering**: paint loop in `CanvasScreen` walks `FramePaintEvent`s built by `buildFramePaintEvents` — Surface (shadow + background) at `frame.zIndex`, members in their own z-order, Overlay (contentOverlays + border) at `max(memberZ, frameZ) + epsilon`. Plain frames (no `contentOverlays`) still paint single-pass. See [rendering.md § 6b](architecture/rendering.md#6b-layered-frame-rendering).
+- [x] **Layered frame rendering**: paint loop in `CanvasScreen` walks `FramePaintEvent`s built by `buildFramePaintEvents` — Surface (shadow + background) at `frame.zIndex`, members in their own z-order, Overlay (`overlays` + border) at `max(memberZ, frameZ) + epsilon`. Plain frames (no `overlays`) still paint single-pass. See [rendering.md § 6b](architecture/rendering.md#6b-layered-frame-rendering).
 - [x] **Shared overlay-stack helper**: `DrawScope.drawOverlayStack(overlays, left, top, right, bottom, textureBitmaps)` in `OverlayRenderer.kt`. Used by both `FullMediaRenderer` and `FullFrameRenderer` (Overlay phase).
 - [x] `CropMode.Fit` — letterbox within bounding box (`ContentScale.Fit`).
 - [x] `CropMode.Fill` — crop to fill bounding box (`ContentScale.Crop`; respects focal point is deferred until the manual-crop renderer lands).
@@ -774,7 +774,7 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 - [x] `OverlayStyle` rendering — Solid / Texture / Procedural source with `NodeBlendMode` via `saveLayer(Paint(blendMode, alpha))`. Texture overlays load through `rememberOverlayTextureBitmaps` (Coil `SingletonImageLoader.execute` with `allowHardware(false)`), keyed on the set of `textureRefId`s in the list.
 - [ ] Nine-slice decoration rendering — draw 9 regions independently (corners unscaled, edges scaled one axis).
 - [ ] `MediaFrameDecoration.contentInsets` — defines usable content area (e.g. Polaroid caption space).
-- [ ] LOD: skip overlay/filter rendering below a threshold zoom (stub view only); at intermediate zoom the renderer may draw only the first overlay entry or only entries with non-`Normal` blend; contentOverlays also drop at low LOD. Today: Full = everything, Simplified = no contentOverlays, Stub/Preview = stub paint only.
+- [ ] LOD: skip overlay/filter rendering below a threshold zoom (stub view only); at intermediate zoom the renderer may draw only the first overlay entry or only entries with non-`Normal` blend; frame overlays also drop at low LOD. Today: Full = everything, Simplified = no frame overlays, Stub/Preview = stub paint only.
 - [ ] `FrameContentEffect` rendering — off-screen pass (`GraphicsLayer.record` / `ColorMatrix`); post-MVP.
 
 ### 20.3 Style presets
@@ -796,8 +796,8 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 
 ### 20.5 UI
 - [x] Appearance panel / properties sheet for selected media node (`MediaAppearanceBottomSheet`), wired to a `✦ Appearance` entry in the contextual action bar.
-- [x] `overlays` list editor — reorder (↑/↓), remove, per-entry source picker (Solid / Texture / Procedural), opacity slider, blend mode picker. Shared between media `overlays` and frame `contentOverlays`.
-- [x] Frame appearance panel — `background` editor + `contentOverlays` list editor + opacity / cornerRadius / border / shadow sections (`FrameAppearanceBottomSheet`).
+- [x] `overlays` list editor — reorder (↑/↓), remove, per-entry source picker (Solid / Texture / Procedural), opacity slider, blend mode picker. Operates on `appearance.overlays` for both media and frame (unified post-§20.7).
+- [x] Frame appearance panel — `background` editor + `overlays` list editor + opacity / cornerRadius / border / shadow sections (`FrameAppearanceBottomSheet`).
 - [x] `BorderStyleEditor` + `ShadowStyleEditor` — reused by both sheets.
 - [x] Crop mode selector (Fit / Fill / Manual / Stretch) + focal-point sliders (Fill) / manual offset+zoom sliders (Manual).
 - [ ] `frameDecoration` picker (browse built-in + user assets — current UI is asset-URI text field + mode dropdown only).
@@ -806,8 +806,8 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 - [ ] Context menu actions: Copy Appearance, Paste Appearance, Save as Preset, Reset Appearance, Save Edited Image.
 
 ### Implementation priority
-MVP-adjacent: shared `NodeAppearance` base + `OverlayStyle` value type; `MediaAppearance` with opacity, crop (Fit/Fill/Manual), cornerRadius, border, shadow, `overlays: List<OverlayStyle>` (1–2 entries common), `frameDecoration` (Stretch), copy/paste appearance, save as preset, ResetAppearance; `FrameAppearance` with migrated `background` field plus an empty default `contentOverlays` list (model only; layered rendering can land later).
-Post-MVP: layered frame renderer (`FrameAppearance.contentOverlays`), additional `NodeBlendMode` values, NineSlice decoration, parametric color adjustments, rendered derivatives, `FrameContentEffect`, animated overlays.
+MVP-adjacent: shared `NodeAppearance` base (with unified `overlays: List<OverlayStyle>`) + `OverlayStyle` value type; `MediaAppearance` with opacity, crop (Fit/Fill/Manual), cornerRadius, border, shadow, `overlays` (1–2 entries common), `frameDecoration` (Stretch), copy/paste appearance, save as preset, ResetAppearance; `FrameAppearance` with migrated `background` field plus an empty default `overlays` list and the layered renderer.
+Post-MVP: additional `NodeBlendMode` values, NineSlice decoration, parametric color adjustments, rendered derivatives, `FrameContentEffect`, animated overlays.
 
 ### 20.6 Clip + alpha mask (replaces `cornerRadius`)
 
@@ -876,10 +876,11 @@ See [appearance.md § 13](architecture/appearance.md#13-proposed-evolution--unif
 - [x] If popup-based per-concept editors (§5d / context-menu) land first, the unified field naturally fits the unified "Edit overlays" popup
 
 #### 20.7.5 Doc cleanup (after code lands)
-- [ ] Collapse `appearance.md §§ 4–5` into a one-line historical note
-- [ ] Update `appearance.md § 6` (render pipeline), § 8 (terminology), § 10 (impl status), § 11 (short rule) to use the single `overlays` name throughout
-- [ ] Update `rendering.md § 6b` (`buildFramePaintEvents` description), `background.md § 5` (frame-overlays bullet), `data-model.md § NodeAppearance` to use the unified field
-- [ ] Remove the "proposed evolution" banner on `appearance.md` once shipped
+- [x] Collapse `appearance.md §§ 4–5` into a one-line historical note
+- [x] Update `appearance.md § 6` (render pipeline), § 8 (terminology), § 10 (impl status), § 11 (short rule) to use the single `overlays` name throughout
+- [x] Update `rendering.md § 6b` (`buildFramePaintEvents` description), `background.md § 5` (frame-overlays bullet), `data-model.md § NodeAppearance` to use the unified field
+- [x] Remove the "proposed evolution" banner on `appearance.md` once shipped
+- [x] Refresh `decisions.md`, `media-appearance.md`, and historical §20 entries to drop stale `contentOverlays` mentions
 
 ### Post-MVP
 - [ ] `FrameAppearance.contentEffect` — off-screen filter pass (sepia / blur / grayscale of rendered frame contents)

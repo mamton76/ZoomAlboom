@@ -13,11 +13,7 @@ The same source photo can appear multiple times with different visual styles (no
 
 `MediaAppearance` is one of the two concrete `NodeAppearance` subclasses (alongside `FrameAppearance`). The shared base class, the shared `OverlayStyle` type, and the rule for *why media overlay and frame content overlay are different fields* live in [appearance.md](appearance.md). This doc covers the media-specific surface.
 
-> **Proposed evolution (two pending changes).**
-> - The inherited `cornerRadius: Float` will be replaced by `clip: ClipShape` + `alphaMask: AlphaMask?`. See [appearance.md § 12](appearance.md#12-proposed-evolution--clip--alphamask).
-> - The current `MediaAppearance.overlays` field moves to `NodeAppearance` base as the unified `overlays: List<OverlayStyle>`. Same field name and semantics for media; just inherited instead of declared. See [appearance.md § 13](appearance.md#13-proposed-evolution--unified-overlays-on-the-base).
->
-> Not yet implemented.
+> **Proposed evolution.** The inherited `cornerRadius: Float` will be replaced by `clip: ClipShape` + `alphaMask: AlphaMask?`. See [appearance.md § 12](appearance.md#12-proposed-evolution--clip--alphamask). Not yet implemented.
 
 ---
 
@@ -119,13 +115,13 @@ For MVP, a single texture/filter entry in `overlays` is the simpler approach. Pa
 
 `MediaAppearance.frameDecoration: MediaFrameDecoration?` is the decorative *picture-frame* drawn around a single media node — a Polaroid border, an old-album mat, a wooden frame asset. It belongs to one media node and renders on top of all other media layers.
 
-> ⚠ **Name disambiguation.** "Media frame decoration" here means the decorative photo-frame around *one media object*. It is **not** a `CanvasNode.Frame` and **not** a `FrameAppearance.contentOverlays` entry. The three concepts:
+> ⚠ **Name disambiguation.** "Media frame decoration" here means the decorative photo-frame around *one media object*. It is **not** a `CanvasNode.Frame` and **not** an entry in `FrameAppearance.overlays`. The three concepts:
 >
 > | Field | Owner | Meaning |
 > |---|---|---|
 > | `MediaAppearance.frameDecoration` | one `CanvasNode.Media` | Decorative picture-frame asset around this single photo (Polaroid, mat, wooden frame). |
-> | `FrameAppearance` | one `CanvasNode.Frame` | Styling for a navigation/container frame (its background, contentOverlays, border, title). |
-> | `FrameAppearance.contentOverlays` | one `CanvasNode.Frame` | Overlays above the frame's linked contents, clipped to the frame. See [appearance.md § 3](appearance.md#3-frameappearance--containercontent-level-styling). |
+> | `FrameAppearance` | one `CanvasNode.Frame` | Styling for a navigation/container frame (its background, overlays, border, title). |
+> | `FrameAppearance.overlays` (inherited from base) | one `CanvasNode.Frame` | Overlays above the frame's combined contents output, clipped to the frame. See [appearance.md § 3](appearance.md#3-frameappearance--containercontent-level-styling). |
 >
 > The previous name `frameOverlay: FrameOverlay?` is retired in favour of `frameDecoration: MediaFrameDecoration?` to finish disambiguating "frame" — see [data-model.md § Migration Notes](data-model.md#migration-notes).
 
@@ -178,7 +174,7 @@ In order:
 
 **LOD:** At `Stub` or `Preview` detail levels, skip overlay and frame-decoration rendering — show the cropped source only. Full pipeline runs at `Full` detail. At intermediate levels, the renderer may also draw only the first overlay entry (or only entries with non-`Normal` blend that visibly change tone).
 
-This pipeline is **self-contained inside `MediaRenderer`** — it does not need to know about other nodes or about frame containment. That's the operational distinction from `FrameAppearance.contentOverlays`, which need the frame's linked contents to draw correctly (see [appearance.md § 6](appearance.md#6-render-pipeline-implication)).
+This pipeline is **self-contained inside `MediaRenderer`** — it does not need to know about other nodes or about frame containment. That's the operational distinction from frame-level overlays, which need the frame's linked contents to draw correctly (see [appearance.md § 6](appearance.md#6-render-pipeline-implication)).
 
 ---
 

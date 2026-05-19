@@ -92,12 +92,12 @@ Notes:
 2. **World-locked album background** — drawn inside the camera `graphicsLayer`, before all nodes
 3. **Frame backgrounds** — `frame.appearance.background`, drawn behind the frame's linked contents, clipped to frame bounds
 4. **Canvas nodes** by `zIndex`, including each frame's linked contents
-5. **Frame content overlays** — `frame.appearance.contentOverlays` (ordered list), drawn above the frame's linked contents, clipped to frame bounds; entry `[i]` composites over entry `[i-1]` (future layered renderer — see [appearance.md § 6](appearance.md#6-render-pipeline-implication) and [rendering.md § 6b](rendering.md#6b-layered-frame-rendering))
+5. **Frame overlays** — `frame.appearance.overlays` (ordered list), drawn above the frame's linked contents, clipped to frame bounds; entry `[i]` composites over entry `[i-1]` (layered renderer — see [appearance.md § 6](appearance.md#6-render-pipeline-implication) and [rendering.md § 6b](rendering.md#6b-layered-frame-rendering))
 6. **Frame decoration** — `frame.appearance.border`, title, selection handles
 7. Selection overlays, guidelines, snapping indicators
 8. IDE UI overlay
 
-Steps 3 and 5 are the two halves of the layered frame render: background goes under the contents, `contentOverlays` go over them in list order. Both halves are painted by the event-driven paint loop in `CanvasScreen` — see [rendering.md § 6b](rendering.md#6b-layered-frame-rendering). Plain frames (no `contentOverlays`) still paint single-pass.
+Steps 3 and 5 are the two halves of the layered frame render: background goes under the contents, overlays go over them in list order. Both halves are painted by the event-driven paint loop in `CanvasScreen` — see [rendering.md § 6b](rendering.md#6b-layered-frame-rendering). Plain frames (no `overlays`) still paint single-pass.
 
 ---
 

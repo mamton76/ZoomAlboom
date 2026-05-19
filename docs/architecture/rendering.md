@@ -127,25 +127,25 @@ Nodes use **`graphicsLayer`** for position and rotation (GPU-only, no Compose Co
 
 > Related: [appearance.md § 6](appearance.md#6-render-pipeline-implication) | [background.md § Rendering Order](background.md#rendering-order) | [frame-membership.md](frame-membership.md)
 
-`FrameAppearance` requires composing a frame in **layers**, not as a single `CanvasNode` pass. A frame's contentOverlays must draw above its linked contents, not just above its own surface, so the renderer needs to interleave a frame's two surfaces around its members. Conceptual order, per frame:
+`FrameAppearance` requires composing a frame in **layers**, not as a single `CanvasNode` pass. A frame's `overlays` (inherited from `NodeAppearance`) must draw above its linked contents, not just above its own surface, so the renderer needs to interleave a frame's two surfaces around its members. Conceptual order, per frame:
 
 1. **Frame background** — `frame.appearance.background` (Solid / Texture / Procedural). Drawn behind the frame's linked contents, clipped to frame bounds.
-2. **Linked frame contents** — every node bound to this frame (see [frame-membership.md](frame-membership.md)), drawn in `Transform.zIndex` order. Each child still draws its own `MediaAppearance`, including its own `MediaAppearance.overlays` list — child appearance is not mutated by the parent frame.
-3. **Frame content overlays** — `frame.appearance.contentOverlays: List<OverlayStyle>`, drawn above the rendered children in list order (entry `[i]` over entry `[i-1]`), clipped to frame bounds.
+2. **Linked frame contents** — every node bound to this frame (see [frame-membership.md](frame-membership.md)), drawn in `Transform.zIndex` order. Each child still draws its own `MediaAppearance`, including its own `overlays` list — child appearance is not mutated by the parent frame.
+3. **Frame overlays** — `frame.appearance.overlays: List<OverlayStyle>`, drawn above the rendered children in list order (entry `[i]` over entry `[i-1]`), clipped to frame bounds.
 4. **Frame decoration** — `frame.appearance.border`, `titleStyle`, selection handles / editor overlays (Edit mode only).
 5. **Frame content effect** *(future)* — `frame.appearance.contentEffect` is a true off-screen pass that re-renders the contents through a filter (sepia, blur, grayscale of everything inside). Sits between (2) and (3) when implemented. Not MVP.
 
-**Distinct from `contentOverlays`:** `contentOverlays` only composite new layers above the rendered children. `contentEffect` re-renders the children through a filter. Both leave child node data untouched; only the rendered frame output differs.
+**Distinct from `overlays`:** frame overlays only composite new layers above the rendered children. `contentEffect` re-renders the children through a filter. Both leave child node data untouched; only the rendered frame output differs.
 
 **How the paint loop schedules the two phases.** The `visibleNodes` loop in `CanvasScreen` is now event-driven rather than a flat `for` loop:
 
-1. `buildFramePaintEvents` (in `feature/canvas/view/FramePaintEvents.kt`) walks `visibleNodes` once. For each layered frame F (i.e. `frame.appearance?.contentOverlays` non-empty) it emits two events: a `LayeredFrameSurface` at `F.transform.zIndex` and a `LayeredFrameOverlay` at `max(memberZ, F.transform.zIndex) + epsilon`, where `memberZ` is the highest z-index among F's [effective members](frame-membership.md) intersected with the current visible set. Every other node emits a single `NodePass` at its own z-index.
+1. `buildFramePaintEvents` (in `feature/canvas/view/FramePaintEvents.kt`) walks `visibleNodes` once. For each layered frame F (i.e. `frame.appearance?.overlays` non-empty) it emits two events: a `LayeredFrameSurface` at `F.transform.zIndex` and a `LayeredFrameOverlay` at `max(memberZ, F.transform.zIndex) + epsilon`, where `memberZ` is the highest z-index among F's [effective members](frame-membership.md) intersected with the current visible set. Every other node emits a single `NodePass` at its own z-index.
 2. Events are stable-sorted by `sortKey`.
 3. The loop dispatches each event: `NodePass → CanvasNodeRenderer`, `LayeredFrameSurface / LayeredFrameOverlay → FrameRendererPhased(frame, detail, phase)`.
 
-A frame with no contentOverlays does **not** split — its border still paints together with its background in a single Spacer, preserving today's single-pass behavior for plain frames.
+A frame with no `overlays` does **not** split — its border still paints together with its background in a single Spacer, preserving today's single-pass behavior for plain frames.
 
-**Shared rendering helper.** Because `MediaAppearance.overlays` and `FrameAppearance.contentOverlays` are both `List<OverlayStyle>` with the same declaration-order compositing rule, a single helper — `DrawScope.drawOverlayStack(overlays, left, top, right, bottom, textureBitmaps)` in `OverlayRenderer.kt` — serves both scopes. The two outer fields differ in *bounds* and *pipeline position*, not in how an individual stack is drawn. Texture overlays load through `rememberOverlayTextureBitmaps`, which iterates the unique `textureRefId`s in the overlay list, runs Coil's `SingletonImageLoader.execute(...)` with `allowHardware(false)` (so the bitmaps can back `BitmapShader` for Repeat tile modes), and returns a `Map<String, ImageBitmap>` to the helper.
+**Shared rendering helper.** Because `MediaAppearance.overlays` and `FrameAppearance.overlays` are both `List<OverlayStyle>` (inherited from the base) with the same declaration-order compositing rule, a single helper — `DrawScope.drawOverlayStack(overlays, left, top, right, bottom, textureBitmaps)` in `OverlayRenderer.kt` — serves both scopes. The renderer dispatches by node type, picking the right *bounds* and *pipeline position*. Texture overlays load through `rememberOverlayTextureBitmaps`, which iterates the unique `textureRefId`s in the overlay list, runs Coil's `SingletonImageLoader.execute(...)` with `allowHardware(false)` (so the bitmaps can back `BitmapShader` for Repeat tile modes), and returns a `Map<String, ImageBitmap>` to the helper.
 
 **Frame–content binding.** The Overlay event's sort key depends on `FrameMembershipUseCase.effectiveMembers(frame, visibleNodes)` — geometry plus per-frame overrides. The renderer uses the same membership rules as the rest of the app ([frame-membership.md](frame-membership.md)). A member that's culled out of the viewport doesn't pull the overlay's z-slot upward.
 

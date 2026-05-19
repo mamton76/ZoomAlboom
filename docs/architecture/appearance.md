@@ -2,9 +2,9 @@
 
 > Related: [data-model.md](data-model.md) | [media-appearance.md](media-appearance.md) | [background.md](background.md) | [rendering.md](rendering.md) | [frame-membership.md](frame-membership.md)
 
-The appearance system holds non-destructive visual styling for any `CanvasNode`. Each node variant owns a typed appearance container; the base class carries only the cross-cutting properties that have the same meaning for every kind of node. Shared *value* types (overlay sources, borders, shadows, blend modes) are defined once and reused.
+The appearance system holds non-destructive visual styling for any `CanvasNode`. Each node variant owns a typed appearance container; the base class carries the cross-cutting properties that have the same meaning for every kind of node (opacity, corner radius, border, shadow, overlays). Shared *value* types (overlay sources, borders, shadows, blend modes) are defined once and reused.
 
-The system is deliberately split per node type. Media and frames look similar at a glance — both can carry a "border", both can carry an "overlay" — but the same word means different things on a leaf media node and on a container frame. Putting the two under one ambiguous field would force the renderer and the UI to special-case at every step. Keeping the fields apart, with one shared *type*, gives us reuse where it's correct and clarity where it isn't.
+Each subclass extends the base with its own type-specific fields: `MediaAppearance` adds crop / color adjustments / frame decoration / caption; `FrameAppearance` adds background / title style / content effect. The renderer dispatches by node type, so the base-level fields can be uniform (one field name) while the rendering pipeline differs per type — e.g. `overlays` paint above a media's pixels for `CanvasNode.Media` and above the frame's combined children for `CanvasNode.Frame`.
 
 ---
 
@@ -13,22 +13,24 @@ The system is deliberately split per node type. Media and frames look similar at
 ```kotlin
 @Serializable
 sealed class NodeAppearance {
-    abstract val opacity: Float        // 0..1, applied to the node's own rendered output
-    abstract val cornerRadius: Float   // world units; affects border / clipping
+    abstract val opacity: Float                          // 0..1, applied to the node's own rendered output
+    abstract val cornerRadius: Float                     // world units; affects border / clipping
+    abstract val overlays: List<OverlayStyle>            // ordered; entry [i] composites above entry [i-1]
     abstract val border: BorderStyle?
     abstract val shadow: ShadowStyle?
 }
 ```
 
-`NodeAppearance` carries only the four properties that mean the same thing on every node: opacity of the node's own surface, corner rounding of the node's rectangle, border drawn on the node's rectangle, drop shadow cast by the node's rectangle.
+`NodeAppearance` carries the cross-cutting properties: opacity of the node's own rendered output, corner rounding of the node's rectangle, an ordered list of overlays painted above the node's output (clipped to the node's rect), border drawn on the node's rectangle, drop shadow cast by the node's rectangle.
 
-> **Proposed evolution.** Two changes pending implementation:
-> - `cornerRadius: Float` → `clip: ClipShape` + `alphaMask: AlphaMask?` ([§ 12](#12-proposed-evolution--clip--alphamask)).
-> - `MediaAppearance.overlays` and `FrameAppearance.contentOverlays` collapse into a single `overlays: List<OverlayStyle>` on `NodeAppearance` base ([§ 13](#13-proposed-evolution--unified-overlays-on-the-base)). Supersedes §§ 4–5.
->
-> The model in §§ 1–11 below describes shipped state.
+The `overlays` semantic is uniform but the renderer's pipeline position differs per node type:
 
-`NodeAppearance` **intentionally does not** have a generic `overlay` field. See [§5 — Why no generic overlay](#5-why-no-generic-overlay-on-the-base).
+- On a `CanvasNode.Media`, `overlays` paint above the cropped photo pixels, bounded by the media rect — object-level layering.
+- On a `CanvasNode.Frame`, `overlays` paint above the frame's *combined* output (background + every member node, each with its own per-media overlays), clipped to the frame rect — container/content-level layering. Requires the layered frame renderer; see [§ 6](#6-render-pipeline-implication).
+
+The renderer dispatches by node type — the data model is one field. See [§ 13 — Design history](#13-design-history--overlay-unification) for the prior two-field design.
+
+> **Proposed evolution.** `cornerRadius: Float` will be replaced by `clip: ClipShape` + `alphaMask: AlphaMask?`. See [§ 12](#12-proposed-evolution--clip--alphamask). Not yet implemented; the rest of this doc describes shipped state.
 
 ---
 
@@ -40,6 +42,10 @@ sealed class NodeAppearance {
 data class MediaAppearance(
     override val opacity: Float = 1f,
     override val cornerRadius: Float = 0f,
+    // Object-level overlays inherited from NodeAppearance — above this media's
+    // pixels, bounded by the media rect. Ordered list, declaration-order
+    // compositing. Empty = no overlays. See §7.1 for the OverlayStyle type.
+    override val overlays: List<OverlayStyle> = emptyList(),
     override val border: BorderStyle? = null,
     override val shadow: ShadowStyle? = null,
 
@@ -51,11 +57,6 @@ data class MediaAppearance(
     // Color transform applied to the media itself (sepia, brightness, etc.).
     val visualFilter: VisualFilter? = null,
 
-    // Object-level overlays above this specific media only — bounded by the media rect.
-    // Ordered list: drawn in order, later entries composite on top of earlier ones.
-    // Empty list = no overlays. Each entry uses the shared OverlayStyle type (§7.1).
-    val overlays: List<OverlayStyle> = emptyList(),
-
     // Parametric color grading (brightness/contrast/saturation/...).
     val adjustments: ImageAdjustments = ImageAdjustments(),
 ) : NodeAppearance()
@@ -63,7 +64,7 @@ data class MediaAppearance(
 
 Stored on `CanvasNode.Media` as a nullable field (`null` = default rendering). See [media-appearance.md](media-appearance.md) for crop, fit, filter, derived-image, and preset detail.
 
-**`MediaAppearance.overlays` semantics — object-level overlays.**
+**`overlays` on a media node — object-level overlays.**
 
 | Property | Value |
 |---|---|
@@ -72,7 +73,7 @@ Stored on `CanvasNode.Media` as a nullable field (`null` = default rendering). S
 | Transforms with | The media node (pan / scale / rotate together) |
 | Knows about other nodes? | No |
 | Depends on frame containment? | No |
-| Renders inside | `MediaRenderer` |
+| Renders inside | `MediaRenderer` (single-pass) |
 | Ordering | Ordered list: entry `[i]` composites above entry `[i-1]`. Empty list = no overlays. |
 
 Use cases: a single light leak on one photo; a vignette on one photo; stacked looks such as paper grain + light leak + vignette on the same photo (each layer drawn in declaration order with its own blend mode).
@@ -87,17 +88,15 @@ Use cases: a single light leak on one photo; a vignette on one photo; stacked lo
 data class FrameAppearance(
     override val opacity: Float = 1f,
     override val cornerRadius: Float = 0f,
+    // Container/content-level overlays inherited from NodeAppearance — above the
+    // frame's combined output (background + members), clipped to frame bounds.
+    // Ordered list, declaration-order compositing. Empty = no overlays.
+    override val overlays: List<OverlayStyle> = emptyList(),
     override val border: BorderStyle? = null,
     override val shadow: ShadowStyle? = null,
 
     // Background drawn behind the frame's linked contents.
     val background: BackgroundData? = null,
-
-    // Overlays drawn above the frame's linked contents, clipped to frame bounds.
-    // Ordered list: drawn in order, later entries composite on top of earlier ones.
-    // Empty list = no content overlays.
-    // Intentionally NOT named just `overlays` — see §4.
-    val contentOverlays: List<OverlayStyle> = emptyList(),
 
     // Future: true off-screen effect applied to rendered frame contents
     // (sepia / blur / grayscale of *everything inside* this frame). Not MVP.
@@ -109,7 +108,7 @@ data class FrameAppearance(
 
 Stored on `CanvasNode.Frame` as a nullable field (`null` = default rendering). `background` migrates from the current top-level `Frame.background` — see [data-model.md § Migration Notes](data-model.md#migration-notes) and [background.md](background.md).
 
-**`FrameAppearance.contentOverlays` semantics — container/content-level overlays.**
+**`overlays` on a frame node — container/content-level overlays.**
 
 | Property | Value |
 |---|---|
@@ -120,57 +119,36 @@ Stored on `CanvasNode.Frame` as a nullable field (`null` = default rendering). `
 | Mutates child nodes? | **No.** Children keep their own appearance untouched. |
 | Depends on frame–content binding? | Yes — only meaningful for nodes that are members of this frame |
 | Renders inside | Layered frame renderer (see [§6 — Render pipeline](#6-render-pipeline-implication)) |
-| Ordering | Ordered list: entry `[i]` composites above entry `[i-1]`. Empty list = no content overlays. |
+| Ordering | Ordered list: entry `[i]` composites above entry `[i-1]`. Empty list = no overlays. |
 
 Use cases: subtle old-paper tint over every photo inside a frame; translucent watercolor wash; dark-glass dimming over the frame's contents; uniform paper grain over a whole scrapbook page; stacks like grain + tint + vignette over a single frame's contents.
 
-**`contentOverlays` are not `contentEffect`.** `contentOverlays` are extra layers composited *above* the rendered contents — children render exactly as they would standalone, then the overlays draw on top in list order. `contentEffect` (future) is an off-screen pass that re-renders the contents through a filter (sepia, blur, grayscale of everything inside). Both leave child node data unchanged; only the rendered frame output differs.
+**Frame `overlays` are not `contentEffect`.** `overlays` are extra layers composited *above* the rendered contents — children render exactly as they would standalone, then the overlays draw on top in list order. `contentEffect` (future) is an off-screen pass that re-renders the contents through a filter (sepia, blur, grayscale of everything inside). Both leave child node data unchanged; only the rendered frame output differs.
 
 ---
 
-## 4. Why media `overlays` and frame `contentOverlays` are separate fields
+## 4. Overlay semantics — one field, two render-pipeline positions
 
-> **Note (2026-05-19):** This section describes the **shipped** rationale. The committed direction is to unify the two into a single `overlays: List<OverlayStyle>` on `NodeAppearance` base. See [§ 13](#13-proposed-evolution--unified-overlays-on-the-base). The reasoning below remains accurate for current code; it will be superseded when the migration ships.
+`overlays` is a single field on `NodeAppearance` (see § 1), but the renderer treats it differently per node type because "above this node's own rendered output" means different things for a leaf and a container:
 
-They share the same element type (`OverlayStyle`) and the same shader-level concept ("draw this layer with this blend mode"), but they sit at different points in the render pipeline and answer different questions.
+- **Media node.** The "rendered output" is the cropped photo pixels. Overlays paint above those pixels, bounded by the media rect. Composited inside the single-pass `MediaRenderer`. Depends only on the media node itself.
+- **Frame node.** The "rendered output" is the frame's *combined* surface — background + every member node + each member's own per-media overlays. Frame overlays paint above that combined surface, clipped to the frame rect. Composited inside the layered frame renderer (§ 6). Depends on the frame's effective member set (see [frame-membership.md](frame-membership.md)).
 
-> `MediaAppearance.overlays` are object-level overlays.
-> `FrameAppearance.contentOverlays` are container/content-level overlays.
-
-A single `NodeAppearance.overlays` field would be ambiguous for frames:
-
-- For a leaf media node, an overlay obviously means *above this media object*.
-- For a frame, the *useful* overlay is *above the frame's contents, clipped to frame bounds* — i.e. a layer in a multi-layer compositing pipeline that needs the frame's member set to exist before it can mean anything.
-
-The two operations are different in:
-
-- **Bounds.** Media-overlay bounds = the media rect. Content-overlay bounds = the frame rect, clipped, after children draw.
-- **Render-pipeline position.** Media overlays sit inside the single-pass media renderer. Content overlays sit between *frame contents* and *frame decoration* in a layered frame render — see §6.
-- **Dependencies.** Media overlays need only the media node. Content overlays need the frame's effective members (frame–content binding).
-- **What they composite with.** Media overlays composite with the cropped source pixels. Content overlays composite with whatever the children happened to render, including their own per-media overlays.
-
-Keeping the two fields apart in the model keeps the renderer's job unambiguous and avoids needing a "is this a media or a frame" branch inside an overlay-handling step. The list-vs-list parallel is intentional: both fields support stacking with identical ordering semantics, so the rendering helper for `List<OverlayStyle>` is shared even though the two outer fields aren't merged.
+The renderer dispatches by node type, so the data model can carry a single uniform field while the rendering code chooses the right pipeline position. The shared `OverlayStyle` element type (§ 7.1) and the shared `drawOverlayStack` helper keep the per-type renderers thin.
 
 ---
 
-## 5. Why no generic overlay(s) on the base
+## 5. Future appearance variants
 
-> **Note (2026-05-19):** Same as § 4 — describes shipped rationale only. The committed direction puts `overlays` on the base; see [§ 13](#13-proposed-evolution--unified-overlays-on-the-base) for the unified design.
+When a new `*Appearance` subtype lands (e.g. a future `WidgetAppearance`), it inherits `overlays` from `NodeAppearance` with the natural semantic — *above this node's own rendered output*. The base-level fields are the right hook for surface-level overlays on any node type.
 
-`NodeAppearance` deliberately does not declare an abstract `overlay` or `overlays`. The proper hook lives on each concrete subclass:
-
-- `MediaAppearance.overlays: List<OverlayStyle>`
-- `FrameAppearance.contentOverlays: List<OverlayStyle>`
-
-A future widget / text / shape variant may want its own *surface* overlays (on the widget's own rendered rectangle, no container semantics). When that need arises, the right field is a *new* field on that variant — for example `WidgetAppearance.surfaceOverlays: List<OverlayStyle>` — defined explicitly as "overlays on this node's own rendered surface". Surface overlays would never replace `FrameAppearance.contentOverlays`, because the frame overlays have container semantics that a per-node surface overlay can't express.
-
-If, after multiple variants have shipped, the same surface-overlay code appears in every subclass, then `NodeAppearance.surfaceOverlays` can be lifted into the base with a precise definition. Until then, keeping the base minimal prevents a generic field from quietly turning into "do whatever the renderer feels like."
+If a variant ever needs an *additional* overlay surface with different semantics (e.g. a payload-vs-chrome distinction on a widget), that surface should be a new type-specific field on the variant, not a renamed base field. The renderer's per-type dispatch keeps multiple overlay surfaces unambiguous as long as each lives on its own typed field.
 
 ---
 
 ## 6. Render pipeline implication
 
-A frame with any `contentOverlays` (or, in the future, a `contentEffect`) can no longer be rendered as a single ordinary `CanvasNode` pass — its contents must be composited between two of its own layers. Conceptually:
+A frame with any `overlays` (or, in the future, a `contentEffect`) can no longer be rendered as a single ordinary `CanvasNode` pass — its contents must be composited between two of its own layers. Conceptually:
 
 ```
 1. Album background
@@ -181,10 +159,10 @@ A frame with any `contentOverlays` (or, in the future, a `contentEffect`) can no
 
 3. Linked frame contents
      every node bound to this frame, in z-order
-     (each child still draws its own MediaAppearance, including its MediaAppearance.overlays)
+     (each child still draws its own MediaAppearance, including its overlays)
 
-4. Frame content overlay layer
-     frame.appearance.contentOverlays, drawn in list order
+4. Frame overlay layer
+     frame.appearance.overlays, drawn in list order
      clipped to frame bounds, each entry composited above the previous one
 
 5. Frame decoration layer
@@ -194,9 +172,9 @@ A frame with any `contentOverlays` (or, in the future, a `contentEffect`) can no
 
 `contentEffect`, when added later, sits between (3) and (4) as an off-screen pass that re-renders the contents through a filter before the overlays composite on top.
 
-The simple per-node `CanvasNodeRenderer` pass used today handles step (2) trivially (it's the existing `Frame.background` render), and step (5) trivially (border + label), but not (3) + (4) together: the renderer needs to know which children belong to the frame and must draw them between the frame's two own layers. This is what makes `contentOverlays` strictly more than a node-local effect.
+The simple per-node `CanvasNodeRenderer` pass used today handles step (2) trivially (it's the existing `Frame.background` render), and step (5) trivially (border + label), but not (3) + (4) together: the renderer needs to know which children belong to the frame and must draw them between the frame's two own layers. This is what makes frame overlays strictly more than a node-local effect.
 
-**Status — what's wired today.** The layered renderer ships with this slice. `CanvasScreen` walks `FramePaintEvent`s built from the visible-nodes set: every layered frame paints its background on the Surface phase at `frame.zIndex`, members draw in z-order, then the overlay phase paints `contentOverlays + border` just past `max(memberZ, frame.zIndex)`. Membership uses [frame-membership.md](frame-membership.md). Plain frames (no `contentOverlays`) still paint in a single pass.
+**Status — what's wired today.** The layered renderer ships. `CanvasScreen` walks `FramePaintEvent`s built from the visible-nodes set: every layered frame paints its background on the Surface phase at `frame.zIndex`, members draw in z-order, then the overlay phase paints `overlays + border` just past `max(memberZ, frame.zIndex)`. Membership uses [frame-membership.md](frame-membership.md). Plain frames (no `overlays`) still paint in a single pass.
 
 `FrameContentEffect` is the one piece still field-only: the sealed class has no variants yet and the off-screen filter pass is post-MVP. `contentEffect` deserializes and round-trips but renders as a no-op until that slice lands.
 
@@ -233,9 +211,9 @@ sealed class OverlaySource {
 }
 ```
 
-`OverlayStyle` is the element type reused by both `MediaAppearance.overlays` and `FrameAppearance.contentOverlays`. The shape mirrors `BackgroundData` (Solid / Texture / Procedural) on purpose: paper grain that works as a background also works as an overlay, just composited differently. `TileData` and `ProceduralPattern` are the same types as in [background.md](background.md).
+`OverlayStyle` is the element type carried by `NodeAppearance.overlays` (inherited by both `MediaAppearance` and `FrameAppearance`). The shape mirrors `BackgroundData` (Solid / Texture / Procedural) on purpose: paper grain that works as a background also works as an overlay, just composited differently. `TileData` and `ProceduralPattern` are the same types as in [background.md](background.md).
 
-Both overlay fields are `List<OverlayStyle>` with **declaration-order compositing** — entry `[i]` draws on top of entry `[i-1]`. An empty list is the default ("no overlays"). The renderer iterates the list inside its scope (media rect for media overlays, frame-clip rect for content overlays) and applies each entry's `blendMode` and `opacity`. Reusing the same element type means one rendering helper for `List<OverlayStyle>` serves both scopes.
+`overlays` is a `List<OverlayStyle>` with **declaration-order compositing** — entry `[i]` draws on top of entry `[i-1]`. An empty list is the default ("no overlays"). The renderer iterates the list inside the active scope (media rect for media nodes, frame-clip rect for frame nodes) and applies each entry's `blendMode` and `opacity`. The same `drawOverlayStack` helper serves both scopes.
 
 ### 7.2 NodeBlendMode
 
@@ -280,14 +258,14 @@ Reused by both `MediaAppearance` and `FrameAppearance` unchanged.
 
 ## 8. Terminology — pick one word per concept
 
-These five phrases mean five different things. Use them consistently in code, comments, and UI labels.
+These phrases mean different things. Use them consistently in code, comments, and UI labels.
 
 | Term | Where it lives | What it draws |
 |------|----------------|---------------|
 | **Frame background** | `FrameAppearance.background` | Layer *behind* the frame's linked contents. Solid / texture / procedural / gradient / watercolor. |
-| **Media overlays** | `MediaAppearance.overlays: List<OverlayStyle>` | Layers *above* one media node only. Bounded by the media rect. Ordered list — entry `[i]` over entry `[i-1]`. Examples: light leak, vignette, scratches, paper grain on a single photo (and stacks of those). |
-| **Frame contentOverlays** | `FrameAppearance.contentOverlays: List<OverlayStyle>` | Layers *above* the frame's linked contents, clipped to the frame. Ordered list — entry `[i]` over entry `[i-1]`. Examples: subtle old-paper tint over every photo inside a frame, translucent watercolor wash, dark glass, or stacks of those. |
-| **Frame contentEffect** *(future)* | `FrameAppearance.contentEffect` | True off-screen pass applied to the *rendered* frame contents (sepia/blur/grayscale of everything inside). Not MVP. Distinct from `contentOverlays`, which only composite new layers on top. |
+| **Overlays (on a media node)** | `MediaAppearance.overlays: List<OverlayStyle>` (inherited from base) | Layers *above* one media node only. Bounded by the media rect. Ordered list — entry `[i]` over entry `[i-1]`. Examples: light leak, vignette, scratches, paper grain on a single photo (and stacks of those). |
+| **Overlays (on a frame node)** | `FrameAppearance.overlays: List<OverlayStyle>` (inherited from base) | Layers *above* the frame's combined output (background + members), clipped to the frame. Ordered list — entry `[i]` over entry `[i-1]`. Examples: subtle old-paper tint over every photo inside a frame, translucent watercolor wash, dark glass, or stacks of those. |
+| **Frame contentEffect** *(future)* | `FrameAppearance.contentEffect` | True off-screen pass applied to the *rendered* frame contents (sepia/blur/grayscale of everything inside). Not MVP. Distinct from frame overlays, which only composite new layers on top. |
 | **Media frame decoration** | `MediaAppearance.frameDecoration: MediaFrameDecoration?` | Decorative picture-frame asset around a single media node (Polaroid border, mat, wooden frame, nine-slice). NOT a `CanvasNode.Frame`, NOT a `FrameAppearance`. See [media-appearance.md](media-appearance.md#media-frame-decoration). |
 
 ---
@@ -304,11 +282,11 @@ Polymorphism uses kotlinx-serialization's standard `@SerialName` discriminator. 
 
 What this slice landed:
 
-- Shared types: `NodeAppearance`, `OverlayStyle`, `OverlaySource` (Solid / Texture / Procedural), `NodeBlendMode` (all 7 values mapped to Compose `BlendMode`), `BorderStyle`, `ShadowStyle`.
+- Shared types: `NodeAppearance` (with unified `overlays: List<OverlayStyle>` on base), `OverlayStyle`, `OverlaySource` (Solid / Texture / Procedural), `NodeBlendMode` (all 7 values mapped to Compose `BlendMode`), `BorderStyle`, `ShadowStyle`.
 - `FrameAppearance` and `MediaAppearance` data classes with their per-type fields; nullable `appearance` field on `CanvasNode.Frame` and `CanvasNode.Media`.
-- Scene-graph serializer migration that lifts legacy top-level `Frame.background` into `appearance.background` on read.
+- Scene-graph serializer migrations: lifts legacy top-level `Frame.background` into `appearance.background` on read; lifts legacy `FrameAppearance.contentOverlays` into the unified `overlays` field.
 - Media renderer paints `overlays`, `border`, `shadow`, `cornerRadius`, surface `opacity`, and `crop.mode` (Fit / Fill / Stretch).
-- Layered frame renderer paints background → members → `contentOverlays` → border, driven by `FrameMembershipUseCase.effectiveMembers`.
+- Layered frame renderer paints background → members → `overlays` → border, driven by `FrameMembershipUseCase.effectiveMembers`.
 - `DrawScope.drawOverlayStack` helper shared between the two scopes.
 
 Still pending (each has its own todo entry under [§ 20](../todo.md#20-appearance-system-non-destructive-styling)):
@@ -326,10 +304,10 @@ Still pending (each has its own todo entry under [§ 20](../todo.md#20-appearanc
 
 ## 11. Short rule
 
-> `MediaAppearance.overlays` are object-level overlays.
-> `FrameAppearance.contentOverlays` are container/content-level overlays.
-> Both are `List<OverlayStyle>` with declaration-order compositing.
-> They share the element type. They are not the same field.
+> `NodeAppearance.overlays` is a single `List<OverlayStyle>` field on the base.
+> On a media node it paints above the photo pixels.
+> On a frame node it paints above the frame's combined contents, clipped to the frame.
+> The renderer dispatches by node type — the data model is uniform.
 
 ---
 
@@ -529,124 +507,15 @@ Both popups use the shared content composable pattern (`feature/<name>/ui/conten
 
 ---
 
-## 13. Proposed evolution — unified `overlays` on the base
+## 13. Design history — overlay unification
 
-> **Status — committed (2026-05-19), pending implementation.** Replaces the separate `MediaAppearance.overlays` and `FrameAppearance.contentOverlays` fields with a single `overlays: List<OverlayStyle>` on `NodeAppearance` base. Supersedes the rationale in §§ 4–5 (which described the shipped two-field design).
-
-### 13.1 The unified semantic
-
-> **`overlays` paints above whatever the node renders, clipped to the node's rect.**
-
-For a media node, "whatever the node renders" is the cropped photo pixels — so `overlays` paints above those, bounded by the media rect (today's `MediaAppearance.overlays` behavior).
-
-For a frame node, "whatever the node renders" is the frame's *complete* output: background + every member node + each member's own per-media overlays, composed. `overlays` paints above all of that, bounded by the frame rect (today's `FrameAppearance.contentOverlays` behavior).
-
-The semantic is uniform: **above the node's own rendered output**. The renderer's pipeline position differs per node type, but the data-model field is one.
-
-### 13.2 Model
-
-```kotlin
-@Serializable
-sealed class NodeAppearance {
-    abstract val opacity: Float
-    abstract val cornerRadius: Float                     // pending replacement — see § 12
-    abstract val overlays: List<OverlayStyle>            // unified; default emptyList()
-    abstract val border: BorderStyle?
-    abstract val shadow: ShadowStyle?
-}
-
-@Serializable
-@SerialName("MediaAppearance")
-data class MediaAppearance(
-    override val opacity: Float = 1f,
-    override val cornerRadius: Float = 0f,
-    override val overlays: List<OverlayStyle> = emptyList(),    // inherited; no per-type rename
-    override val border: BorderStyle? = null,
-    override val shadow: ShadowStyle? = null,
-
-    val crop: CropSettings = CropSettings(),
-    val visualFilter: VisualFilter? = null,
-    val adjustments: ImageAdjustments = ImageAdjustments(),
-    // ... media-specific only fields stay
-) : NodeAppearance()
-
-@Serializable
-@SerialName("FrameAppearance")
-data class FrameAppearance(
-    override val opacity: Float = 1f,
-    override val cornerRadius: Float = 0f,
-    override val overlays: List<OverlayStyle> = emptyList(),    // formerly contentOverlays
-    override val border: BorderStyle? = null,
-    override val shadow: ShadowStyle? = null,
-
-    val background: BackgroundData? = null,
-    val contentEffect: FrameContentEffect? = null,
-    val titleStyle: FrameTitleStyle? = null,
-) : NodeAppearance()
-```
-
-No new value types. `OverlayStyle`, `OverlaySource`, `NodeBlendMode` are unchanged (§ 7).
-
-### 13.3 Render pipeline position (unchanged per-type behavior)
-
-Field is uniform; renderer dispatches by node type, same as today.
-
-**Media node** — single-pass `FullMediaRenderer`:
-```
-crop source → adjustments → overlays (in list order) → border (per § 12 clip path)
-```
-
-**Frame node** — layered renderer (`buildFramePaintEvents`):
-```
-1. background (FrameAppearance.background)
-2. members in z-order — each child draws its own MediaAppearance.overlays
-3. overlays (in list order, clipped to frame rect)        ← was contentOverlays
-4. border, titleStyle
-```
-
-The unification is naming/data only. No rendering behavior changes.
-
-### 13.4 Migration
-
-`SceneGraphSerializer` reads legacy JSON:
-
-```jsonc
-// Legacy FrameAppearance (pre-unification)
-{ "type": "FrameAppearance", "contentOverlays": [ ... ], ... }
-// New
-{ "type": "FrameAppearance", "overlays": [ ... ], ... }
-```
-
-Migration: on read of a `FrameAppearance`, if `contentOverlays` is present, lift it into `overlays`. `MediaAppearance.overlays` keeps its name and needs no migration.
-
-Same one-shot read-time-lift pattern as `Frame.background → appearance.background` and the planned `cornerRadius → clip` (§ 12.6). No deprecated alias; old field name disappears from the data model.
-
-### 13.5 Why this works
-
-The shipped rationale (§§ 4–5) argued separation kept the renderer's pipeline position visible in the data model. After consideration: the renderer dispatches by node type anyway (`FullMediaRenderer` vs. layered frame renderer), and the dispatch is unambiguous from the node type alone — the field name doesn't add information the renderer needs. Meanwhile the **uniformity** wins:
-
-- **One concept** to teach: "overlays paint above the node's output."
-- **One field name** in the multi-edit popup ("Add overlay" appends to `appearance.overlays` regardless of type).
-- **No special-case** in editor UI for type-specific overlay-field lookup.
-- **Future variants** (e.g. widget appearance) automatically inherit `overlays` with the natural semantic ("above this widget's own surface").
-
-The renderer-pipeline-position argument is preserved by the **per-type rendering code** — `FullMediaRenderer` and the layered frame renderer each know where overlays sit in their pipeline. The data model doesn't need to encode the distinction.
-
-### 13.6 Implementation order
-
-1. **Model rename.** Move `overlays` to `NodeAppearance` base abstract. Remove `FrameAppearance.contentOverlays`. Both subclasses override the inherited `overlays` field.
-2. **Serializer migration.** Read-time lift of legacy `contentOverlays` → `overlays`.
-3. **Renderer rename.** Layered frame renderer reads `appearance.overlays` instead of `appearance.contentOverlays`. `buildFramePaintEvents`, `FullFrameRenderer`, `drawOverlayStack` call sites.
-4. **Editor rename.** `MediaAppearanceBottomSheet` and `FrameAppearanceBottomSheet` already use a shared `OverlayListEditor` — just update the field reference. No new UI work.
-5. **Doc cleanup.** Collapse §§ 4–5 into a single short note pointing at this section. Update § 6, § 8, § 10, § 11 to use the single `overlays` field name throughout.
-
-Behavior-preserving end-to-end. Existing albums look identical after migration.
+> **Shipped 2026-05-19** ([commit `d17efcb`](#)). Previous design had two separate fields: `MediaAppearance.overlays` (object-level) and `FrameAppearance.contentOverlays` (container-level). Both have been unified onto `NodeAppearance.overlays` (see § 1). `SceneGraphSerializer` reads legacy `contentOverlays` JSON on a frame and lifts it into the unified field; no other migration is needed. Section preserved for cross-reference stability; the rationale lives in § 4.
 
 ---
 
 ## 14. Multi-selection editing
 
-> **Status — committed (2026-05-19), pending implementation.** Captures the rules for what happens when per-concept appearance popups operate on a multi-node selection. Builds on the per-concept popup direction (`to_discuss.md` resolved, `context-menu.md`) and the unified-overlays decision (§ 13).
+> **Status — committed (2026-05-19), pending implementation.** Captures the rules for what happens when per-concept appearance popups operate on a multi-node selection. Builds on the per-concept popup direction (`to_discuss.md` resolved, `context-menu.md`) and the unified-overlays design (§ 1).
 
 ### 14.1 No "Edit common appearance" mega-popup
 
@@ -677,9 +546,7 @@ Type-specific popups are hidden from the context menu when the selection contain
 
 ### 14.4 Overlays on a mixed selection
 
-With overlays unified onto the base (§ 13), this case becomes trivial: "Add overlay" appends a new `OverlayStyle` to **every** selected node's `appearance.overlays` list. The renderer paints each entry in the right pipeline position per node type — for media nodes, above the photo pixels; for frame nodes, above the frame contents. The user gets the visually-uniform layer they asked for; the per-type render-pipeline semantics still apply.
-
-Before § 13 unification, this case required either "add to two different fields" or "disallow." After unification, it's one field, one append.
+`overlays` lives on `NodeAppearance` base (§ 1), so this case is trivial: "Add overlay" appends a new `OverlayStyle` to **every** selected node's `appearance.overlays` list. The renderer paints each entry in the right pipeline position per node type — for media nodes, above the photo pixels; for frame nodes, above the frame contents. The user gets the visually-uniform layer they asked for; the per-type render-pipeline semantics still apply.
 
 ### 14.5 Preset application
 

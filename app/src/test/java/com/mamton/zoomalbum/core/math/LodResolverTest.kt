@@ -31,24 +31,26 @@ class LodResolverTest {
     @Test
     fun `frame in zoom range renders Full`() {
         val node = frame(w = 100f)
-        val camera = Camera(scale = 1f)
-        // relativeZoom = 1.0/1.0 = 1.0, within default frame range [0.01, 50]
+        // relativeZoom = 1.0, within default frame range
+        val camera = Camera(scale = LodResolver.DEFAULT_REFERENCE_SCALE)
         assertEquals(RenderDetail.Full, LodResolver.resolveRenderDetail(node, camera))
     }
 
     @Test
     fun `frame below min relative zoom renders Stub`() {
-        // Default frame policy: referenceScale=1, minRelativeZoom=0.01, belowRangeMode=Stub
-        val node = frame(w = 100f)
-        val camera = Camera(scale = 0.005f) // relativeZoom = 0.005 < 0.01
+        // Pick a scale safely below DEFAULT_FRAME_MIN_RELATIVE_ZOOM, then size the
+        // node so screen-size culling does NOT fire — otherwise this test would
+        // assert Stub but get Hidden via culling.
+        val cameraScale = LodResolver.DEFAULT_FRAME_MIN_RELATIVE_ZOOM / 2f
+        val node = frame(w = sizePassingCulling(cameraScale))
+        val camera = Camera(scale = cameraScale)
         assertEquals(RenderDetail.Stub, LodResolver.resolveRenderDetail(node, camera))
     }
 
     @Test
     fun `frame above max relative zoom renders Simplified`() {
-        // Default frame policy: referenceScale=1, maxRelativeZoom=50, aboveRangeMode=Simplified
         val node = frame(w = 100f)
-        val camera = Camera(scale = 60f) // relativeZoom = 60 > 50
+        val camera = Camera(scale = LodResolver.DEFAULT_FRAME_MAX_RELATIVE_ZOOM * 1.2f)
         assertEquals(RenderDetail.Simplified, LodResolver.resolveRenderDetail(node, camera))
     }
 
@@ -57,23 +59,22 @@ class LodResolverTest {
     @Test
     fun `media in zoom range renders Full`() {
         val node = media(w = 100f)
-        val camera = Camera(scale = 1f)
+        val camera = Camera(scale = LodResolver.DEFAULT_REFERENCE_SCALE)
         assertEquals(RenderDetail.Full, LodResolver.resolveRenderDetail(node, camera))
     }
 
     @Test
     fun `media below min relative zoom renders Hidden`() {
-        // Default media: referenceScale=1, minRelativeZoom=0.1, belowRangeMode=Hidden
-        val node = media(w = 100f)
-        val camera = Camera(scale = 0.05f) // relativeZoom = 0.05 < 0.1
+        val cameraScale = LodResolver.DEFAULT_MEDIA_MIN_RELATIVE_ZOOM / 2f
+        val node = media(w = sizePassingCulling(cameraScale))
+        val camera = Camera(scale = cameraScale)
         assertEquals(RenderDetail.Hidden, LodResolver.resolveRenderDetail(node, camera))
     }
 
     @Test
     fun `media above max relative zoom renders Full`() {
-        // Default media: maxRelativeZoom=10, aboveRangeMode=Full
         val node = media(w = 100f)
-        val camera = Camera(scale = 15f) // relativeZoom = 15 > 10
+        val camera = Camera(scale = LodResolver.DEFAULT_MEDIA_MAX_RELATIVE_ZOOM * 1.5f)
         assertEquals(RenderDetail.Full, LodResolver.resolveRenderDetail(node, camera))
     }
 
@@ -123,18 +124,32 @@ class LodResolverTest {
 
     @Test
     fun `referenceScale from creation zoom changes thresholds`() {
-        // Node created at zoom 0.1 — referenceScale = 0.1
-        val policy = VisibilityPolicy(referenceScale = 0.1f)
-        val node = frame(w = 500f, visibilityPolicy = policy)
+        // Node created at zoom 0.1 → referenceScale = 0.1
+        // VisibilityPolicy uses its DEFAULT_MIN_RELATIVE_ZOOM / DEFAULT_MAX_RELATIVE_ZOOM
+        // and the default belowRangeMode = Hidden.
+        val refScale = 0.1f
+        val policy = VisibilityPolicy(referenceScale = refScale)
 
-        // Camera at 0.1 → relativeZoom = 1.0 → Full
-        assertEquals(RenderDetail.Full, LodResolver.resolveRenderDetail(node, Camera(scale = 0.1f)))
+        // Camera at refScale → relativeZoom = 1.0 → Full
+        val inRangeCamera = Camera(scale = refScale)
+        val inRangeNode = frame(w = sizePassingCulling(inRangeCamera.scale), visibilityPolicy = policy)
+        assertEquals(RenderDetail.Full, LodResolver.resolveRenderDetail(inRangeNode, inRangeCamera))
 
-        // Camera at 0.01 → relativeZoom = 0.1 → still in [0.25..4] default? No, 0.1 < 0.25 → Hidden
-        assertEquals(RenderDetail.Hidden, LodResolver.resolveRenderDetail(node, Camera(scale = 0.01f)))
+        // Camera at refScale * (DEFAULT_MIN_RELATIVE_ZOOM / 2) → relativeZoom < default min → Hidden
+        val belowMinCamera = Camera(scale = refScale * VisibilityPolicy.DEFAULT_MIN_RELATIVE_ZOOM / 2f)
+        val belowMinNode = frame(w = sizePassingCulling(belowMinCamera.scale), visibilityPolicy = policy)
+        assertEquals(RenderDetail.Hidden, LodResolver.resolveRenderDetail(belowMinNode, belowMinCamera))
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
+
+    /**
+     * World-unit node size that comfortably exceeds [LodResolver.MIN_VISIBLE_PX] at
+     * the given [cameraScale]. Use when a test wants to exercise the semantic-zoom
+     * filter and must not be short-circuited by screen-size culling.
+     */
+    private fun sizePassingCulling(cameraScale: Float): Float =
+        LodResolver.MIN_VISIBLE_PX * 1.5f / cameraScale
 
     private fun frame(
         w: Float = 100f,

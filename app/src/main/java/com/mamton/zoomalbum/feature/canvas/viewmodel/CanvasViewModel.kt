@@ -148,7 +148,7 @@ sealed interface CanvasAction : Intent {
     data class SetAlbumBackground(val background: AlbumBackground?) : CanvasAction
 
     // Appearance (§20). Replaces a frame's entire FrameAppearance — covers
-    // background, contentOverlays, border, shadow, etc.
+    // background, overlays, border, shadow, etc.
     // `null` resets the frame to default rendering.
     data class SetFrameAppearance(
         val nodeId: String,

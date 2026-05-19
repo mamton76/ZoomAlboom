@@ -104,9 +104,13 @@ class CommandHistoryTest {
 
         val restored = CommandHistory()
         restored.restore(snap)
-        assertEquals(2L, restored.undo()?.timestampMs)
-        assertEquals(1L, restored.undo()?.timestampMs)
-        assertEquals(3L, restored.redo()?.timestampMs)
+        // Undo stack: pop 2 then 1 (LIFO). Each undo pushes onto redo.
+        assertEquals(2L, restored.undo()?.timestampMs) // undo: [1],  redo: [3, 2]
+        assertEquals(1L, restored.undo()?.timestampMs) // undo: [],   redo: [3, 2, 1]
+        // Redo pops the top of redo (LIFO) — the most recently undone command (1),
+        // not the original snapshot entry (3). This verifies the round-trip plus the
+        // LIFO contract; the original `3` remains at the bottom of the redo stack.
+        assertEquals(1L, restored.redo()?.timestampMs) // undo: [1],  redo: [3, 2]
     }
 
     @Test

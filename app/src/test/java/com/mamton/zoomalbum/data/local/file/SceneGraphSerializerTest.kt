@@ -244,12 +244,12 @@ class SceneGraphSerializerTest {
     }
 
     @Test
-    fun `round-trip preserves OverlayStyle Procedural source on FrameAppearance contentOverlays`() {
+    fun `round-trip preserves OverlayStyle on FrameAppearance overlays`() {
         val frame = CanvasNode.Frame(
             id = "f1",
             transform = Transform(cx = 0f, cy = 0f, w = 100f, h = 100f),
             appearance = FrameAppearance(
-                contentOverlays = listOf(
+                overlays = listOf(
                     OverlayStyle(
                         source = OverlaySource.SolidColor("#40FFFFFF"),
                         opacity = 0.25f,
@@ -264,6 +264,86 @@ class SceneGraphSerializerTest {
 
         val restored = back.nodes.single() as CanvasNode.Frame
         assertEquals(frame.appearance, restored.appearance)
+    }
+
+    @Test
+    fun `legacy contentOverlays on frame appearance migrates to overlays`() {
+        // Pre-unification format: FrameAppearance JSON with `contentOverlays` key
+        // instead of the unified `overlays` key. Migration lifts the value
+        // verbatim. See SceneGraphSerializer.migrateAppearanceContentOverlays.
+        val raw = """
+            {
+              "albumId": 7,
+              "camera": { "cx": 0.0, "cy": 0.0, "scale": 1.0, "rotation": 0.0 },
+              "nodes": [
+                {
+                  "type": "com.mamton.zoomalbum.domain.model.CanvasNode.Frame",
+                  "id": "f1",
+                  "transform": { "cx": 0.0, "cy": 0.0, "w": 100.0, "h": 100.0 },
+                  "appearance": {
+                    "contentOverlays": [
+                      {
+                        "source": { "type": "SolidColor", "color": "#40FFFFFF" },
+                        "opacity": 0.25,
+                        "blendMode": "SoftLight"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val sg = serializer.deserialize(raw, albumId = 999L)
+
+        val restored = sg.nodes.single() as CanvasNode.Frame
+        val appearance = restored.appearance!!
+        assertEquals(1, appearance.overlays.size)
+        assertEquals(0.25f, appearance.overlays[0].opacity)
+        assertEquals(NodeBlendMode.SoftLight, appearance.overlays[0].blendMode)
+    }
+
+    @Test
+    fun `legacy contentOverlays migration drops the legacy key when overlays is already present`() {
+        // Both keys present (shouldn't happen in practice — only one writer ever
+        // emitted either). The migration prefers the new key and discards legacy.
+        val raw = """
+            {
+              "albumId": 7,
+              "camera": { "cx": 0.0, "cy": 0.0, "scale": 1.0, "rotation": 0.0 },
+              "nodes": [
+                {
+                  "type": "com.mamton.zoomalbum.domain.model.CanvasNode.Frame",
+                  "id": "f1",
+                  "transform": { "cx": 0.0, "cy": 0.0, "w": 100.0, "h": 100.0 },
+                  "appearance": {
+                    "overlays": [
+                      {
+                        "source": { "type": "SolidColor", "color": "#11111111" },
+                        "opacity": 0.1,
+                        "blendMode": "Normal"
+                      }
+                    ],
+                    "contentOverlays": [
+                      {
+                        "source": { "type": "SolidColor", "color": "#FF000000" },
+                        "opacity": 0.9,
+                        "blendMode": "Multiply"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val sg = serializer.deserialize(raw, albumId = 999L)
+
+        val restored = sg.nodes.single() as CanvasNode.Frame
+        val appearance = restored.appearance!!
+        assertEquals(1, appearance.overlays.size)
+        assertEquals(0.1f, appearance.overlays[0].opacity)
+        assertEquals(NodeBlendMode.Normal, appearance.overlays[0].blendMode)
     }
 
     @Test

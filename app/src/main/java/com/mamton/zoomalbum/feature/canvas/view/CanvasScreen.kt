@@ -278,9 +278,9 @@ fun CanvasScreen(
             }
 
             // Paint visible nodes in z-order. Most frames render as a single
-            // pass via CanvasNodeRenderer; frames with FrameAppearance.contentOverlays
+            // pass via CanvasNodeRenderer; frames with FrameAppearance.overlays
             // need their paint split so member nodes sandwich between the frame's
-            // background (Surface phase) and its contentOverlays + border (Overlay
+            // background (Surface phase) and its overlays + border (Overlay
             // phase). See docs/architecture/rendering.md § 6b.
             val membershipUseCase = remember { FrameMembershipUseCase() }
             val paintEvents = remember(state.visibleNodes) {

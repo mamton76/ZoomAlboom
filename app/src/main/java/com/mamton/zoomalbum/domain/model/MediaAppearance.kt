@@ -131,15 +131,15 @@ data class CaptionStyle(
 data class MediaAppearance(
     override val opacity: Float = 1f,
     override val cornerRadius: Float = 0f,
-    override val border: BorderStyle? = null,
-    override val shadow: ShadowStyle? = null,
-    val crop: CropSettings = CropSettings(),
-    val colorAdjustments: MediaColorAdjustments? = null,
     /**
      * Object-level overlays above this media's pixels, bounded by the media rect.
      * Ordered list: entry `[i]` composites above entry `[i-1]`. Empty = no overlays.
      */
-    val overlays: List<OverlayStyle> = emptyList(),
+    override val overlays: List<OverlayStyle> = emptyList(),
+    override val border: BorderStyle? = null,
+    override val shadow: ShadowStyle? = null,
+    val crop: CropSettings = CropSettings(),
+    val colorAdjustments: MediaColorAdjustments? = null,
     /** Decorative picture-frame around this single media. NOT a [CanvasNode.Frame]. */
     val frameDecoration: MediaFrameDecoration? = null,
     val caption: CaptionStyle? = null,

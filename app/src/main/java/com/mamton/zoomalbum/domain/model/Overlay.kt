@@ -55,13 +55,16 @@ sealed class OverlaySource {
 /**
  * One overlay layer.
  *
- * Reused by `MediaAppearance.overlays` (object-level) and
- * `FrameAppearance.contentOverlays` (container/content-level). Both fields are
- * `List<OverlayStyle>` with **declaration-order compositing** — entry `[i]`
- * draws on top of entry `[i-1]`. The two outer fields differ in *bounds* and
- * *pipeline position*; an individual stack draws the same way in both scopes.
+ * Carried by `NodeAppearance.overlays` (inherited by both [MediaAppearance]
+ * and [FrameAppearance]). On a media node the stack paints above the media
+ * pixels, bounded by the media rect. On a frame node it paints above the
+ * frame's combined children + background output, clipped to the frame rect.
+ * Both use the same **declaration-order compositing** — entry `[i]` draws on
+ * top of entry `[i-1]`. The renderer dispatches by node type; the data shape
+ * is uniform.
  *
- * See `docs/architecture/appearance.md § 7.1`.
+ * See `docs/architecture/appearance.md § 13` (unified field) and § 7.1
+ * (`OverlayStyle` value type).
  */
 @Serializable
 data class OverlayStyle(

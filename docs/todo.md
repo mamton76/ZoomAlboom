@@ -851,29 +851,29 @@ See [appearance.md § 12](architecture/appearance.md#12-proposed-evolution--clip
 
 ### 20.7 Overlay field unification (`MediaAppearance.overlays` + `FrameAppearance.contentOverlays` → `base.overlays`)
 
-See [appearance.md § 13](architecture/appearance.md#13-proposed-evolution--unified-overlays-on-the-base). Status: committed 2026-05-19, pending implementation. Behavior-preserving rename.
+See [appearance.md § 13](architecture/appearance.md#13-proposed-evolution--unified-overlays-on-the-base). Code work complete 2026-05-19; doc cleanup (§20.7.5) still pending. Behavior-preserving rename — legacy albums migrate transparently via `SceneGraphSerializer`.
 
 #### 20.7.1 Domain model
-- [ ] Move `overlays: List<OverlayStyle>` to `NodeAppearance` base abstract; default `emptyList()`
-- [ ] Remove `MediaAppearance.overlays` declaration (keep override on the subclass)
-- [ ] Remove `FrameAppearance.contentOverlays` field; override `overlays` on the subclass
+- [x] Move `overlays: List<OverlayStyle>` to `NodeAppearance` base abstract; default `emptyList()`
+- [x] Remove `MediaAppearance.overlays` declaration (keep override on the subclass)
+- [x] Remove `FrameAppearance.contentOverlays` field; override `overlays` on the subclass
 
 #### 20.7.2 Serializer migration
-- [ ] `SceneGraphSerializer` read-time lift: when reading a `FrameAppearance`, if `contentOverlays` is present in the JSON, populate `overlays` instead
-- [ ] `MediaAppearance.overlays` already has the right name — no JSON change needed
-- [ ] Write path emits `overlays` for both subtypes; `contentOverlays` is removed from the wire format
+- [x] `SceneGraphSerializer` read-time lift: when reading a `FrameAppearance`, if `contentOverlays` is present in the JSON, populate `overlays` instead
+- [x] `MediaAppearance.overlays` already has the right name — no JSON change needed
+- [x] Write path emits `overlays` for both subtypes; `contentOverlays` is removed from the wire format
 
 #### 20.7.3 Renderer rename
-- [ ] `buildFramePaintEvents` (`feature/canvas/view/FramePaintEvents.kt`) — read `appearance.overlays` for the layered-frame check (was `appearance.contentOverlays`)
-- [ ] `FullFrameRenderer` overlay pass — read `appearance.overlays`
-- [ ] `FullMediaRenderer` — no change (field name unchanged for media)
-- [ ] `drawOverlayStack` call sites — no change (helper takes a `List<OverlayStyle>` regardless of which field it came from)
+- [x] `buildFramePaintEvents` (`feature/canvas/view/FramePaintEvents.kt`) — read `appearance.overlays` for the layered-frame check (was `appearance.contentOverlays`)
+- [x] `FullFrameRenderer` overlay pass — read `appearance.overlays`
+- [x] `FullMediaRenderer` — no change (field name unchanged for media)
+- [x] `drawOverlayStack` call sites — no change (helper takes a `List<OverlayStyle>` regardless of which field it came from)
 
 #### 20.7.4 Editor rename
-- [ ] `FrameAppearanceBottomSheet` — `OverlayListEditor` now binds to `appearance.overlays` (was `appearance.contentOverlays`)
-- [ ] `MediaAppearanceBottomSheet` — no change
-- [ ] `CanvasAction.SetFrameAppearance` / `SetMediaAppearance` payloads — already carry the whole `FrameAppearance` / `MediaAppearance`, so payload shape changes only through the model rename
-- [ ] If popup-based per-concept editors (§5d / context-menu) land first, the unified field naturally fits the unified "Edit overlays" popup
+- [x] `FrameAppearanceBottomSheet` — `OverlayListEditor` now binds to `appearance.overlays` (was `appearance.contentOverlays`)
+- [x] `MediaAppearanceBottomSheet` — no change
+- [x] `CanvasAction.SetFrameAppearance` / `SetMediaAppearance` payloads — already carry the whole `FrameAppearance` / `MediaAppearance`, so payload shape changes only through the model rename
+- [x] If popup-based per-concept editors (§5d / context-menu) land first, the unified field naturally fits the unified "Edit overlays" popup
 
 #### 20.7.5 Doc cleanup (after code lands)
 - [ ] Collapse `appearance.md §§ 4–5` into a one-line historical note

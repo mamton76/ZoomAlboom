@@ -43,7 +43,7 @@ class FramePaintEventsTest {
 
     private val solidOverlay = FrameAppearance(
         background = BackgroundData.SolidBackgroundData("#202020"),
-        contentOverlays = listOf(
+        overlays = listOf(
             OverlayStyle(
                 source = OverlaySource.SolidColor("#40FFFFFF"),
                 opacity = 0.25f,
@@ -53,7 +53,7 @@ class FramePaintEventsTest {
     )
 
     @Test
-    fun `frame without contentOverlays emits a single NodePass`() {
+    fun `frame without overlays emits a single NodePass`() {
         val f = frame("f", zIndex = 0f)
         val events = buildFramePaintEvents(listOf(vn(f)), membership)
 
@@ -114,7 +114,7 @@ class FramePaintEventsTest {
 
     @Test
     fun `non-layered frame with members preserves single-pass order`() {
-        // A frame with no contentOverlays — even with members, no Surface/Overlay split.
+        // A frame with no overlays — even with members, no Surface/Overlay split.
         val f = frame("f", zIndex = 1f, w = 200f, h = 200f)
         val m = media("m", zIndex = 5f)
 

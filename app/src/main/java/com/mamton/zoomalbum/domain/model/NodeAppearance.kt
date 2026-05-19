@@ -5,21 +5,23 @@ import kotlinx.serialization.Serializable
 /**
  * Non-destructive visual styling shared by every styleable [CanvasNode] variant.
  *
- * The base owns only the four properties that mean the same thing on every
- * node: surface opacity, corner rounding of the node rect, border on the node
- * rect, drop shadow cast by the node rect. Concrete subclasses ([FrameAppearance]
- * and the upcoming `MediaAppearance`) add their own fields — background,
- * overlays, content overlays, etc.
+ * The base owns the cross-cutting properties that mean the same thing on every
+ * node: surface opacity, corner rounding of the node rect, an ordered overlay
+ * stack painted above the node's own rendered output, a border, and a drop
+ * shadow. Concrete subclasses ([FrameAppearance], [MediaAppearance]) add their
+ * own fields — background, crop, decoration, etc.
  *
- * [NodeAppearance] deliberately does not declare a generic `overlays` field.
- * Media-level and container-level overlays sit at different render-pipeline
- * positions and are kept as separate fields on each subclass — see
- * `docs/architecture/appearance.md § 4–5`.
+ * [overlays] is unified across node types: for a media node it paints above
+ * the media's pixels; for a frame node it paints above the frame's combined
+ * children + background output, clipped to the frame rect. The renderer
+ * dispatches by node type — the data model is one field.
+ * See `docs/architecture/appearance.md § 13`.
  */
 @Serializable
 sealed class NodeAppearance {
     abstract val opacity: Float
     abstract val cornerRadius: Float
+    abstract val overlays: List<OverlayStyle>
     abstract val border: BorderStyle?
     abstract val shadow: ShadowStyle?
 }

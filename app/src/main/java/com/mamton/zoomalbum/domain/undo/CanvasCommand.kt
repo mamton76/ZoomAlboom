@@ -10,7 +10,7 @@ enum class CommandKind {
     SET_ALBUM_BACKGROUND,
     /**
      * Frame appearance mutation — covers the entire `FrameAppearance` (background,
-     * contentOverlays, border, shadow, titleStyle, opacity, cornerRadius).
+     * overlays, border, shadow, titleStyle, opacity, cornerRadius).
      * Wire name kept as `SET_FRAME_BACKGROUND` so existing on-disk history files
      * keep deserializing; semantics broadened with the appearance system.
      */

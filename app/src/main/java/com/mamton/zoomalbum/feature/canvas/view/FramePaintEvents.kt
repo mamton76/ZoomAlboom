@@ -9,9 +9,9 @@ import com.mamton.zoomalbum.feature.canvas.viewmodel.VisibleNode
  * Discrete unit of work for the canvas paint loop.
  *
  * Most frames paint in a single [NodePass]. Frames with non-empty
- * `FrameAppearance.contentOverlays` need their paint split so that their
- * members sandwich between the frame's surface (background) and its
- * contentOverlays + border — see `docs/architecture/rendering.md § 6b`.
+ * `FrameAppearance.overlays` need their paint split so that their members
+ * sandwich between the frame's surface (background) and its overlays +
+ * border — see `docs/architecture/rendering.md § 6b`.
  *
  * Events carry a [sortKey] so the loop can mix them with regular node paints
  * in z-order: surface → members in their own z-order → overlay (just after

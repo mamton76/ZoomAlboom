@@ -33,7 +33,8 @@ import com.mamton.zoomalbum.domain.model.OverlayStyle
 
 /**
  * Editor for an ordered `List<OverlayStyle>` — the shape carried by
- * `MediaAppearance.overlays` and `FrameAppearance.contentOverlays`.
+ * `NodeAppearance.overlays` (inherited by both `MediaAppearance` and
+ * `FrameAppearance`).
  *
  * Compositing is declaration-order: entry `[i]` draws above entry `[i-1]`.
  * The UI exposes per-entry source / opacity / blend mode, plus up / down /

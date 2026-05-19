@@ -16,11 +16,19 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class VisibilityPolicy(
     val referenceScale: Float,
-    val minRelativeZoom: Float = 0.025f,
-    val maxRelativeZoom: Float = 10.0f,
+    val minRelativeZoom: Float = DEFAULT_MIN_RELATIVE_ZOOM,
+    val maxRelativeZoom: Float = DEFAULT_MAX_RELATIVE_ZOOM,
     val belowRangeMode: RenderDetail = RenderDetail.Hidden,
     val aboveRangeMode: RenderDetail = RenderDetail.Full,
-)
+) {
+    companion object {
+        /** Default lower-bound for [minRelativeZoom] — applied when none is provided. */
+        const val DEFAULT_MIN_RELATIVE_ZOOM = 0.025f
+
+        /** Default upper-bound for [maxRelativeZoom] — applied when none is provided. */
+        const val DEFAULT_MAX_RELATIVE_ZOOM = 10.0f
+    }
+}
 
 @Serializable
 enum class RenderDetail {

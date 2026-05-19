@@ -40,7 +40,7 @@ import com.mamton.zoomalbum.domain.model.ShadowStyle
  * large world-coordinate dimensions without crashing.
  *
  * For frames whose appearance demands layered painting (a non-empty
- * `contentOverlays` list), the caller should use [FrameRendererPhased] directly
+ * `overlays` list), the caller should use [FrameRendererPhased] directly
  * with [FramePaintPhase.Surface] / [FramePaintPhase.Overlay] interleaved around
  * the frame's member nodes — see `docs/architecture/rendering.md § 6b`.
  */
@@ -58,7 +58,7 @@ fun CanvasNodeRenderer(node: CanvasNode, detail: RenderDetail) {
  * - [Both] = today's single-pass paint (background + border in one Spacer).
  * - [Surface] = shadow + background only. Use as the first half of a layered
  *   render so members can be painted on top.
- * - [Overlay] = contentOverlays + border (+ future title/contentEffect). Use as
+ * - [Overlay] = overlays + border (+ future title/contentEffect). Use as
  *   the second half, after all the frame's members have painted.
  */
 enum class FramePaintPhase { Both, Surface, Overlay }
@@ -66,10 +66,10 @@ enum class FramePaintPhase { Both, Surface, Overlay }
 /**
  * True iff this frame needs the renderer to split its paint into a separate
  * Surface / Overlay pair so member nodes can be sandwiched between background
- * and contentOverlays. False = single-pass paint is sufficient.
+ * and overlays. False = single-pass paint is sufficient.
  */
 val CanvasNode.Frame.needsLayeredPaint: Boolean
-    get() = !appearance?.contentOverlays.isNullOrEmpty()
+    get() = !appearance?.overlays.isNullOrEmpty()
 
 @Composable
 fun FrameRendererPhased(
@@ -160,7 +160,7 @@ private fun DrawScope.drawFrameBackground(
     }
 }
 
-/** Full render: shadow + background on the Surface pass; contentOverlays + border on the Overlay pass. */
+/** Full render: shadow + background on the Surface pass; overlays + border on the Overlay pass. */
 @Composable
 private fun FullFrameRenderer(
     cx: Float, cy: Float, rotation: Float,
@@ -172,8 +172,8 @@ private fun FullFrameRenderer(
     val surfaceAlpha = appearance?.opacity ?: 1f
     val cornerRadiusValue = appearance?.cornerRadius ?: DEFAULT_FRAME_CORNER_RADIUS
     val textureBitmap = rememberBackgroundBitmap(background)
-    val contentOverlays = appearance?.contentOverlays.orEmpty()
-    val overlayTextureBitmaps = rememberOverlayTextureBitmaps(contentOverlays)
+    val overlays = appearance?.overlays.orEmpty()
+    val overlayTextureBitmaps = rememberOverlayTextureBitmaps(overlays)
 
     Spacer(
         modifier = Modifier
@@ -210,10 +210,10 @@ private fun FullFrameRenderer(
                 }
 
                 if (phase != FramePaintPhase.Surface) {
-                    if (contentOverlays.isNotEmpty()) {
+                    if (overlays.isNotEmpty()) {
                         withRoundedClip(left, top, right, bottom, cornerRadiusValue) {
                             drawOverlayStack(
-                                overlays = contentOverlays,
+                                overlays = overlays,
                                 left = left, top = top, right = right, bottom = bottom,
                                 textureBitmaps = overlayTextureBitmaps,
                             )
@@ -233,7 +233,7 @@ private fun FullFrameRenderer(
     )
 }
 
-/** Simplified: thin border (+ optional background) on the Surface pass; no contentOverlays at this LOD. */
+/** Simplified: thin border (+ optional background) on the Surface pass; no overlays at this LOD. */
 @Composable
 private fun SimplifiedFrameRenderer(
     cx: Float, cy: Float, rotation: Float,
@@ -241,7 +241,7 @@ private fun SimplifiedFrameRenderer(
     appearance: FrameAppearance?,
     phase: FramePaintPhase,
 ) {
-    // Simplified never paints contentOverlays — collapse the Overlay pass into the Surface pass
+    // Simplified never paints overlays — collapse the Overlay pass into the Surface pass
     // by skipping the Overlay-only invocation.
     if (phase == FramePaintPhase.Overlay) return
 

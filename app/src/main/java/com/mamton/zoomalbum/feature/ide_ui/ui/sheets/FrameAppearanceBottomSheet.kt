@@ -106,8 +106,8 @@ fun FrameAppearanceBottomSheet(
             Spacer(Modifier.height(8.dp))
 
             OverlayListEditor(
-                overlays = draft.contentOverlays,
-                onChange = { draft = draft.copy(contentOverlays = it) },
+                overlays = draft.overlays,
+                onChange = { draft = draft.copy(overlays = it) },
                 tileSizeUnitLabel = "world units",
             )
 

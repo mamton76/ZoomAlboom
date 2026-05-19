@@ -27,6 +27,7 @@ import com.mamton.zoomalbum.domain.model.MembershipState
 import com.mamton.zoomalbum.domain.usecase.FrameMembershipUseCase
 import com.mamton.zoomalbum.feature.canvas.gestures.infiniteCanvasGestures
 import com.mamton.zoomalbum.feature.canvas.gestures.nodeInteractionGestures
+import androidx.compose.runtime.rememberUpdatedState
 import com.mamton.zoomalbum.feature.canvas.gestures.tapAndLongPressGestures
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
@@ -35,7 +36,22 @@ import kotlin.math.atan2
 @Composable
 fun CanvasScreen(
     viewModel: CanvasViewModel = hiltViewModel(),
-    onShowOverlapPicker: (List<CanvasNode>) -> Unit = {},
+    onShowContextMenu: (ContextMenuRequest) -> Unit = {},
+    /**
+     * Fired when the user starts any canvas gesture that should dismiss an open
+     * context menu (tap, rect-select drag). NOT fired on long-press, because the
+     * long-press path produces a new [ContextMenuRequest] via [onShowContextMenu]
+     * which replaces the existing popup naturally (no transient dismiss frame).
+     */
+    onCanvasGesture: () -> Unit = {},
+    /**
+     * True iff a context-menu popup is currently open. While open, tap /
+     * double-tap / drag-start dismiss the popup (via [onCanvasGesture]) and
+     * suppress their normal canvas actions — so users can close the popup
+     * without losing their selection. Long-press still fires normally to
+     * support single-gesture popup replacement on another node.
+     */
+    isContextMenuOpen: Boolean = false,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -52,6 +68,29 @@ fun CanvasScreen(
 
     // Mutable ref for rectangle selection start point (world coords).
     val rectStartWorld = remember { floatArrayOf(0f, 0f) }
+
+    // Long-press → context-menu handoff. `onLongPress` sets the anchor (or
+    // null for empty-space) and optionally a list of overlapping nodes for
+    // the picker; `onLongPressLift` reads both on lift-without-drag to open
+    // the menu. `skipMenu` is true when long-press fired in a non-Edit mode.
+    // Mutable state is captured by reference via this remembered holder so
+    // it's stable across recompositions (the gesture lambdas need to read
+    // values set in a sibling lambda).
+    val menuCtx = remember {
+        object {
+            var anchor: String? = null
+            var pickerNodes: List<CanvasNode>? = null
+            var skipMenu: Boolean = false
+        }
+    }
+
+    // `tapAndLongPressGestures` is implemented as `pointerInput(Unit) { … }`,
+    // which captures its callbacks ONCE at first composition and never restarts.
+    // Plain primitive parameters (`isContextMenuOpen`) captured by those lambdas
+    // would be stuck at their initial value. `rememberUpdatedState` wraps the
+    // boolean in a stable State holder whose `.value` reads fresh on each
+    // lambda invocation — so the gesture handlers see the live menu-open flag.
+    val isContextMenuOpenLatest by rememberUpdatedState(isContextMenuOpen)
 
     // Screen size in pixels — needed by world-locked background renderer to
     // compute the visible world rect. Updated synchronously with the viewmodel's
@@ -146,6 +185,11 @@ fun CanvasScreen(
                     }
                 },
                 onDragBegin = { kind ->
+                    // Layer 1 (node body drag / resize / rotation handle): dismiss
+                    // the popup on gesture start, but proceed with the interaction.
+                    // Same rationale as the camera-gesture branch — continuous edit
+                    // intent shouldn't be lost just because the menu was open.
+                    if (isContextMenuOpenLatest) onCanvasGesture()
                     viewModel.onAction(CanvasAction.BeginInteraction(kind))
                 },
                 onDragEnd = {
@@ -156,6 +200,13 @@ fun CanvasScreen(
             // Layer 2: tap + double-tap + long-press+drag — single Main pass handler
             .tapAndLongPressGestures(
                 onTap = { offset ->
+                    if (isContextMenuOpenLatest) {
+                        // Popup is open — single tap dismisses it without
+                        // running the normal Select/Deselect, so users can
+                        // close the menu without losing their selection.
+                        onCanvasGesture()
+                        return@tapAndLongPressGestures
+                    }
                     val hit = viewModel.hitTest(offset.x, offset.y)
                     when (state.mode) {
                         CanvasInteractionMode.Edit -> {
@@ -174,32 +225,73 @@ fun CanvasScreen(
                         }
                     }
                 },
-                onDoubleTap = { viewModel.reset() },
+                onDoubleTap = {
+                    if (isContextMenuOpenLatest) {
+                        // Popup is open — dismiss it instead of resetting the camera.
+                        onCanvasGesture()
+                        return@tapAndLongPressGestures
+                    }
+                    viewModel.reset()
+                },
                 onLongPress = { screenX, screenY ->
-                    // View / Presentation: swallow long-press — no overlap picker,
-                    // no selection toggle, no rect-select drag.
-                    if (state.mode != CanvasInteractionMode.Edit) return@tapAndLongPressGestures true
+                    // Reset the menu-handoff state for this gesture.
+                    menuCtx.anchor = null
+                    menuCtx.pickerNodes = null
+                    menuCtx.skipMenu = false
+
+                    // View / Presentation: swallow long-press — no selection
+                    // resolution, no rect-select drag, no context menu.
+                    if (state.mode != CanvasInteractionMode.Edit) {
+                        menuCtx.skipMenu = true
+                        return@tapAndLongPressGestures true
+                    }
 
                     // Edit long-press routing:
-                    //   >1 hits → overlap picker dialog (consume)
-                    //   1 hit   → toggle that node in selection (consume; no rect drag)
-                    //   0 hits  → fall through to rect-select drag
+                    //   >1 hits → add the topmost to selection (it becomes the
+                    //             initial anchor) and remember the full stack
+                    //             so the popup renders a checkbox picker above
+                    //             the menu items.
+                    //   1 hit   → add that node to selection. Anchor = it.
+                    //   0 hits  → fall through; if user drags → rect-select, if
+                    //             user lifts → empty-space context menu.
                     val hits = viewModel.hitTestAll(screenX, screenY)
                     when {
-                        hits.size > 1 -> {
-                            onShowOverlapPicker(hits)
-                            true
-                        }
-
-                        hits.size == 1 -> {
-                            viewModel.onAction(CanvasAction.ToggleNodeSelection(hits[0].id))
+                        hits.isNotEmpty() -> {
+                            // `hitTestAll` sorts by z descending, so hits[0] is the topmost.
+                            val topmost = hits[0]
+                            viewModel.onAction(CanvasAction.AddNodeToSelection(topmost.id))
+                            menuCtx.anchor = topmost.id
+                            menuCtx.pickerNodes = if (hits.size > 1) hits else null
                             true
                         }
 
                         else -> false
                     }
                 },
+                onLongPressLift = { screenX, screenY ->
+                    // Fires on UP after a long-press that didn't drag. Selection-
+                    // resolution actions already fired in `onLongPress`; we just open
+                    // the menu scoped to the post-resolution selection + anchor.
+                    if (menuCtx.skipMenu) return@tapAndLongPressGestures
+                    if (state.mode != CanvasInteractionMode.Edit) return@tapAndLongPressGestures
+                    onShowContextMenu(
+                        ContextMenuRequest(
+                            selection = viewModel.state.value.selectedNodeIds,
+                            anchorNodeId = menuCtx.anchor,
+                            anchorScreenX = screenX,
+                            anchorScreenY = screenY,
+                            pickerNodes = menuCtx.pickerNodes,
+                        ),
+                    )
+                },
                 onDragStart = { screenX, screenY ->
+                    if (isContextMenuOpenLatest) {
+                        // Popup is open — drag dismisses the popup but does NOT
+                        // start a rect-select. User releases and drags again on
+                        // a fresh gesture for rect-select.
+                        onCanvasGesture()
+                        return@tapAndLongPressGestures
+                    }
                     val (wx, wy) = TransformUtils.screenToWorld(screenX, screenY, state.camera)
                     rectStartWorld[0] = wx
                     rectStartWorld[1] = wy
@@ -242,6 +334,13 @@ fun CanvasScreen(
             )
             // Layer 3: canvas pan/zoom/rotate — Main pass handler
             .infiniteCanvasGestures { centroid, pan, zoom, rotation ->
+                // Camera gestures stream many updates per second. We dismiss
+                // the popup on the first call and let the rest of the gesture
+                // pan / zoom / rotate the canvas normally — closing the menu
+                // shouldn't also throw away the user's pinch / pan intent.
+                // (Differs from tap / drag-start, where the gesture is
+                // discrete and "dismiss only" is the right rule.)
+                if (isContextMenuOpenLatest) onCanvasGesture()
                 viewModel.onGesture(centroid, pan, zoom, rotation)
             },
     ) {
@@ -307,6 +406,7 @@ fun CanvasScreen(
                     cameraScale = state.camera.scale,
                     rotationHandleEnabled = true, // TODO: wire to InteractionSettings
                     groupTransform = state.groupSelectionTransform,
+                    anchorNodeId = state.contextAnchorNodeId,
                 )
             }
             state.selectionRect?.let { rect -> SelectionRectOverlay(rect) }

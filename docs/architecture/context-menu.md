@@ -30,17 +30,28 @@ This unifies a single discoverable affordance ("long-press = menu") with the exi
 
 ```kotlin
 data class ContextMenuRequest(
-    val selection: Set<NodeId>,       // what most actions act on (post-resolution)
-    val anchorNodeId: NodeId?,        // the long-pressed node; null for empty-space menu
-    val anchorPosScreen: Offset,      // where to place the popover
+    val selection: Set<NodeId>,            // what most actions act on (post-resolution)
+    val anchorNodeId: NodeId?,             // the long-pressed node; null for empty-space menu
+    val anchorScreenX: Float,              // where to place the popover (screen pixels)
+    val anchorScreenY: Float,
+    val pickerNodes: List<CanvasNode>?,    // non-null for stacked long-press; renders the
+                                           // inline checkbox picker above the menu items
 )
 ```
 
 - `selection` is the **post-resolution** selection — after Phase 1's add-or-keep step.
-- `anchorNodeId` is the node under the finger at long-press time, even when it's already a member of `selection`.
+- `anchorNodeId` is the node under the finger at long-press time, even when it's already a member of `selection`. For stacked long-press it starts as the topmost hit and updates each time the user toggles a different picker row.
+- `pickerNodes` is the full list of overlapping hits when long-press landed on a stack; the popup renders a checkbox row per node above the menu items, with the anchor row highlighted.
 - Menu items are split into:
   - **Selection-scoped** — operate on every node in `selection` (Align, Distribute, Create frame around selection, Delete selection, ...).
   - **Anchor-scoped** — operate on `anchorNodeId` specifically (Remove this from selection, Edit this only, ...). Shown only when `anchorNodeId != null` and `selection.size > 1` and `anchorNodeId in selection`.
+
+**Anchor visual feedback.** The anchor gets two kinds of visual treatment while the popup is open:
+
+- **In the popup picker row** (stacked long-press only): semibold label + `secondaryContainer`-tinted background on the matching row, so the user sees which checkbox is "the anchor right now."
+- **On the canvas itself**: `SelectionOverlay` draws an outer halo around the anchor node — a translucent `AccentCyan` ring offset 6 px (screen-space) outside the regular selection border, stroke 4 px. The halo follows when the anchor changes (e.g. user toggles a different picker row) and disappears when the popup closes.
+
+The canvas-side highlight is driven by `CanvasState.contextAnchorNodeId`, mirrored from `ContextMenuRequest.anchorNodeId` via a `LaunchedEffect` in `CanvasScaffold`. The popup-side highlight reads directly from `request.anchorNodeId`.
 
 The split is what answers the "how do I remove one object from a 3-object selection?" question without re-introducing the toggle gesture: that action becomes a visible, discoverable menu item rather than a hidden long-press semantics.
 
@@ -63,13 +74,15 @@ DOWN
   · Phase 2 (long-press fired):
       [a] resolve selection:
             empty-space hit:    do nothing yet
-            single-node hit:    AddNodeToSelection(id)   ← new action
-            stacked-node hit:   show OverlapPicker; on pick: AddNodeToSelection(picked)
+            single-node hit:    AddNodeToSelection(id)
+            stacked-node hit:   AddNodeToSelection(topmost); remember the full hit
+                                list as picker rows for the menu (see § 4)
             already-selected:   keep selection unchanged
       [b] wait for drag-or-lift:
             pointer moves > slop:   start rect-select drag from current position;
                                     DO NOT open menu
-            pointer lifts:          dispatch OpenContextMenu(selection, anchor, posScreen)
+            pointer lifts:          dispatch OpenContextMenu(selection, anchor, posScreen,
+                                    pickerNodes)
   ↓ (two+ fingers down at any time)
 [ Layer 3 — infinite canvas gestures ]
   · pan / pinch / rotate; cancels any in-flight Phase 2
@@ -80,6 +93,24 @@ Three invariants the implementation must keep:
 1. **Selection action fires on long-press detection, not on UP.** This is what gives the haptic moment a meaning. If the user then drags into rect-select, the selection change still stands and the rect-select union grows from there.
 2. **Menu opens on UP, only if no drag occurred.** Drag = "still selecting" path, no menu.
 3. **`AddNodeToSelection` is idempotent.** Long-pressing an already-selected node leaves `selection` untouched. The "I want to act on just this one" intent is served by the **`Edit this only`** anchor-scoped menu item, not by the gesture.
+
+### Dismissal rules
+
+When the popup is open, canvas gestures behave differently — discrete gestures (tap, double-tap, drag-start) dismiss the popup *without* running their normal action so users can close it without losing selection. Continuous gestures (camera pan/pinch, node drag/resize/rotate) dismiss the popup *and* still execute, because the gesture is itself the user's edit intent and there's no discrete side-effect to undo.
+
+| Gesture (popup open) | Effect |
+|---|---|
+| Tap (anywhere outside the popup) | Dismisses popup. Suppresses the normal `SelectNode` / `DeselectAll`. |
+| Double-tap | Dismisses popup. Suppresses the normal camera reset. |
+| Drag-start (rect-select path) | Dismisses popup. Suppresses the normal rect-select. User releases and drags again to start a fresh rect-select. |
+| Camera pan / pinch / rotate (two-finger, Layer 3) | Dismisses popup. Camera updates **proceed** — the user's pinch/pan/rotate of the canvas continues normally. |
+| Node body drag / resize / rotation handle (Layer 1) | Dismisses popup. Interaction **proceeds** — the user's move/resize/rotate of the selection continues normally. |
+| Long-press elsewhere | Replaces the popup in-place with a new request (selection-resolution + anchor for the new target). Single gesture, no intermediate dismiss step. |
+| Back-press | Dismisses popup. (`Popup.dismissOnBackPress = true`.) |
+| Menu item tap | Runs the item's action; popup dismisses. |
+| Picker checkbox tap | Toggles selection membership for that node; updates anchor; popup stays open. |
+
+The `CanvasScreen` Composable takes `isContextMenuOpen: Boolean`, wraps it with `rememberUpdatedState` (the gesture coroutines from `pointerInput(Unit)` capture lambdas once at first composition and never restart, so a plain primitive parameter would freeze), and gates the gesture callbacks on the live value. `Popup.focusable = false` keeps long-press elsewhere working as a single gesture.
 
 ---
 
@@ -234,5 +265,5 @@ When this lands, update:
 2. **Empty popover stub.** On UP after long-press, open a `Popover` at touch point. No items yet — confirms positioning and dismissal.
 3. **Selection-scoped items.** Wire single-media / single-frame / group menus. `Create frame around selection` can ship here or via `ContextualActionBar` first (see § 5).
 4. **Anchor-scoped items.** Add `Remove this from selection` / `Edit this only`. This is the moment the proposal becomes strictly better than the old toggle.
-5. **Overlap picker → add semantics.** Closes the [selection.md § 6](selection.md#6-open-issues) open issue.
+5. **Overlap picker inline in the popup.** Closes the [selection.md § 6](selection.md#6-open-issues) open issue. The separate `OverlapPickerDialog` is removed; stacked-long-press now opens the context menu with a checkbox row per overlapping node above the menu items. The anchor row is highlighted (semibold + tinted background); toggling a row dispatches `ToggleNodeSelection` and updates the anchor.
 6. **Empty-space menu.** Add Photo / Add Frame / Add Text / Paste / Add Guideline.

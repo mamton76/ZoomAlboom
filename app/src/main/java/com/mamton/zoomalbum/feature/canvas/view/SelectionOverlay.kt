@@ -21,6 +21,10 @@ import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
  * - **Single node**: border + corner handles + rotation handle on that node.
  * - **Multiple nodes**: individual border on each node, plus a group
  *   rectangle (with handles + rotation handle) that rotates as a rigid body.
+ *
+ * When [anchorNodeId] is non-null and present in [selectedNodes], that node
+ * also gets an outer halo communicating which node anchor-scoped context
+ * menu items operate on (see `docs/architecture/context-menu.md § 2`).
  */
 @Composable
 fun SelectionOverlay(
@@ -28,8 +32,17 @@ fun SelectionOverlay(
     cameraScale: Float,
     rotationHandleEnabled: Boolean,
     groupTransform: Transform?,
+    anchorNodeId: String? = null,
 ) {
     if (selectedNodes.isEmpty()) return
+
+    // Anchor halo draws first so the regular selection border overlays on top —
+    // halo sits outside the border, not behind it visually.
+    if (anchorNodeId != null) {
+        selectedNodes.firstOrNull { it.id == anchorNodeId }?.let { anchor ->
+            AnchorHalo(transform = anchor.transform, cameraScale = cameraScale)
+        }
+    }
 
     if (selectedNodes.size == 1) {
         // Single node: full chrome (border + handles + rotation handle)
@@ -59,6 +72,39 @@ fun SelectionOverlay(
             )
         }
     }
+}
+
+/**
+ * Outer halo drawn around the context-menu anchor node — a soft ring offset
+ * outside the node's bounds. Visible only while the popup is open.
+ */
+@Composable
+private fun AnchorHalo(
+    transform: Transform,
+    cameraScale: Float,
+) {
+    val haloOffset = 6f / cameraScale
+    val haloStroke = 4f / cameraScale
+    Spacer(
+        modifier = Modifier
+            .graphicsLayer {
+                translationX = transform.cx
+                translationY = transform.cy
+                rotationZ = transform.rotation
+                transformOrigin = TransformOrigin(0f, 0f)
+                clip = false
+            }
+            .drawBehind {
+                val halfW = transform.renderW / 2f + haloOffset
+                val halfH = transform.renderH / 2f + haloOffset
+                drawRect(
+                    color = AccentCyan.copy(alpha = 0.55f),
+                    topLeft = Offset(-halfW, -halfH),
+                    size = Size(halfW * 2, halfH * 2),
+                    style = Stroke(width = haloStroke),
+                )
+            },
+    )
 }
 
 /**

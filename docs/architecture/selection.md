@@ -26,9 +26,9 @@ The table below describes **Edit mode** behavior. For non-Edit modes see [§ 7 M
 |---------|--------|-------------------|
 | Tap on a node | **Replace** — selection becomes `{node}` | `SelectNode(id)` |
 | Tap on empty space | Clear selection | `DeselectAll` |
-| Long-press on a single node | **Toggle** — add if absent, remove if present | `ToggleNodeSelection(id)` |
+| Long-press on a single node | **Add-or-keep** — add to selection if absent; no-op if already selected | `AddNodeToSelection(id)` |
 | Long-press on empty + drag | **Rect-select** — additive if selection was non-empty at drag start, replace otherwise | `SelectNodesInRect(rect, additive)` |
-| Long-press on ≥2 stacked nodes | Overlap picker dialog | `SelectNode(id)` (replace) — see [§ 6](#6-open-issues) |
+| Long-press on ≥2 stacked nodes | Add topmost to selection + open context menu with an inline checkbox picker (see [context-menu.md § 4](context-menu.md#4-menu-content-by-selection-type)) | `AddNodeToSelection(topmost)`; subsequent picker-row toggles dispatch `ToggleNodeSelection(id)` |
 | Frame-list item tap | Replace with one node | `SelectNode(id)` |
 | Double-tap anywhere | Camera reset (unrelated to selection) | — |
 | Drag on a selected node body | Move the whole selection | `MoveSelection(dx, dy)` |
@@ -38,6 +38,7 @@ The table below describes **Edit mode** behavior. For non-Edit modes see [§ 7 M
 **Rationale:**
 - Tap = replace matches touch UX conventions (iOS, Figma iPad). Tap moves focus, doesn't accumulate.
 - Long-press is the explicit "I want multi-select" affordance — discoverable through ContextualActionBar feedback.
+- Long-press is **add-or-keep**, not toggle: the removal intent moves into the [context menu's anchor-scoped items](context-menu.md#2-menu-model) (`Remove this from selection`, `Edit this only`) rather than being a hidden long-press semantic. `ToggleNodeSelection` remains in the codebase as the underlying action for those menu items; no gesture dispatches it.
 - Rect-select is additive when extending an existing selection; replace from scratch when starting fresh.
 
 ## 3. Action API
@@ -47,7 +48,9 @@ The table below describes **Edit mode** behavior. For non-Edit modes see [§ 7 M
 ```kotlin
 sealed interface CanvasAction {
     data class SelectNode(val nodeId: String)            // replace with {id}
-    data class ToggleNodeSelection(val nodeId: String)   // add or remove
+    data class AddNodeToSelection(val nodeId: String)    // additive, idempotent (long-press dispatcher)
+    data class AddNodesToSelection(val nodeIds: Set<String>) // additive union (overlap picker)
+    data class ToggleNodeSelection(val nodeId: String)   // add-or-remove; reserved for future menu "Remove from selection"
     data class SelectNodesInRect(
         val worldRect: BoundingBox,
         val additive: Boolean = false,                   // union vs replace
@@ -114,9 +117,8 @@ Two-or-more-finger camera pan / pinch-zoom / rotate. Single-finger events pass t
 
 ## 6. Open Issues
 
-- **Overlap picker dispatches `SelectNode` (replace), not toggle.** Long-press on a stack of nodes shows the picker and replaces selection with the chosen one — there's no path to toggle a single overlapping node into an existing multi-selection. Revisit when the picker UX is reworked.
 - **Single-tap result has a ~300 ms delay** because Phase 3 of `tapAndLongPressGestures` waits `DOUBLE_TAP_MS` to disambiguate from double-tap. Inherent to the gesture design; could be tuned if it becomes a complaint.
-- **Selection mutations are not undoable.** `SelectNode`, `ToggleNodeSelection`, `DeselectAll`, `SelectNodesInRect` do not push `CanvasCommand` entries. Only structural mutations (move, resize, rotate, add, delete, duplicate) are undoable.
+- **Selection mutations are not undoable.** `SelectNode`, `AddNodeToSelection`, `AddNodesToSelection`, `ToggleNodeSelection`, `DeselectAll`, `SelectNodesInRect` do not push `CanvasCommand` entries. Only structural mutations (move, resize, rotate, add, delete, duplicate) are undoable.
 
 ## 7. Mode Interaction
 

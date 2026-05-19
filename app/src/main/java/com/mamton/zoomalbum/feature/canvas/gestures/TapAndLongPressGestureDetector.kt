@@ -16,14 +16,21 @@ import androidx.compose.ui.input.pointer.pointerInput
  * Gesture priority:
  * 1. **Long-press** (hold > [LONG_PRESS_MS] without moving) →
  *    [onLongPress] fires. If it returns `false`, enters drag loop
- *    ([onDragStart] → [onDragUpdate] → [onDragEnd]).
+ *    ([onDragStart] → [onDragUpdate] → [onDragEnd]). If the user lifts
+ *    without dragging beyond touch-slop, [onLongPressLift] fires instead.
  * 2. **Double-tap** (two taps within [DOUBLE_TAP_MS]) → [onDoubleTap]
  * 3. **Single tap** (no second tap within [DOUBLE_TAP_MS]) → [onTap]
+ *
+ * [onLongPressLift] fires after long-press in *both* paths (consumed and
+ * fall-through), giving callers a single hook for "context menu opens on
+ * lift, drag pre-empts." Selection-resolution actions belong in
+ * [onLongPress]; menu opening belongs in [onLongPressLift].
  */
 fun Modifier.tapAndLongPressGestures(
     onTap: (Offset) -> Unit,
     onDoubleTap: (Offset) -> Unit,
     onLongPress: (screenX: Float, screenY: Float) -> Boolean,
+    onLongPressLift: (screenX: Float, screenY: Float) -> Unit = { _, _ -> },
     onDragStart: (screenX: Float, screenY: Float) -> Unit,
     onDragUpdate: (screenX: Float, screenY: Float) -> Unit,
     onDragEnd: () -> Unit,
@@ -66,18 +73,39 @@ fun Modifier.tapAndLongPressGestures(
             // ── Long-press path ──────────────────────────────
             val handled = onLongPress(startPos.x, startPos.y)
             if (handled) {
+                // Caller consumed selection-resolution. We still wait for UP
+                // so the menu can open on lift, since onLongPressLift is the
+                // single hook for "lift after long-press, no drag." No drag
+                // is possible in the consumed branch.
                 consumeUntilAllUp()
+                onLongPressLift(startPos.x, startPos.y)
             } else {
-                onDragStart(startPos.x, startPos.y)
+                // Fall-through: user may drag (e.g. rect-select) or just lift.
+                // Defer onDragStart until movement crosses touch-slop so a
+                // pure lift fires onLongPressLift, not a zero-area drag.
+                var movedPastSlop = false
                 while (true) {
                     val event = awaitPointerEvent()
                     val change = event.changes.firstOrNull() ?: break
                     if (change.changedToUp()) {
                         change.consume()
-                        onDragEnd()
+                        if (movedPastSlop) {
+                            onDragEnd()
+                        } else {
+                            onLongPressLift(startPos.x, startPos.y)
+                        }
                         break
                     }
-                    onDragUpdate(change.position.x, change.position.y)
+                    if (!movedPastSlop) {
+                        val delta = change.position - startPos
+                        if (delta.x * delta.x + delta.y * delta.y > slopSq) {
+                            movedPastSlop = true
+                            onDragStart(startPos.x, startPos.y)
+                            onDragUpdate(change.position.x, change.position.y)
+                        }
+                    } else {
+                        onDragUpdate(change.position.x, change.position.y)
+                    }
                     change.consume()
                 }
             }

@@ -11,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,6 +27,9 @@ import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
 import com.mamton.zoomalbum.domain.model.RenderDetail
 import com.mamton.zoomalbum.feature.canvas.view.CanvasScreen
+import com.mamton.zoomalbum.feature.canvas.view.ContextMenuItem
+import com.mamton.zoomalbum.feature.canvas.view.ContextMenuPopup
+import com.mamton.zoomalbum.feature.canvas.view.ContextMenuRequest
 import com.mamton.zoomalbum.feature.canvas.view.SelectionDebugPanel
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
@@ -63,7 +67,14 @@ fun CanvasScaffold(
     var showAlbumSettings by remember { mutableStateOf(false) }
     var frameBgEditing by remember { mutableStateOf<CanvasNode.Frame?>(null) }
     var mediaApprEditing by remember { mutableStateOf<CanvasNode.Media?>(null) }
-    var overlapPickerNodes by remember { mutableStateOf<List<CanvasNode>>(emptyList()) }
+    var contextMenuRequest by remember { mutableStateOf<ContextMenuRequest?>(null) }
+
+    // Mirror the popup's anchor into MVI state so `SelectionOverlay` can draw
+    // an outer halo around the anchor node. When the popup closes (or the user
+    // picks a different anchor in the inline picker), the halo follows.
+    LaunchedEffect(contextMenuRequest?.anchorNodeId) {
+        canvasViewModel.onAction(CanvasAction.SetContextAnchor(contextMenuRequest?.anchorNodeId))
+    }
 
     val selectedNodeIds = canvasState.selectedNodeIds
     // Single-Frame selection enables the Background button in the action bar.
@@ -182,7 +193,14 @@ fun CanvasScaffold(
                 .padding(padding),
         ) {
             CanvasScreen(
-                onShowOverlapPicker = { nodes -> overlapPickerNodes = nodes },
+                onShowContextMenu = { request -> contextMenuRequest = request },
+                // Tap / double-tap / drag-start dismisses an open context menu
+                // *without* running its normal canvas action — outside-tap of
+                // the popup is "close only", selection untouched. Long-press is
+                // handled separately: it produces a new request which replaces
+                // the popup in place (zero-flicker swap).
+                onCanvasGesture = { contextMenuRequest = null },
+                isContextMenuOpen = contextMenuRequest != null,
             )
             IdeOverlayScreen()
 
@@ -370,17 +388,42 @@ fun CanvasScaffold(
         )
     }
 
-    // Overlap picker dialog — multi-select, additive (matches long-press semantics).
-    if (overlapPickerNodes.isNotEmpty()) {
-        OverlapPickerDialog(
-            nodes = overlapPickerNodes,
-            onConfirm = { ids ->
-                canvasViewModel.onAction(
-                    com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.AddNodesToSelection(ids),
-                )
-                overlapPickerNodes = emptyList()
+    // Context menu — opens on long-press lift (Edit mode only). See
+    // `docs/architecture/context-menu.md`. Anchor-scoped items use the
+    // post-resolution selection + the long-pressed node id. When the
+    // long-press hit a stack of overlapping nodes, the popup also renders
+    // a checkbox row per stacked node above the menu items so the user
+    // can adjust the selection without leaving the popover.
+    contextMenuRequest?.let { storedRequest ->
+        // The request stored at long-press time carries a *snapshot* of the
+        // selection. Refresh it from live MVI state on every recomposition so
+        // picker checkboxes reflect the actual current selection (toggling a
+        // checkbox dispatches `ToggleNodeSelection`, which mutates state but
+        // not the stored snapshot) and so the menu structure (single vs group)
+        // stays in sync if the user changes selection via the picker.
+        val request = storedRequest.copy(selection = canvasState.selectedNodeIds)
+        val nodesById = remember(canvasState.visibleNodes) {
+            canvasState.visibleNodes.associate { it.node.id to it.node }
+        }
+        val items = buildEditContextMenuItems(
+            request = request,
+            nodesById = nodesById,
+            dispatch = canvasViewModel::onAction,
+            openMediaAppearance = { mediaApprEditing = it },
+            openFrameAppearance = { frameBgEditing = it },
+            openAddSheet = { showAddSheet = true },
+        )
+        ContextMenuPopup(
+            request = request,
+            items = items,
+            onDismiss = { contextMenuRequest = null },
+            onTogglePickerNode = { node ->
+                // Toggle add/remove the picker node and make it the new anchor.
+                // Selection mutation goes through MVI; the popup re-reads it via
+                // the `liveSelection` copy above on the next recomposition.
+                canvasViewModel.onAction(CanvasAction.ToggleNodeSelection(node.id))
+                contextMenuRequest = storedRequest.copy(anchorNodeId = node.id)
             },
-            onDismiss = { overlapPickerNodes = emptyList() },
         )
     }
 
@@ -408,6 +451,118 @@ fun CanvasScaffold(
                 },
                 onDismiss = { pendingFrameMembershipIntent = null },
             )
+        }
+    }
+}
+
+/**
+ * Builds the Edit-mode context menu items for a given long-press request.
+ *
+ * Empty selection → empty-space menu (Add Photo / Add Frame).
+ * Single media   → Edit appearance / Duplicate / Delete.
+ * Single frame   → Edit frame appearance / Navigate / Duplicate / Delete.
+ * Group (≥ 2)    → Duplicate / Delete / Clear selection + (if anchor in selection)
+ *                  Remove this from selection / Edit this only.
+ *
+ * Items in [context-menu.md § 4] that have no underlying action yet
+ * (Add Text, Paste, Add Guideline, Replace media, Edit media — and the
+ * type-specific clip / alpha mask / overlays / crop popups which currently
+ * all share `MediaAppearanceBottomSheet`) are omitted rather than shown
+ * disabled, and will appear once their actions / popups ship.
+ */
+private fun buildEditContextMenuItems(
+    request: ContextMenuRequest,
+    nodesById: Map<String, CanvasNode>,
+    dispatch: (CanvasAction) -> Unit,
+    openMediaAppearance: (CanvasNode.Media) -> Unit,
+    openFrameAppearance: (CanvasNode.Frame) -> Unit,
+    openAddSheet: () -> Unit,
+): List<ContextMenuItem> {
+    val divider = ContextMenuItem.Divider
+    val selection = request.selection
+
+    return when {
+        selection.isEmpty() -> listOf(
+            // No "Add Photo" / "Add Frame" direct items yet — open the existing
+            // AddContentBottomSheet which already routes both via the photo picker
+            // and `CanvasNodeFactory.createFrame`. Splitting into separate menu
+            // items is a follow-up.
+            ContextMenuItem(label = "Add…", onClick = openAddSheet),
+        )
+
+        selection.size == 1 -> {
+            val node = nodesById[selection.first()] ?: return emptyList()
+            when (node) {
+                is CanvasNode.Media -> listOf(
+                    ContextMenuItem(
+                        label = "Edit appearance",
+                        onClick = { openMediaAppearance(node) },
+                    ),
+                    divider,
+                    ContextMenuItem(
+                        label = "Duplicate",
+                        onClick = { dispatch(CanvasAction.DuplicateSelection) },
+                    ),
+                    ContextMenuItem(
+                        label = "Delete",
+                        onClick = { dispatch(CanvasAction.DeleteSelection) },
+                    ),
+                )
+
+                is CanvasNode.Frame -> listOf(
+                    ContextMenuItem(
+                        label = "Edit frame appearance",
+                        onClick = { openFrameAppearance(node) },
+                    ),
+                    ContextMenuItem(
+                        label = "Navigate to frame",
+                        onClick = { dispatch(CanvasAction.FocusNode(node.id)) },
+                    ),
+                    divider,
+                    ContextMenuItem(
+                        label = "Duplicate",
+                        onClick = { dispatch(CanvasAction.DuplicateSelection) },
+                    ),
+                    ContextMenuItem(
+                        label = "Delete",
+                        onClick = { dispatch(CanvasAction.DeleteSelection) },
+                    ),
+                )
+            }
+        }
+
+        else -> {
+            // Group menu. Selection-scoped items first; anchor-scoped items
+            // appended only when the long-pressed node is in the selection
+            // (the common case — long-press on a selected node from a group).
+            val groupItems = mutableListOf(
+                ContextMenuItem(
+                    label = "Duplicate selection",
+                    onClick = { dispatch(CanvasAction.DuplicateSelection) },
+                ),
+                ContextMenuItem(
+                    label = "Delete selection",
+                    onClick = { dispatch(CanvasAction.DeleteSelection) },
+                ),
+                ContextMenuItem(
+                    label = "Clear selection",
+                    onClick = { dispatch(CanvasAction.DeselectAll) },
+                ),
+            )
+            val anchorId = request.anchorNodeId
+            if (anchorId != null && anchorId in selection) {
+                groupItems += divider
+                groupItems += ContextMenuItem(
+                    label = "Remove this from selection",
+                    // ToggleNodeSelection on an already-selected node removes it.
+                    onClick = { dispatch(CanvasAction.ToggleNodeSelection(anchorId)) },
+                )
+                groupItems += ContextMenuItem(
+                    label = "Edit this only",
+                    onClick = { dispatch(CanvasAction.SelectNode(anchorId)) },
+                )
+            }
+            groupItems
         }
     }
 }

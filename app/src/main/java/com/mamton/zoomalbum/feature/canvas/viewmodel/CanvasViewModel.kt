@@ -90,6 +90,15 @@ data class CanvasState(
      * Defaults are session-level, not persisted with the album.
      */
     val frameEditOptions: FrameEditOptions = FrameEditOptions(),
+    /**
+     * Node id of the current long-press anchor — the node the user just
+     * long-pressed (or last toggled in the overlap picker). Non-null only
+     * while the context menu popup is open. Drawn with an outer halo by
+     * `SelectionOverlay` to communicate which node anchor-scoped menu items
+     * (`Remove this from selection`, `Edit this only`) operate on.
+     * See `docs/architecture/context-menu.md § 2`.
+     */
+    val contextAnchorNodeId: String? = null,
 )
 
 // ── Actions ───────────────────────────────────────────────────────────
@@ -98,6 +107,14 @@ sealed interface CanvasAction : Intent {
     // Selection
     data class SelectNode(val nodeId: String) : CanvasAction
     data class ToggleNodeSelection(val nodeId: String) : CanvasAction
+    /**
+     * Add a single node to the selection. Idempotent — no-op if the node is
+     * already selected. Dispatched by the long-press gesture (replaces the
+     * earlier `ToggleNodeSelection` dispatch); the toggle action is retained
+     * for the future context-menu "Remove this from selection" item.
+     * See `docs/architecture/context-menu.md`.
+     */
+    data class AddNodeToSelection(val nodeId: String) : CanvasAction
     /** Union the given ids into the current selection. Insertion order preserved. */
     data class AddNodesToSelection(val nodeIds: Set<String>) : CanvasAction
     /**
@@ -143,6 +160,14 @@ sealed interface CanvasAction : Intent {
     data class SetMode(val mode: CanvasInteractionMode) : CanvasAction
     /** Animated camera focus on the given node (frame or media). */
     data class FocusNode(val nodeId: String) : CanvasAction
+
+    /**
+     * Sets the long-press anchor node id — the node decorated with an outer
+     * halo while the context menu popup is open. `null` clears the halo.
+     * Driven by `CanvasScaffold`'s `LaunchedEffect` that mirrors the
+     * popup's `ContextMenuRequest.anchorNodeId` into MVI state.
+     */
+    data class SetContextAnchor(val nodeId: String?) : CanvasAction
 
     // Backgrounds (§19)
     data class SetAlbumBackground(val background: AlbumBackground?) : CanvasAction
@@ -371,6 +396,13 @@ class CanvasViewModel @Inject constructor(
                     s.copy(selectedNodeIds = updated)
                 }
                 recomputeGroupTransform(_state.value.selectedNodeIds)
+            }
+
+            is CanvasAction.AddNodeToSelection -> {
+                if (action.nodeId in _state.value.selectedNodeIds) return
+                val updated = _state.value.selectedNodeIds + action.nodeId
+                _state.update { it.copy(selectedNodeIds = updated) }
+                recomputeGroupTransform(updated)
             }
 
             is CanvasAction.AddNodesToSelection -> {
@@ -687,6 +719,11 @@ class CanvasViewModel @Inject constructor(
             is CanvasAction.FocusNode -> {
                 val node = _allNodes.value.firstOrNull { it.id == action.nodeId } ?: return
                 startCameraAnimation(node.transform)
+            }
+
+            is CanvasAction.SetContextAnchor -> {
+                if (_state.value.contextAnchorNodeId == action.nodeId) return
+                _state.update { it.copy(contextAnchorNodeId = action.nodeId) }
             }
 
             is CanvasAction.SetAlbumBackground -> {

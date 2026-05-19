@@ -495,33 +495,33 @@ Guidelines are **editor metadata, not `CanvasNode`**. They belong to the Guideli
 
 ## 15. Context Menu
 
-Distinct from `ContextualActionBar` — the action bar is persistent on selection; the context menu is transient on long-press. Full design in [context-menu.md](architecture/context-menu.md) (committed 2026-05-18; pending implementation).
+Distinct from `ContextualActionBar` — the action bar is persistent on selection; the context menu is transient on long-press. Full design in [context-menu.md](architecture/context-menu.md) (committed 2026-05-18; first slice shipped 2026-05-19).
 
 ### 15.1 Edit mode
-- [ ] Long-press on a node → context menu popover at touch point
-- [ ] Menu model: `(selection, anchorNodeId, anchorPosScreen)`. Selection-scoped items + anchor-scoped items per [context-menu.md § 2](architecture/context-menu.md#2-menu-model)
-- [ ] Single-media menu: Edit media / Edit appearance / Edit mask / crop (split into clip + alpha mask + crop when §1.3 popup direction lands) / Edit overlay / Replace media / Duplicate / Delete
-- [ ] Single-frame menu: Edit frame / Edit frame appearance / Navigate to frame / Edit frame contents (post-MVP) / Duplicate frame / Delete frame
-- [ ] Group menu (selection ≥ 2): Edit common appearance / Create frame around selection / Align / Distribute / Duplicate / Delete / Clear selection
-- [ ] Anchor-scoped items (selection ≥ 2, anchor in selection): Remove this from selection / Edit this only
-- [ ] Long-press on empty space → context menu with Add Photo / Add Frame / Add Text / Paste / Add Guideline
+- [x] Long-press on a node → context menu popover at touch point (`ContextMenuPopup` in `feature/canvas/view/ContextMenu.kt`, hosted in `CanvasScaffold`). Popup is non-focusable (transparent to touches outside its surface) so a new long-press on another node immediately replaces the popup; tap / drag / double-tap dismiss via `onCanvasGesture` callback.
+- [x] Menu model: `(selection, anchorNodeId, anchorScreenX, anchorScreenY, pickerNodes)`. Selection-scoped items + anchor-scoped items per [context-menu.md § 2](architecture/context-menu.md#2-menu-model). Stacked-long-press carries the full hit list in `pickerNodes`; the popup renders a checkbox picker row per node above the menu items, with the anchor row highlighted (semibold + tinted background). Toggling a row dispatches `ToggleNodeSelection` and updates the anchor to that node.
+- [x] Single-media menu: `Edit appearance` (opens `MediaAppearanceBottomSheet`), `Duplicate`, `Delete`. Items with no underlying action yet (Edit media, Replace media, separate clip/mask/crop popups) omitted — wired when their actions/popups ship.
+- [x] Single-frame menu: `Edit frame appearance` (opens `FrameAppearanceBottomSheet`), `Navigate to frame` (`FocusNode`), `Duplicate`, `Delete`. `Edit frame contents` omitted (post-MVP).
+- [x] Group menu (selection ≥ 2): `Duplicate selection`, `Delete selection`, `Clear selection`. `Create frame around selection` deferred until §18 ships; `Align` / `Distribute` deferred until §17 ships.
+- [x] Anchor-scoped items (selection ≥ 2, anchor in selection): `Remove this from selection` (dispatches `ToggleNodeSelection(anchorId)` — `ToggleNodeSelection` is no longer dispatched by gestures but is wired here per §15.4), `Edit this only` (`SelectNode(anchorId)`).
+- [x] Long-press on empty space → context menu with `Add…` (single entry opens the existing `AddContentBottomSheet`). Splitting into per-type items (Add Photo / Add Frame / Add Text / Paste / Add Guideline) and direct dispatches is a follow-up; Text/Paste/Guideline don't have underlying infrastructure yet.
 
 ### 15.2 View mode
-- [ ] Long-press on media → viewer menu (Open / Share / Info)
-- [ ] Long-press on frame → frame menu (Focus / Open as Album View)
+- [ ] Long-press on media → viewer menu (Open / Share / Info). Deferred — no underlying viewer/share/info infrastructure yet. View-mode long-press is currently swallowed; no context menu opens.
+- [ ] Long-press on frame → frame menu (Focus / Open as Album View). Deferred — `Focus` is redundant with View-mode tap; `Open as Album View` has no infrastructure.
 
 ### 15.3 Conflict with current long-press semantics — resolved
-- Today long-press = toggle selection ([selection.md § 2](architecture/selection.md#2-gesture-mapping)). Decision: long-press becomes **add-or-keep + open menu on UP**; the "remove this from selection" intent moves into the menu's anchor-scoped items. See §15.4.
+- Today long-press = toggle selection ([selection.md § 2](architecture/selection.md#2-gesture-mapping)). Decision: long-press becomes **add-or-keep + open menu on UP**; the "remove this from selection" intent moves into the menu's anchor-scoped items. See §15.4 (gesture rule rewrite, shipped) and the menu wiring above.
 
 ### 15.4 Gesture rule rewrite (lands first, before the popover)
 Pure-gesture slice that verifies the rule shift in isolation. Behavior-preserving for empty-selection users; replaces "long-press = toggle off" with "long-press = add-or-keep" for non-empty selection.
 
-- [ ] `CanvasAction.AddNodeToSelection(nodeId: String)` — idempotent; `selection - {nodeId}` if absent, no-op if already in. Replaces `ToggleNodeSelection` as the long-press dispatcher.
-- [ ] `ToggleNodeSelection` stays in the codebase as the implementation of the future menu's "Remove this from selection" item; no gesture dispatches it.
-- [ ] `tapAndLongPressGestures` Layer 2 (`feature/canvas/gestures/`) — long-press handler dispatches `AddNodeToSelection(hit.id)` on Phase 1; UP after no drag dispatches `OpenContextMenu(...)` (stubbed initially)
-- [ ] Overlap picker switches from `SelectNode` (replace) to `AddNodeToSelection` (add). Closes [selection.md § 6](architecture/selection.md#6-open-issues) open issue.
-- [ ] Update `selection.md § 2` long-press row to **Add-or-keep**; remove `ToggleNodeSelection` from the dispatcher list.
-- [ ] Update `selection.md § 6` to remove the resolved overlap-picker bullet.
+- [x] `CanvasAction.AddNodeToSelection(nodeId: String)` — additive, idempotent. Replaces `ToggleNodeSelection` as the long-press dispatcher.
+- [x] `ToggleNodeSelection` stays in the codebase as the implementation of the future menu's "Remove this from selection" item; no gesture dispatches it.
+- [x] Long-press handler in `CanvasScreen.kt` dispatches `AddNodeToSelection(hit.id)` for the 1-hit case. UP-after-no-drag → `OpenContextMenu(...)` is deferred to the popover slice.
+- [x] Overlap picker uses additive `AddNodesToSelection(ids)` (already wired in `CanvasScaffold.kt`). The original "picker replaces selection" issue was resolved separately; this slice keeps the additive semantic.
+- [x] Update `selection.md § 2` long-press row to **Add-or-keep**; expand § 3 action list with `AddNodeToSelection` / `AddNodesToSelection`.
+- [x] Update `selection.md § 6` to remove the resolved overlap-picker bullet.
 
 ---
 

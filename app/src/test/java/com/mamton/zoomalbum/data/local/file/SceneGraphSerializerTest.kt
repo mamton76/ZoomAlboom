@@ -347,6 +347,80 @@ class SceneGraphSerializerTest {
     }
 
     @Test
+    fun `re-serialize after contentOverlays migration writes overlays and drops legacy key`() {
+        // After loading a legacy album, re-serializing must emit the unified
+        // shape only — `overlays` present, `contentOverlays` absent. Guards
+        // against accidental re-introduction of the legacy field by codegen
+        // or by manual JSON shape changes.
+        val raw = """
+            {
+              "albumId": 7,
+              "camera": { "cx": 0.0, "cy": 0.0, "scale": 1.0, "rotation": 0.0 },
+              "nodes": [
+                {
+                  "type": "com.mamton.zoomalbum.domain.model.CanvasNode.Frame",
+                  "id": "f1",
+                  "transform": { "cx": 0.0, "cy": 0.0, "w": 100.0, "h": 100.0 },
+                  "appearance": {
+                    "contentOverlays": [
+                      {
+                        "source": { "type": "SolidColor", "color": "#40FFFFFF" },
+                        "opacity": 0.25,
+                        "blendMode": "SoftLight"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val sg = serializer.deserialize(raw, albumId = 999L)
+        val reserialized = serializer.serialize(sg)
+
+        assertTrue(
+            "Re-serialized JSON must contain unified `overlays` key",
+            reserialized.contains("\"overlays\""),
+        )
+        assertTrue(
+            "Re-serialized JSON must NOT contain legacy `contentOverlays` key",
+            !reserialized.contains("\"contentOverlays\""),
+        )
+    }
+
+    @Test
+    fun `legacy contentOverlays migrates in bare-list JSON too`() {
+        // Even older albums were stored as a bare List<CanvasNode> (no root
+        // wrapper). The same Slice B migration must apply on that path.
+        val raw = """
+            [
+              {
+                "type": "com.mamton.zoomalbum.domain.model.CanvasNode.Frame",
+                "id": "f1",
+                "transform": { "cx": 0.0, "cy": 0.0, "w": 100.0, "h": 100.0 },
+                "appearance": {
+                  "contentOverlays": [
+                    {
+                      "source": { "type": "SolidColor", "color": "#33112233" },
+                      "opacity": 0.5,
+                      "blendMode": "Multiply"
+                    }
+                  ]
+                }
+              }
+            ]
+        """.trimIndent()
+
+        val sg = serializer.deserialize(raw, albumId = 42L)
+
+        val restored = sg.nodes.single() as CanvasNode.Frame
+        val appearance = restored.appearance!!
+        assertEquals(1, appearance.overlays.size)
+        assertEquals(0.5f, appearance.overlays[0].opacity)
+        assertEquals(NodeBlendMode.Multiply, appearance.overlays[0].blendMode)
+    }
+
+    @Test
     fun `deserialize tolerates root object without profile and background fields`() {
         // Simulates an older root-object album written before profile/background existed.
         val raw = """

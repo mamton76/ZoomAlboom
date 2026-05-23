@@ -149,6 +149,8 @@ A frame with no `overlays` does **not** split — its border still paints togeth
 
 **Frame–content binding.** The Overlay event's sort key depends on `FrameMembershipUseCase.effectiveMembers(frame, visibleNodes)` — geometry plus per-frame overrides. The renderer uses the same membership rules as the rest of the app ([frame-membership.md](frame-membership.md)). A member that's culled out of the viewport doesn't pull the overlay's z-slot upward.
 
+**Known limitation (MVP).** Frame overlays are **clipped to frame bounds, not masked to member pixels**, and are rendered after the highest-z visible member. A non-member node that visually intersects the frame's bounding rect and sorts below the overlay event will be covered by the overlay — even though the renderer does not logically consider it part of the frame's content. This is accepted for MVP because exact member-only compositing requires per-frame offscreen layers (a saveLayer pass for the rendered members, then the overlay composited against that alpha) and the cost (allocation, GPU bandwidth, lifecycle correctness across LOD) doesn't justify the visual fidelity gain for the current MVP scope. Workaround for authors: keep non-members out of the frame's bounding rect, or move them above the overlay's z-slot (`BringToFront`).
+
 ### 7. Node Creation
 
 `CanvasNodeFactory` creates nodes positioned relative to the current viewport. Both `createFrame` and `createMedia` follow the same scaling convention:

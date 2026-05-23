@@ -36,7 +36,8 @@ data class AlbumBackgroundChange(
  * - `before == null && after != null` → pure insert (ADD, DUPLICATE).
  * - `before != null && after == null` → pure delete (REMOVE, DELETE).
  *   `beforeIndices` is populated to restore deleted nodes at their original positions.
- * - `before != null && after != null` → node mutation (MOVE, RESIZE, ROTATE, SET_FRAME_BACKGROUND, SET_FRAME_OVERRIDES).
+ * - `before != null && after != null` → node mutation such as MOVE, RESIZE, ROTATE,
+ *   SET_FRAME_BACKGROUND, SET_MEDIA_APPEARANCE, SET_FRAME_OVERRIDES, REORDER.
  *   Same length, same ids, paired positionally.
  * - `albumBackgroundChange != null` → album-level mutation (SET_ALBUM_BACKGROUND). May
  *   coexist with node sides being null.

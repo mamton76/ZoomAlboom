@@ -57,12 +57,18 @@ data class ContextMenuRequest(
  * Disabled entries render with reduced opacity and absorb taps without firing
  * [onClick] or dismissing the popup. Use sparingly — entries that don't apply
  * to the current selection should be omitted, not disabled.
+ *
+ * [keepOpenOnClick] suppresses auto-dismiss after [onClick]. Used by
+ * selection-management items (e.g. `Remove this from selection`) where the
+ * user is likely to keep working in the same popup. Anchor adjustments are
+ * the [onClick]'s responsibility (see `docs/architecture/context-menu.md § 4.4`).
  */
 data class ContextMenuItem(
     val label: String,
     val onClick: () -> Unit = {},
     val enabled: Boolean = true,
     val isDivider: Boolean = false,
+    val keepOpenOnClick: Boolean = false,
 ) {
     companion object {
         val Divider = ContextMenuItem(label = "", isDivider = true)
@@ -72,10 +78,35 @@ data class ContextMenuItem(
 /**
  * Transient popover anchored at the long-press touch point.
  *
- * Wraps a `Popup` with `dismissOnClickOutside` + `dismissOnBackPress` so any
- * touch outside the menu closes it without dispatching an item. Click-through
- * to the canvas behind the menu is **not** desired (a typical "tap outside to
- * dismiss" surface, not pass-through), so [PopupProperties.focusable] is true.
+ * Dismissal is **driven externally**, not by the `Popup` itself:
+ *
+ * - Tap / double-tap / drag-start outside the popup → handled by
+ *   `CanvasScreen.onCanvasGesture`, which the host (`CanvasScaffold`)
+ *   reacts to by clearing `contextMenuRequest`. The same gestures' normal
+ *   canvas actions (Select / DeselectAll / camera reset / rect-select) are
+ *   suppressed for the same touch.
+ * - Long-press on another node → produces a new `ContextMenuRequest` which
+ *   replaces the popup in place (no intermediate dismiss frame).
+ * - Camera pan/pinch/rotate (Layer 3) and node drag/resize/rotate (Layer 1)
+ *   → dismiss the popup *and* still execute the gesture.
+ * - Back-press → handled by a `BackHandler` in `CanvasScaffold` (gated on
+ *   the menu being open). The popup window itself is not focusable, so
+ *   `PopupProperties.dismissOnBackPress` cannot fire from inside the popup.
+ * - Menu item tap → fires the action and clears `contextMenuRequest`.
+ *
+ * Why `focusable = false`: a focusable popup creates a separate focused
+ * window that swallows touches anywhere on the screen and would force
+ * "long-press on another node" through an outside-tap intermediate step
+ * (visible flicker + selection loss). Keeping the popup non-focusable lets
+ * the canvas gesture handlers below see the touch and route it correctly.
+ *
+ * Why `dismissOnClickOutside = false`: outside-tap dismissal already runs
+ * through the canvas gesture handler so it can suppress the normal selection
+ * action; enabling Popup's own outside-click would race with that path.
+ *
+ * Why `dismissOnBackPress = false`: a non-focusable popup never receives
+ * key events, so this flag is a no-op. Back is intercepted by the host's
+ * `BackHandler` instead (see `CanvasScaffold`).
  *
  * Items selected via [DropdownMenuItem] fire their own `onClick` and then the
  * caller is expected to clear the menu state, which auto-dismisses the Popup.
@@ -84,6 +115,11 @@ data class ContextMenuItem(
  * above the menu items for each overlapping node. Toggling a checkbox calls
  * [onTogglePickerNode] and does **not** dismiss the popup — the user keeps
  * the menu open while adjusting the selection.
+ *
+ * Known limitation: a non-member node visually inside frame bounds and below
+ * the overlay pass may be covered by the frame's overlay (the overlay is
+ * clipped to the frame rect, not masked to its members). See
+ * `docs/architecture/rendering.md § 6b`.
  */
 @Composable
 fun ContextMenuPopup(
@@ -96,14 +132,12 @@ fun ContextMenuPopup(
     Popup(
         offset = IntOffset(request.anchorScreenX.toInt(), request.anchorScreenY.toInt()),
         onDismissRequest = onDismiss,
-        // `focusable = false` makes the popup transparent to touches outside its
-        // surface — a new long-press on another node immediately replaces the
-        // popup without requiring an outside-tap-to-dismiss intermediate step.
-        // Dismissal on outside-tap is driven externally by the canvas gesture
-        // handler (`onCanvasGesture` in CanvasScreen). Back-press still dismisses.
+        // See the kdoc above for the full dismissal/focusable rationale.
+        // Back-press is handled by the host (`BackHandler` in CanvasScaffold)
+        // because a non-focusable popup window cannot intercept key events.
         properties = PopupProperties(
             focusable = false,
-            dismissOnBackPress = true,
+            dismissOnBackPress = false,
             dismissOnClickOutside = false,
         ),
     ) {
@@ -140,7 +174,7 @@ fun ContextMenuPopup(
                             text = { Text(item.label) },
                             onClick = {
                                 item.onClick()
-                                onDismiss()
+                                if (!item.keepOpenOnClick) onDismiss()
                             },
                             enabled = item.enabled,
                         )

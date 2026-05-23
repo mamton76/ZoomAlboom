@@ -16,6 +16,13 @@ import com.mamton.zoomalbum.feature.canvas.viewmodel.VisibleNode
  * Events carry a [sortKey] so the loop can mix them with regular node paints
  * in z-order: surface → members in their own z-order → overlay (just after
  * the last member). Built by [buildFramePaintEvents].
+ *
+ * Known limitation (MVP): the overlay event is clipped to the frame's
+ * bounding rect, **not** masked to member pixels. A non-member node that
+ * visually intersects the frame bounds and sorts below the overlay's z-slot
+ * is covered by the overlay. Exact member-only compositing would require
+ * an offscreen pass per layered frame — not justified for MVP. See
+ * `docs/architecture/rendering.md § 6b — Known limitation`.
  */
 internal sealed interface FramePaintEvent {
 

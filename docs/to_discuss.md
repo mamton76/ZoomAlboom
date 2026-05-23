@@ -75,6 +75,92 @@ But it's a real design call — flagging for explicit decision.
 
 ---
 
+## 4. Album-level frame chrome settings + temporary session overrides
+
+Frames are navigation anchors, not just visual containers — but today there's no first-class control for how frame *bounds* are displayed across modes; the bounds are baked into rendering decisions and selection chrome. Proposal: split **frame chrome** (navigation/editor hint, mode-dependent, possibly transient) from **frame appearance** (background, border, overlays — the visual album content, governed by `appearance.md`). Appearance is what the album *looks like*; chrome is what the editor/viewer *hints at*. Chrome may be hidden depending on mode; appearance is not.
+
+### 4.1 Album-level mode defaults
+
+Each album defines per-mode defaults for how frames are displayed:
+
+| Mode          | Default chrome                                       |
+| ------------- | ---------------------------------------------------- |
+| View          | Subtle hints or hidden                               |
+| Edit          | Full outlines + selected-frame bounds                |
+| Present       | Hidden; optional current-frame flash on transition   |
+| Map / Minimap | Strong visibility + labels                           |
+
+Shared `FrameChromeStyle` vocabulary (album defaults *and* session overrides must emit the same type — otherwise they can't compose): `Hidden`, `CornersOnly`, `SubtleOutline`, `SoftGlow`, `LabelTab`, `TintedArea`, `FullOutline`, `DebugBounds`.
+
+Open questions:
+
+- **Per-album, per-frame, or both?** Album-wide default makes sense, but specific frames may want explicit overrides (e.g. a title frame always shown as `LabelTab` regardless of mode). Mirrors the per-frame override pattern in `presentation-profile.md`.
+- **Where does this live?** A new `FrameChromeProfile` on the album, or folded into `PresentationProfile` (which already carries mode-dependent rendering decisions — camera fit, `OutsideFrameMode`)? Strong argument for the latter: a profile is "a mode of presentation," and chrome is mode-dependent.
+- **Edit-mode chrome is partly already implemented** (frame outlines + `SelectionOverlay`). Is the album-level default in Edit mode actually overridable, or is Edit mode special-cased to always show full chrome regardless of album setting?
+
+### 4.2 Temporary session-level overrides
+
+A transient layer that does **not** mutate album data and is **not** serialized. Examples:
+
+- User taps "Show frame hints" → frame hints appear temporarily.
+- User opens the minimap → frames become more visible on the main canvas.
+- User opens the frame-list panel → related frames are highlighted in the scene.
+- User navigates to a frame → the target briefly flashes/glows, then fades.
+- User holds a navigation/debug button → all frame bounds appear while held.
+
+Sketch (illustrative, not the final shape):
+
+```kotlin
+data class FrameChromeOverride(
+    val target: ChromeOverrideTarget,
+    val style: FrameChromeStyle,
+    val lifetime: ChromeOverrideLifetime,
+)
+
+enum class ChromeOverrideTarget {
+    ALL, CURRENT, SELECTED, RELATED, HOVERED,
+}
+
+sealed class ChromeOverrideLifetime {
+    data class Timed(val durationMillis: Long) : ChromeOverrideLifetime()
+    data object WhilePanelOpen : ChromeOverrideLifetime()
+    data object WhileGestureActive : ChromeOverrideLifetime()
+    data object UntilCancelled : ChromeOverrideLifetime()
+}
+```
+
+Held in `CanvasUiState` (or equivalent session state), never in album data. Multiple overrides can be active concurrently (minimap open *and* navigation transition flashing *and* a frame selected) — they stack.
+
+### 4.3 The resolver — the actual design work
+
+The data classes are the easy part. The non-obvious work is the **precedence stack**: when album defaults and N concurrent overrides disagree on a frame's chrome, what wins?
+
+Open questions:
+
+- **Pick-one vs. merge.** Walk the stack highest-priority-first and pick the first matching style? Or merge styles (e.g. `LabelTab` + `SoftGlow` rendered simultaneously)? Mergeability depends on whether `FrameChromeStyle` is a closed enum (pick-one) or a layerable set of hints (merge).
+- **Per-target conflicts.** Two overrides target the same frame with different styles (minimap pushes `ALL → LabelTab`, navigation transition pushes `CURRENT → SoftGlow`). Most-specific-target wins? Most-recent-pushed wins? Explicit numeric priority?
+- **Composition with appearance.** Appearance (border, fill, content overlays) is always visible per the proposal's own rule. Chrome is a separate render layer painted on top — analogous to `SelectionOverlay` today. Need to confirm the layering order and that selection chrome and frame chrome don't double up on the same hint.
+- **Mode is itself an override.** Cleanest model: the album's per-mode default is the lowest-priority entry on the same stack. Avoids a "default vs override" branching code path; resolver is a single pure function.
+
+### 4.4 `FrameOverrideReason` — telemetry, not contract
+
+The original sketch included a `reason` enum (`SHOW_HINTS_ACTION`, `MINIMAP_OPEN`, `NAVIGATION_TRANSITION`, `DEBUG_HOLD`, …). Risk: this couples *cause* into the data type — every new trigger forces an enum bump, and the resolver may be tempted to branch on reason instead of behavior.
+
+Recommendation: drop `reason` from the override's behavioral contract. Keep `(target, style, lifetime)` as the contract. If reason is useful for diagnostics, attach it as a separate non-load-bearing diagnostic field. The resolver must never branch on reason.
+
+### 4.5 Open sub-questions
+
+- **Define `RELATED`.** `RELATED_FRAMES` is suggestive but undefined. Related-by-membership? Related-by-explicit-navigation-link (per `navigation.md`)? Related-by-graph-proximity? Pick one or drop the target.
+- **Animation ownership.** Many overrides imply animation (flash-and-fade glow, pulse). Does each `FrameChromeStyle` own its animation, or does the override carry an animation curve separately? Owning per-style is simpler but less flexible.
+- **Restoration after process death.** Session overrides are not persisted — but if the minimap is open when the process is killed, restoring the panel on relaunch should presumably re-create its associated override. Confirm.
+- **Map/Minimap mode vs. mode + minimap panel.** Is "Map/Minimap" a top-level mode alongside View/Edit/Present, or a *panel* available within those modes? If the latter, "Map/Minimap defaults" don't belong on `PresentationProfile`; they belong on the minimap panel's own config.
+
+My instinct: **fold album defaults into `PresentationProfile`** (one home for mode-dependent rendering), **keep the override stack in `CanvasUiState`** (transient, never serialized), **resolver as a pure function** taking `(profile, overrideStack, frameId, mode) → FrameChromeStyle`, **mode default = lowest-priority entry on the stack** so there's a single resolution path, **drop `reason` from the contract**. Treat Map/Minimap as a panel, not a mode, until proven otherwise.
+
+But it's a real design call — flagging for explicit decision.
+
+---
+
 > Recently graduated out of this file:
 > - Presentation profiles → `docs/architecture/presentation-profile.md` (per-frame multi-profile variants captured in § 9 / § 11 Deferred).
 > - Long-press context menu + selection rules → `docs/architecture/context-menu.md` (status: proposal, not yet implemented).

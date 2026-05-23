@@ -17,10 +17,10 @@ A long-press has two outcomes the user wants to express, and they tend to come t
 1. *"This is the object (or these are the objects) I want to act on."* — selection change.
 2. *"Now show me what I can do with it."* — open a menu.
 
-Today's gesture rule conflates step 1 with toggling and never reaches step 2. The proposal:
+Today's gesture rule conflates step 1 with toggling and never reaches step 2. The current behavior:
 
-> **Long-press always opens the context menu, after selection has been resolved.**
-> Drag-after-long-press still starts rect-select and does NOT open the menu (drag = "I want to keep selecting," lift = "I'm done selecting, show me my options").
+> **For a node long-press**, selection resolves on the press (topmost hit is added) and the menu opens on lift. Movement after the press is consumed by the long-press path; the menu still opens on lift.
+> **For an empty-space long-press**, lifting opens the empty-space menu. If the user instead drags past touch-slop after the press, a rect-select starts from the current position and no menu opens (drag = "I want to keep selecting," lift = "show me my options").
 
 This unifies a single discoverable affordance ("long-press = menu") with the existing selection semantics. The removed-by-this-proposal behavior — long-press on an already-selected node toggles it out of the selection — moves into the menu as an explicit "Remove from selection" item.
 
@@ -77,12 +77,16 @@ DOWN
             single-node hit:    AddNodeToSelection(id)
             stacked-node hit:   AddNodeToSelection(topmost); remember the full hit
                                 list as picker rows for the menu (see § 4)
-            already-selected:   keep selection unchanged
-      [b] wait for drag-or-lift:
-            pointer moves > slop:   start rect-select drag from current position;
-                                    DO NOT open menu
-            pointer lifts:          dispatch OpenContextMenu(selection, anchor, posScreen,
-                                    pickerNodes)
+            already-selected:   keep selection unchanged (AddNodeToSelection is idempotent)
+      [b] wait for lift (or, on empty space, drag-or-lift):
+            node long-press: post-press movement is consumed (no drag escape).
+                Pointer lifts → dispatch OpenContextMenu(selection, anchor,
+                posScreen, pickerNodes).
+            empty-space long-press:
+                pointer moves > slop:   start rect-select drag from current position;
+                                        DO NOT open menu
+                pointer lifts:          dispatch OpenContextMenu(emptySelection, null,
+                                        posScreen, null)
   ↓ (two+ fingers down at any time)
 [ Layer 3 — infinite canvas gestures ]
   · pan / pinch / rotate; cancels any in-flight Phase 2
@@ -90,27 +94,28 @@ DOWN
 
 Three invariants the implementation must keep:
 
-1. **Selection action fires on long-press detection, not on UP.** This is what gives the haptic moment a meaning. If the user then drags into rect-select, the selection change still stands and the rect-select union grows from there.
-2. **Menu opens on UP, only if no drag occurred.** Drag = "still selecting" path, no menu.
+1. **Selection action fires on long-press detection, not on UP.** This is what gives the haptic moment a meaning. For an empty-space long-press that then drags into rect-select, no selection change has fired yet — the rect-select is the selection action.
+2. **Menu opens on UP.** For a node long-press, post-press movement is consumed so the menu always opens on lift. For an empty-space long-press, the menu opens on lift only if the user did not drag past touch-slop (drag → rect-select instead, no menu).
 3. **`AddNodeToSelection` is idempotent.** Long-pressing an already-selected node leaves `selection` untouched. The "I want to act on just this one" intent is served by the **`Edit this only`** anchor-scoped menu item, not by the gesture.
 
 ### Dismissal rules
 
-When the popup is open, canvas gestures behave differently — discrete gestures (tap, double-tap, drag-start) dismiss the popup *without* running their normal action so users can close it without losing selection. Continuous gestures (camera pan/pinch, node drag/resize/rotate) dismiss the popup *and* still execute, because the gesture is itself the user's edit intent and there's no discrete side-effect to undo.
+When the popup is open, canvas gestures behave differently — discrete gestures (tap, double-tap, drag-start) dismiss the popup *without* running their normal action so users can close it without losing selection. Continuous gestures (camera pan/pinch, node drag/resize/rotate) dismiss the popup *and* still execute, because the gesture is itself the user's edit intent and there's no discrete side-effect to undo. Anchor-scoped management actions (`Remove this from selection`, picker checkbox toggle) keep the popup open so the user can continue managing the selection.
 
-| Gesture (popup open) | Effect |
+| Source (popup open) | Effect |
 |---|---|
-| Tap (anywhere outside the popup) | Dismisses popup. Suppresses the normal `SelectNode` / `DeselectAll`. |
-| Double-tap | Dismisses popup. Suppresses the normal camera reset. |
-| Drag-start (rect-select path) | Dismisses popup. Suppresses the normal rect-select. User releases and drags again to start a fresh rect-select. |
-| Camera pan / pinch / rotate (two-finger, Layer 3) | Dismisses popup. Camera updates **proceed** — the user's pinch/pan/rotate of the canvas continues normally. |
+| Tap (anywhere outside the popup) | Dismisses popup. Suppresses the normal `SelectNode` / `DeselectAll`. Selection unchanged. |
+| Double-tap (outside the popup) | Dismisses popup. Suppresses the normal camera reset. |
+| Drag-start (rect-select path) | Dismisses popup. Suppresses the normal rect-select on the same gesture. User releases and drags again to start a fresh rect-select. |
+| Camera pan / pinch / rotate (two-finger, Layer 3) | Dismisses popup on first event. Camera updates **proceed** — the user's pinch/pan/rotate of the canvas continues normally. |
 | Node body drag / resize / rotation handle (Layer 1) | Dismisses popup. Interaction **proceeds** — the user's move/resize/rotate of the selection continues normally. |
-| Long-press elsewhere | Replaces the popup in-place with a new request (selection-resolution + anchor for the new target). Single gesture, no intermediate dismiss step. |
-| Back-press | Dismisses popup. (`Popup.dismissOnBackPress = true`.) |
-| Menu item tap | Runs the item's action; popup dismisses. |
-| Picker checkbox tap | Toggles selection membership for that node; updates anchor; popup stays open. |
+| Long-press another node | Replaces the popup in-place with a new request (selection-resolution + anchor for the new target). Single gesture, no intermediate dismiss step. Selection is not lost; the new node is additively added. |
+| Back-press | Dismisses popup. Implemented by a `BackHandler(enabled = contextMenuRequest != null)` in `CanvasScaffold` — *not* by `Popup.dismissOnBackPress`, because the popup uses `focusable = false` and a non-focusable popup window never receives key events. |
+| Menu item tap (non-anchor) | Runs the item's action; popup dismisses. |
+| `Remove this from selection` | Removes the anchor from selection; **popup stays open**. If the removed node was the anchor, anchor clears (`anchorNodeId = null`) and anchor-scoped items disappear. See § 4.4. |
+| Picker checkbox tap | Toggles selection membership for that node. If the toggled-off node was the anchor, anchor clears; otherwise the toggled node becomes the new anchor. Popup stays open. |
 
-The `CanvasScreen` Composable takes `isContextMenuOpen: Boolean`, wraps it with `rememberUpdatedState` (the gesture coroutines from `pointerInput(Unit)` capture lambdas once at first composition and never restart, so a plain primitive parameter would freeze), and gates the gesture callbacks on the live value. `Popup.focusable = false` keeps long-press elsewhere working as a single gesture.
+The `CanvasScreen` Composable takes `isContextMenuOpen: Boolean`, wraps it with `rememberUpdatedState` (the gesture coroutines from `pointerInput(Unit)` capture lambdas once at first composition and never restart, so a plain primitive parameter would freeze), and gates the gesture callbacks on the live value. `Popup.focusable = false` keeps long-press elsewhere working as a single gesture; the cost is that the popup can't intercept back-press itself, which is why back is handled in the scaffold instead.
 
 ---
 
@@ -179,8 +184,10 @@ Multi-only group actions:
 
 Anchor-scoped (shown only when `anchorNodeId in selection`):
 
-- `Remove this from selection` — selection becomes `selection - anchorNodeId`. If that leaves one element, the menu would re-render as a single-selection menu, but the menu closes on action; the new singleton selection persists.
-- `Edit this only` — selection becomes `{anchorNodeId}`; opens the single-object editor for the anchor.
+- `Remove this from selection` — selection becomes `selection - anchorNodeId`. **Popup stays open** (selection-management action; the user is likely to keep curating the selection from the same surface).
+  Anchor behavior is **Option A**: the anchor clears (`anchorNodeId = null`) since the removed node *was* the anchor. The anchor halo on the canvas disappears, the anchor-scoped block of menu items (`Remove this from selection`, `Edit this only`) is hidden, and the menu re-renders as either a single-selection menu (1 remaining) or the group menu without anchor items (≥ 2 remaining). The user can pick a new anchor by tapping a picker row (stacked long-press case) or by long-pressing a new node.
+  The same rule applies to the inline overlap-picker checkboxes: if the user unchecks the row that is currently the anchor, the anchor clears; otherwise the toggled-on row becomes the new anchor.
+- `Edit this only` — selection becomes `{anchorNodeId}`; popup dismisses; opens the single-object editor for the anchor.
 
 ---
 

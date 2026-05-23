@@ -39,17 +39,29 @@ fun CanvasScreen(
     onShowContextMenu: (ContextMenuRequest) -> Unit = {},
     /**
      * Fired when the user starts any canvas gesture that should dismiss an open
-     * context menu (tap, rect-select drag). NOT fired on long-press, because the
+     * context menu (tap, double-tap, rect-select drag-start, camera pan/pinch/
+     * rotate, node body/handle drag). NOT fired on long-press, because the
      * long-press path produces a new [ContextMenuRequest] via [onShowContextMenu]
      * which replaces the existing popup naturally (no transient dismiss frame).
+     *
+     * Back-press is not routed through here either — it's handled by a
+     * `BackHandler` in `CanvasScaffold` (gated on menu-open) because the popup
+     * uses `focusable = false` and so cannot receive key events itself.
+     *
+     * See `docs/architecture/context-menu.md § 3 — Dismissal rules`.
      */
     onCanvasGesture: () -> Unit = {},
     /**
-     * True iff a context-menu popup is currently open. While open, tap /
-     * double-tap / drag-start dismiss the popup (via [onCanvasGesture]) and
-     * suppress their normal canvas actions — so users can close the popup
-     * without losing their selection. Long-press still fires normally to
-     * support single-gesture popup replacement on another node.
+     * True iff a context-menu popup is currently open. While open:
+     *
+     * - Discrete gestures (tap, double-tap, rect-select drag-start) dismiss the
+     *   popup via [onCanvasGesture] and **suppress** their normal canvas action
+     *   so users can close the popup without losing their selection or
+     *   triggering a camera reset.
+     * - Continuous gestures (camera pan/pinch/rotate, node body/handle drag)
+     *   dismiss the popup *and* proceed — the user's edit intent is preserved.
+     * - Long-press fires normally to support single-gesture popup replacement
+     *   on another node.
      */
     isContextMenuOpen: Boolean = false,
 ) {

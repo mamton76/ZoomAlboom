@@ -445,6 +445,8 @@ Two-tier model: **type layers** (fixed, derived from node class) + **user-define
 
 Single shared `Transform.zIndex: Float` space across all canvas nodes (Frame / Media / Widget). Until now, render order was implicit insertion order; only hit-testing used `zIndex`. The render order is now sorted by `zIndex` (ascending — lowest first, so highest ends on top), so reorder actions take effect visually.
 
+Multi-selection semantics **decided 2026-05-24**; see [architecture/z-order.md](architecture/z-order.md) for the full rule set. Short form: `BringToFront` / `SendToBack` use block-extreme (selection lifted/sunk as a block, internal order preserved); `BringForward` / `SendBackward` use independent-with-skip (each selected node moves one step, treating other selected nodes as transparent — Figma-aligned).
+
 - [x] `recalculateVisibleNodes` sorts the result by `Transform.zIndex` (`CanvasViewModel.kt`) — render correctness now depends only on `zIndex`, not on `_allNodes` insertion order.
 - [x] `CanvasAction.BringToFront(nodeId)` — `newZ = max + 1`. No-op if already on top.
 - [x] `CanvasAction.SendToBack(nodeId)` — `newZ = min - 1`. No-op if already at bottom.
@@ -452,7 +454,18 @@ Single shared `Transform.zIndex: Float` space across all canvas nodes (Frame / M
 - [x] `CanvasAction.SendBackward(nodeId)` — swaps `zIndex` with the next-lower neighbor. No-op if already at bottom.
 - [x] All four routed through `applyZIndexReorder(nodeId, ZReorder)`; undoable via `CommandKind.REORDER` (snapshot of the one or two affected nodes).
 - [x] `ContextualActionBar` exposes the four actions (icons `⤒ ▲ ▼ ⤓`) when exactly one node is selected.
-- [ ] Multi-select reorder semantics (move the group as a block? individually?). Single-only for MVP.
+
+#### Multi-selection (decided, not yet implemented)
+
+- [ ] Pure functions in `core/math/ZOrder.kt`: `bringSelectionToFront`, `sendSelectionToBack`, `bringSelectionForward`, `sendSelectionBackward`. Each returns `Map<NodeId, Float>` of zIndex changes; empty map = no-op.
+- [ ] Block-extreme rule for `BringToFront` / `SendToBack` — selection moved to extreme as a contiguous block, internal relative order preserved. (see `z-order.md § 3.1`)
+- [ ] Independent-with-skip rule for `BringForward` / `SendBackward` — each selected node swaps with its next *unselected* neighbor in the requested direction. (see `z-order.md § 3.2`)
+- [ ] Refactor existing single-id `CanvasAction.BringToFront(nodeId)` etc. to use the new pure functions internally (or replace with `BringSelectionToFront(selection)` and let the single-id path pass `setOf(nodeId)`).
+- [ ] One `CommandKind.REORDER` Compound undo per multi-selection command (snapshot all nodes whose zIndex changed — selected + side-effect-affected unselected).
+- [ ] Frame membership recompute: **not** required (z-order doesn't affect geometry). Confirm in the implementation PR.
+- [ ] `ContextualActionBar` ungated for multi-selection — drop `showZOrderActions = selectedNodeIds.size == 1` constraint.
+- [ ] No-op-at-extreme acceptable for MVP; buttons stay enabled even when no movement is possible. Grey-out per-state is a follow-up (see `z-order.md § 6`).
+- [ ] Unit tests for each pure function covering: sparse selection, contiguous selection, full selection, at-extreme no-op, single-node degenerate case, layered-frame interaction.
 - [ ] Move into the Object Properties Panel (§5c) once that exists; current `ContextualActionBar` placement is interim.
 
 ---
@@ -1048,6 +1061,142 @@ See [architecture/presentation-profile.md](architecture/presentation-profile.md)
 - Multiple independent layouts per frame.
 - Smart AI recomposition.
 - Multiple profiles per album (only the primary is stored for MVP).
+
+---
+
+## 23. Frame Chrome
+
+Editor / viewer hint layer that draws on the *edge* of each frame (outline, glow, label tab) without altering the album's visual content. Distinct from [`FrameAppearance`](architecture/appearance.md) (which is album content). Mode-dependent defaults + transient session overrides, resolved per frame by a pure pick-one resolver.
+
+See [architecture/frame-chrome.md](architecture/frame-chrome.md) for the full design, vocabulary, resolver rules, and open questions.
+
+**Depends on §22** (`AlbumPresentationProfile` — chrome defaults nest under `profile.frameChrome`).
+
+### 23.1 Domain model
+- [ ] `FrameChromeStyle` closed enum — `Hidden`, `CornersOnly`, `SubtleOutline`, `SoftGlow`, `LabelTab`, `FullOutline`, `DebugBounds`
+- [ ] `FrameChromeDefaults(perMode: Map<CanvasInteractionMode, FrameChromeStyle>)` with `defaultPerMode` companion
+- [ ] `ChromeOverrideTarget` enum — `ALL`, `SELECTED`, `CURRENT` (MVP only; `HOVERED` / `RELATED` / `NAV_TARGET` deferred — see frame-chrome.md § 8)
+- [ ] `ChromeOverrideLifetime` sealed — `Timed(durationMillis)`, `WhilePanelOpen`, `WhileGestureActive`, `UntilCancelled`
+- [ ] `FrameChromeOverride(target, style, lifetime, reason: FrameOverrideReason?)`
+- [ ] `FrameOverrideReason` enum — diagnostic only; resolver MUST NOT branch on it
+- [ ] All `@Serializable` where they live in the album (defaults only); overrides are not serialized
+
+### 23.2 Profile integration
+- [ ] Add `frameChrome: FrameChromeDefaults = FrameChromeDefaults()` to `AlbumPresentationProfile`
+- [ ] `SceneGraphSerializer` migration: missing key is fine (default fallback), no rewrite path needed
+- [ ] Serializer round-trip test for `frameChrome`
+
+### 23.3 Resolver
+- [ ] `FrameChromeResolverUseCase` in `domain/usecase/` — pure function `(frame, mode, selection, currentFrameId, profile, overrides) → FrameChromeStyle`
+- [ ] MVP specificity order: `CURRENT > SELECTED > ALL`; mode default as implicit base layer
+- [ ] Most-recent-pushed wins within same specificity bucket
+- [ ] No numeric priority; no `reason` branching
+- [ ] Unit tests: empty stack → mode default; per-target specificity; tiebreaker via push order; missing mode → fallback default
+
+### 23.4 Session state
+- [ ] `CanvasUiState.chromeOverrides: List<FrameChromeOverride>` (push-ordered, oldest first)
+- [ ] `CanvasAction.PushChromeOverride` / `RemoveChromeOverride` (or producer-scoped equivalents)
+- [ ] Lifetime tracker — coroutine in `CanvasViewModel` decrements `Timed` overrides, listens to gesture-end / panel-close, prunes expired
+
+### 23.5 Render layer
+- [ ] `FrameChromeOverlay` composable in `feature/canvas/view/`
+- [ ] Draws per-frame chrome above `LayeredFrameOverlay` and above `SelectionOverlay` handles, inside the camera `graphicsLayer`
+- [ ] Strokes scale by `1/camera.scale` (same pattern as guidelines / selection handles)
+- [ ] All seven `FrameChromeStyle` cases implemented
+- [ ] Chrome paint clipped to edge / outside / label region only — never paints inside the frame content rect (see frame-chrome.md § 1)
+
+### 23.6 Migrate `Frame.color` outline
+- [ ] Stop drawing the colored outline in `FullFrameRenderer` / `SimplifiedFrameRenderer`
+- [ ] `FrameChromeOverlay` reads `frame.color` as the chrome paint color for `FullOutline` / `SubtleOutline` / `CornersOnly` / `SoftGlow` / `LabelTab`
+- [ ] Verify behavior-preserving when Edit-mode default resolves to `FullOutline` (every existing frame still renders its colored outline) — screenshot diff
+
+### 23.7 First producer
+- [ ] "Show frame bounds" debug toggle in TopBar HUD menu → pushes `(ALL, DebugBounds, UntilCancelled)` — end-to-end validation
+
+### 23.8 Settings UI
+- [ ] Per-mode chrome picker in the album-settings surface (depends on §22.6 album-settings sheet)
+- [ ] `CanvasAction.SetAlbumPresentationProfile` already covers the mutation; just extend the editor to show `frameChrome.perMode`
+
+### 23.9 Additional producers (land as host UIs ship)
+- [ ] FocusNode-completion glow — `(CURRENT, SoftGlow, Timed(~600ms))` in View / Present modes
+- [ ] Frame-list panel highlights — `(SELECTED, SubtleOutline, WhilePanelOpen)` on row interactions
+- [ ] Long-press-and-hold "show all frames" gesture — `(ALL, SubtleOutline, WhileGestureActive)`
+
+### Deferred (post-MVP)
+- `HOVERED` target — needs a stylus / mouse / external input producer
+- `RELATED` target — needs a concrete producer definition (frame-list, minimap, navigation edges, inverse membership)
+- `NAV_TARGET` target — lands with the navigation flash producer
+- Per-frame `FrameChromePerFrameOverride` on `CanvasNode.Frame`
+- Animation curves carried by the override (per-style ownership is MVP)
+- `LabelTab` placement collision avoidance + zoom-based culling
+- Process-death restoration semantics (producers re-push on resume; no recovery in session state)
+
+### Out of scope
+- Chrome that paints inside the frame content area — that's appearance.
+- Chrome as published-album output — chrome never reaches the exported album.
+- Merge-style resolution (closed-enum pick-one is the rule).
+
+---
+
+## 24. Editor Tools Framework
+
+> Source: `docs/architecture/editor-tools.md` (decided 2026-05-24, partially implementable). Three-axis interaction model (`EditorMode` × `ActiveTool` × Global navigation) + per-tool gesture maps for six in-scope tools. `MaskEdit` is deferred — blocked on `MaskNode` design (`to_discuss.md § 8`).
+
+Framework itself is small. Per-tool implementations are each gated on the data-model concept the tool depends on.
+
+### 24.1 Type declarations
+- [ ] Declare `EditorTool` sealed interface in `domain/model/EditorTool.kt`. Seven `data object` variants: `Selection`, `FreeDraw`, `Shape`, `Text`, `VectorEdit`, `Eraser`, `MaskEdit`.
+
+### 24.2 State
+- [ ] Add `activeTool: EditorTool = EditorTool.Selection` to `CanvasUiState`.
+- [ ] Add `CanvasAction.SetActiveTool(tool)` + ViewModel handler. Selection persists across tool switches by construction (no per-switch clear).
+- [ ] Confirm `editorMode` plumbing. Today's `CanvasInteractionMode` covers View / Edit / Presentation in the type but the UI toggle only cycles View ↔ Edit. Rename to `EditorMode` only if it reduces confusion.
+
+### 24.3 Layer 2 dispatch wiring (per `editor-tools.md § 7.2`)
+- [ ] Make tap dispatch tool-aware: route through `activeTool.onTap(...)`. For MVP only `Selection` has logic; other tools no-op.
+- [ ] Make double-tap dispatch tool-aware: route through `activeTool.onDoubleTap(...)`. For MVP only `VectorEdit` will define it (when it lands).
+- [ ] Keep long-press centralized: invokes popup-derivation per `editor-tools.md § 5`, no per-tool override. Present mode suppresses long-press entirely.
+
+### 24.4 Drag-on-empty migration (per `editor-tools.md § 7.3`)
+- [ ] Remove the long-press-then-drag rect-select path from `tapAndLongPressGestures` (or gate on `activeTool != Selection` as a transitional step).
+- [ ] Add a single-finger-drag-on-empty detector inside `SelectionTool`'s gesture handler. Initiates `SelectNodesInRect(rect, additive)` directly, no long-press required.
+- [ ] Long-press-on-empty becomes a no-op for MVP (empty-canvas context menu is a later refinement).
+- [ ] Update [`selection.md § 2`](architecture/selection.md#2-gesture-mapping) gesture table to drop the future-model note for this row.
+
+### 24.5 View-mode single-finger pan (per `editor-tools.md § 7.4`)
+- [ ] Add a handler that accepts single-finger drag for camera pan when `editorMode == View`. Two implementation options (pick at impl time):
+  - Extend Layer 3 (`infiniteCanvasGestures`) to accept one finger when in View
+  - Add a dedicated `viewModePanGestures` modifier active only in View
+
+### 24.6 TopBar tool selector
+- [ ] Placeholder for MVP. With only `Selection` actually implemented, no UI needed.
+- [ ] Add when the second tool ships.
+
+### 24.7 Present-mode trigger
+- [ ] View/Edit toggle stays as today. Present is reached via a separate fullscreen / play action — location TBD with the Present surface (out of scope for this section).
+
+### 24.8 Per-tool implementations
+
+Each lands as its own slice once its data-model dependency is ready. Order per `editor-tools.md § 10`:
+
+- [ ] **`FreeDraw` (`editor-tools.md § 4.2`)** — depends on `StrokeNode` (new data-model type), sample-stream input pipeline, smoothed-bezier render-path cache.
+- [ ] **`Shape` (§ 4.3)** — depends on `ShapeNode` (new data-model type), rubber-band drag input, primitive picker topbar.
+- [ ] **`Text` (§ 4.4)** — depends on `TextNode` (verify exists in data-model), overlay `BasicTextField` integration, IME gesture-stack deferral.
+- [ ] **`VectorEdit` (§ 4.5)** — depends on vector-node existence (from `FreeDraw` / `Shape`), per-tool `VectorEditState.selectedAnchors`, anchor / curve screen-space hit testing, node-type editor topbar.
+- [ ] **`Eraser` (§ 4.6) Object mode** — trivial wrapper over delete after § 24.3 lands.
+- [ ] **`Eraser` (§ 4.6) Vector partial mode** — depends on `VectorEdit`'s path-splitting math; brush-corridor cut + boundary anchor insertion.
+- [ ] **`MaskEdit` (§ 4.7)** — blocked on `MaskNode` design (`to_discuss.md § 8`).
+
+### Deferred (post-MVP)
+- Raster partial erase (`editor-tools.md § 4.6` topbar post-MVP section) — depends on `MediaAppearance.alphaMask` per `appearance.md § 12` becoming load-bearing.
+- Lasso geometry beyond bounding-box overlap (true per-path intersection).
+- "Restore last tool" preference across app restarts (`editor-tools.md § 6`).
+- `EditorState` container refactor (`editor-tools.md § 7.1` / `to_discuss.md § 11`) — defer until 3+ tools accumulate per-tool transient state.
+
+### Out of scope
+- Single-finger pan fallback in Edit mode (predictability over convenience, per `editor-tools.md § 9`).
+- Present as a third position on the View/Edit toggle.
+- Per-tool camera control (camera always belongs to Layer 3).
 
 ---
 

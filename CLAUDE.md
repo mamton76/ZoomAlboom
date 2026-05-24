@@ -16,13 +16,14 @@ Source-of-truth docs:
 - `docs/architecture/modules.md`
 - `docs/architecture/rendering.md`
 - `docs/architecture/coordinates.md` — coordinate spaces, camera math, selection invariants
-- `docs/architecture/selection.md` — selection state, gesture mapping, gesture stack
+- `docs/architecture/selection.md` — selection state, gesture mapping, gesture stack (today's behavior)
+- `docs/architecture/editor-tools.md` — three-axis interaction model (`EditorMode` × `ActiveTool` × Global navigation), per-tool gesture maps, popup-derivation rule. Future-state authority on gesture allocation; selection.md will graduate to match as the migration lands.
 - `docs/architecture/navigation.md`
 - `docs/architecture/appearance.md` — shared `NodeAppearance` model, `MediaAppearance` vs `FrameAppearance`, `OverlayStyle`
 - `docs/architecture/media-appearance.md` — media-specific appearance surface (crop, color, frame decoration, presets, derivatives)
 - `docs/architecture/context-menu.md` — long-press context menu proposal; `(selection, anchor)` model. Status: proposal, not implemented.
 - `docs/architecture/presentation-profile.md` — album/frame presentation form factor
-- - `docs/architecture/decisions.md` (if present)
+- `docs/architecture/decisions.md` (if present)
 - `docs/architecture/conventions.md`
 
 Working memory / discovered implementation notes:

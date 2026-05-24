@@ -51,117 +51,192 @@ Implementation note: most actions already exist as `CanvasAction` variants (`Bri
 
 ---
 
-## 3. Can z-order actions be applied to a multi-selection?
+## 5 Album Storage & Cloud Sync — Discussion Notes / Future Direction
 
-Today the `ContextualActionBar` gates z-order on `selectedNodeIds.size == 1` (`showZOrderActions = selectedNodeIds.size == 1` in `CanvasScaffold`). The action wiring also passes only one id (`selectedNodeIds.firstOrNull()`). The intuition: yes, multi-selection z-order should work — but the semantics need a deliberate choice.
+### Context of the discussion
 
-Possible semantics:
+This note comes from a product/architecture discussion about future album storage options.
 
-- **(a) Independent per-node step** — every selected node moves `+1` (Forward) or `-1` (Backward), no awareness of the others. Simplest to implement. Risk: nodes in the selection cross each other unpredictably; users expect the group to *stay grouped* visually.
-- **(b) Block move preserving internal order** — treat the selection as a contiguous block in z-order. Forward = find the next non-selected node above the highest selected, swap the block past it. Backward = mirror. Internal relative order is preserved. Most consistent with Figma / Sketch.
-- **(c) Extreme-only multi-select** — `Bring to Front` and `Send to Back` are well-defined for groups (put all selected at top / bottom, preserve internal order). `Bring Forward` / `Send Backward` are ambiguous on a sparse group; hide them when the selection isn't a contiguous block. Less complete but safer.
-- **(d) Compound undo, regardless** — whichever semantic, the multi-selection action produces **one** `Compound` undo entry, not N step entries. Matches `DuplicateSelection` / `DeleteSelection` precedent.
+The current project already has local album persistence: albums are edited and saved locally. While discussing the album settings/properties UI, we noticed that storage location and sync behavior probably belong there too.
 
-Open sub-questions:
+The key product question was:
 
-- **What does "Bring Forward" mean when the selection is non-contiguous in z?** E.g. selection = {A at z=2, C at z=5}, with B at z=3 and D at z=4 unselected. Does forward swap A past B (z=3) while C stays? Then A and C are no longer "a group" — they're independent moves. The block-move semantic (b) would collapse the group into a contiguous block first, but that *reorders unselected nodes* which is surprising.
-- **Should the action bar's z-order buttons enable for multi-selection?** If yes, the four buttons (ToFront / Forward / Backward / ToBack) might need to grey out per-state — e.g. "Bring Forward" disabled when the selection is already at the front, or when (c) excludes the gappy case.
-- **Pure function in `core/math/`?** Group z-order operations are good candidates for the same pattern as `Align` / `Distribute` / `FrameAroundSelection` — pure function taking a list of transforms + selection + operation, returning new z-indices. Easier to test in isolation.
-- **Does the action also rerun frame-membership recompute?** Z-order doesn't change geometry, so probably not — but worth confirming, since frame membership depends on geometry, not z-order, today.
+> Should an album be only local, or should the user be able to connect it to Google Drive later?
 
-My intuition: **(b) block-move semantics** for `Forward` / `Backward`, **simple "put at extreme, preserve internal order"** for `ToFront` / `ToBack`. Single Compound undo per call. Enable in both ActionBar and popup once decided.
+The conclusion was not “implement Google Drive sync now”. The conclusion was:
 
-But it's a real design call — flagging for explicit decision.
+> Keep local editing as the default and source of immediate interaction, but design the album model/settings so optional cloud sync can be added safely later.
+
+We also discussed that cloud sync should not mean “the album lives only in the cloud”. A safer mental model is:
+
+> The app edits a local working copy. Google Drive is an optional backup/sync target.
+
+This led to several related design questions:
+
+- where the user chooses storage mode;
+- whether each album should correspond to a separate Google Drive folder;
+- how sync should happen: manually, on open/close, or automatically;
+- how to detect conflicts if local and cloud versions both changed;
+- whether timestamps are enough, given device clocks may be wrong;
+- whether we need revision IDs, device IDs, or a change journal;
+- how to avoid silent data loss during overwrite;
+- whether automatic merge is needed now or can be deferred.
+
+The current decision is intentionally conservative:
+
+> For the first version, do not implement complex automatic merge or real-time sync. Prefer explicit, safe sync with conflict detection, user choice, and backups before overwriting anything.
 
 ---
 
-## 4. Album-level frame chrome settings + temporary session overrides
+## 7. Appearance layer expansion (border / feather / glow / shadow / overlay anchoring)
 
-Frames are navigation anchors, not just visual containers — but today there's no first-class control for how frame *bounds* are displayed across modes; the bounds are baked into rendering decisions and selection chrome. Proposal: split **frame chrome** (navigation/editor hint, mode-dependent, possibly transient) from **frame appearance** (background, border, overlays — the visual album content, governed by `appearance.md`). Appearance is what the album *looks like*; chrome is what the editor/viewer *hints at*. Chrome may be hidden depending on mode; appearance is not.
+Realization: most "masking-looking" visual effects can be achieved with a richer appearance layer rather than true clipping. Masks are expensive (offscreen composition, alpha pipelines); appearance effects are cheap and compose well.
 
-### 4.1 Album-level mode defaults
+Extends `docs/architecture/appearance.md` and `docs/architecture/media-appearance.md`. Today's `MediaAppearance` already has crop / color / frame decoration / overlays. Proposal: treat borders, feathering, glow/shadow as first-class appearance fields, not as decorative-frame variants.
 
-Each album defines per-mode defaults for how frames are displayed:
+### Border as a rendering layer
 
-| Mode          | Default chrome                                       |
-| ------------- | ---------------------------------------------------- |
-| View          | Subtle hints or hidden                               |
-| Edit          | Full outlines + selected-frame bounds                |
-| Present       | Hidden; optional current-frame flash on transition   |
-| Map / Minimap | Strong visibility + labels                           |
+Border is not just a line — it's a configurable layer. Capabilities: rounded corners, gradients, glow, shadow, feathering, overlays, decorative frames, opacity, per-side settings. Sources: purely visual, procedural, raster-based, vector-based.
 
-Shared `FrameChromeStyle` vocabulary (album defaults *and* session overrides must emit the same type — otherwise they can't compose): `Hidden`, `CornersOnly`, `SubtleOutline`, `SoftGlow`, `LabelTab`, `TintedArea`, `FullOutline`, `DebugBounds`.
+### Decorative frames
+
+Compatible with all other effects (shadow / glow / feathering / overlays / rounded corners still apply). Examples: film frame, polaroid, torn paper, notebook edge, watercolor edge, contact sheet.
+
+### Feathering / soft edges
+
+Soft-edge rendering gives mask-like visual results without true masking.
+
+- per-side feathering (e.g. soft top, hard bottom)
+- asymmetric strength per edge
+- types: transparency fade, color fade, blur fade
+- properties: size, opacity, curve, asymmetry
+
+### Glow and shadow
+
+Same rendering model — only sign of luminance differs. Shared params: color, blur radius, spread, opacity, offset, blend mode. Future: inner shadow / inner glow.
+
+### Overlay anchoring modes
+
+Overlays already exist as `NodeAppearance.overlays` (unified 2026-05-19). New question: anchoring. Examples — film scratches, dust, paper texture, grain, halftone, vignette, light leaks, reflections, lens dirt.
+
+Properties: opacity, blend mode, tiling, procedural or raster source.
+
+Four anchoring modes proposed:
+
+- **object-locked** — moves / rotates with the node (paper texture, lens dirt on a photo)
+- **frame-locked** — moves with the frame (vignette inside a polaroid)
+- **world-locked** — fixed to world coords (light leak over a canvas region)
+- **camera-locked** — fixed to the viewport (film grain across the whole screen regardless of pan/zoom)
 
 Open questions:
 
-- **Per-album, per-frame, or both?** Album-wide default makes sense, but specific frames may want explicit overrides (e.g. a title frame always shown as `LabelTab` regardless of mode). Mirrors the per-frame override pattern in `presentation-profile.md`.
-- **Where does this live?** A new `FrameChromeProfile` on the album, or folded into `PresentationProfile` (which already carries mode-dependent rendering decisions — camera fit, `OutsideFrameMode`)? Strong argument for the latter: a profile is "a mode of presentation," and chrome is mode-dependent.
-- **Edit-mode chrome is partly already implemented** (frame outlines + `SelectionOverlay`). Is the album-level default in Edit mode actually overridable, or is Edit mode special-cased to always show full chrome regardless of album setting?
+- Per-overlay anchoring or per-overlay-type default?
+- Camera-locked overlays live *above* the canvas, not in it. Render-pass order vs. the existing overlay model?
+- Today's `NodeAppearance.overlays` has no anchoring field. Additive (default `OBJECT`) or breaking?
 
-### 4.2 Temporary session-level overrides
+---
 
-A transient layer that does **not** mutate album data and is **not** serialized. Examples:
+## 8. Masks as a first-class concept — and a future `MaskNode`
 
-- User taps "Show frame hints" → frame hints appear temporarily.
-- User opens the minimap → frames become more visible on the main canvas.
-- User opens the frame-list panel → related frames are highlighted in the scene.
-- User navigates to a frame → the target briefly flashes/glows, then fades.
-- User holds a navigation/debug button → all frame bounds appear while held.
+Already partially discussed in `docs/architecture/appearance.md § 12` (`clip: ClipShape` + `alphaMask: AlphaMask?` as appearance fields — status: proposal). This section extends that with a *separate* MaskNode concept.
 
-Sketch (illustrative, not the final shape):
+### Why masks remain necessary even with rich appearance
+
+Masks fundamentally:
+
+- clip geometry (vs. fade it)
+- limit visible content
+- can be animated
+- may require offscreen composition
+
+Types: rectangle, rounded rect, ellipse, polygon, vector path, image, alpha, gradient.
+
+Cost: clipping, alpha compositing, offscreen render targets, nested mask composition. Animated and soft masks are especially expensive.
+
+### `MaskNode` (post-MVP) — distinct from a navigation frame
+
+Important: a MaskNode is **not** a frame. Frames are navigation anchors; MaskNode is a purely clipping object.
 
 ```kotlin
-data class FrameChromeOverride(
-    val target: ChromeOverrideTarget,
-    val style: FrameChromeStyle,
-    val lifetime: ChromeOverrideLifetime,
-)
-
-enum class ChromeOverrideTarget {
-    ALL, CURRENT, SELECTED, RELATED, HOVERED,
-}
-
-sealed class ChromeOverrideLifetime {
-    data class Timed(val durationMillis: Long) : ChromeOverrideLifetime()
-    data object WhilePanelOpen : ChromeOverrideLifetime()
-    data object WhileGestureActive : ChromeOverrideLifetime()
-    data object UntilCancelled : ChromeOverrideLifetime()
-}
+MaskNode
 ```
 
-Held in `CanvasUiState` (or equivalent session state), never in album data. Multiple overrides can be active concurrently (minimap open *and* navigation transition flashing *and* a frame selected) — they stack.
+Scope variants: object mask, group mask, scene / camera mask.
 
-### 4.3 The resolver — the actual design work
-
-The data classes are the easy part. The non-obvious work is the **precedence stack**: when album defaults and N concurrent overrides disagree on a frame's chrome, what wins?
+Use cases: cinematic vignette, spotlight, comic-panel layouts, transition masks.
 
 Open questions:
 
-- **Pick-one vs. merge.** Walk the stack highest-priority-first and pick the first matching style? Or merge styles (e.g. `LabelTab` + `SoftGlow` rendered simultaneously)? Mergeability depends on whether `FrameChromeStyle` is a closed enum (pick-one) or a layerable set of hints (merge).
-- **Per-target conflicts.** Two overrides target the same frame with different styles (minimap pushes `ALL → LabelTab`, navigation transition pushes `CURRENT → SoftGlow`). Most-specific-target wins? Most-recent-pushed wins? Explicit numeric priority?
-- **Composition with appearance.** Appearance (border, fill, content overlays) is always visible per the proposal's own rule. Chrome is a separate render layer painted on top — analogous to `SelectionOverlay` today. Need to confirm the layering order and that selection chrome and frame chrome don't double up on the same hint.
-- **Mode is itself an override.** Cleanest model: the album's per-mode default is the lowest-priority entry on the same stack. Avoids a "default vs override" branching code path; resolver is a single pure function.
+- **Relationship to appearance-level mask.** `appearance.md § 12` puts mask *inside* a node's appearance. MaskNode is a separate node that masks *other* nodes. Both? Or pick one?
+- **Z-order semantics.** Where does a MaskNode sit in z-order — does it mask everything below it, everything in its group, or everything it overlaps?
+- **Interaction with frames.** Can a MaskNode live inside a frame? Be pinned? Be a navigation target?
+- **Editing UX.** Almost certainly needs its own tool / popup — see § 10.
 
-### 4.4 `FrameOverrideReason` — telemetry, not contract
+---
 
-The original sketch included a `reason` enum (`SHOW_HINTS_ACTION`, `MINIMAP_OPEN`, `NAVIGATION_TRANSITION`, `DEBUG_HOLD`, …). Risk: this couples *cause* into the data type — every new trigger forces an enum bump, and the resolver may be tempted to branch on reason instead of behavior.
+## 9. Tool-based UI layout (left toolbar / topbar / right panel)
 
-Recommendation: drop `reason` from the override's behavioral contract. Keep `(target, style, lifetime)` as the contract. If reason is useful for diagnostics, attach it as a separate non-load-bearing diagnostic field. The resolver must never branch on reason.
+Long-term editor UI direction, inspired by Figma / Illustrator / Procreate Dreams / Concepts / Infinite Painter:
 
-### 4.5 Open sub-questions
+```
+Left toolbar  = tools (Selection, Free Draw, Shape, Vector Edit, Eraser, Text, …)
+Topbar        = active tool settings
+Right panel   = contextual properties of selection
+```
 
-- **Define `RELATED`.** `RELATED_FRAMES` is suggestive but undefined. Related-by-membership? Related-by-explicit-navigation-link (per `navigation.md`)? Related-by-graph-proximity? Pick one or drop the target.
-- **Animation ownership.** Many overrides imply animation (flash-and-fade glow, pulse). Does each `FrameChromeStyle` own its animation, or does the override carry an animation curve separately? Owning per-style is simpler but less flexible.
-- **Restoration after process death.** Session overrides are not persisted — but if the minimap is open when the process is killed, restoring the panel on relaunch should presumably re-create its associated override. Confirm.
-- **Map/Minimap mode vs. mode + minimap panel.** Is "Map/Minimap" a top-level mode alongside View/Edit/Present, or a *panel* available within those modes? If the latter, "Map/Minimap defaults" don't belong on `PresentationProfile`; they belong on the minimap panel's own config.
+Expandable / collapsible groups likely needed.
 
-My instinct: **fold album defaults into `PresentationProfile`** (one home for mode-dependent rendering), **keep the override stack in `CanvasUiState`** (transient, never serialized), **resolver as a pure function** taking `(profile, overrideStack, frameId, mode) → FrameChromeStyle`, **mode default = lowest-priority entry on the stack** so there's a single resolution path, **drop `reason` from the contract**. Treat Map/Minimap as a panel, not a mode, until proven otherwise.
+Open questions:
 
-But it's a real design call — flagging for explicit decision.
+- **Tablet vs. phone.** Tablet/phone editor split was decided 2026-05-19 (one codebase, popup-first for MVP, tablet docked panels deferred — `todo.md § 5d`). Does this section *become* the deferred tablet-panel design, or stays separate?
+- **Phone story.** Phones can't host left/right panels. Does the left toolbar collapse to a floating tool switcher, and the right panel collapse to the popup? If so, the popup design from `context-menu.md` is already doing the right-panel job.
+- **Tool grouping.** Procreate-style nested drawers (e.g. "drawing tools" expands to free draw / pencil / marker / watercolor) vs. a flat single-level toolbar?
+
+---
+
+## 10. Context-menu grouping (Transform / Appearance / Mask / Vector / Frame)
+
+As the popup grows (per § 2 above + new tool actions), a flat menu won't scale. Proposed top-level categories:
+
+- **Transform** — move, rotate, align, distribute
+- **Appearance** — border, glow, shadow, overlays, opacity
+- **Mask** — create, edit, release
+- **Vector** — edit nodes, simplify path, boolean operations
+- **Frame** — navigation, presentation settings, camera behavior
+
+Open questions:
+
+- **Section headers vs. submenu drilldown vs. dividers-only.** Three UI patterns; depends on how many items each category holds. (Also raised in § 2.)
+- **Visibility depends on selection type.** Vector group only for vector nodes; Frame group only for frames; Mask group: "create mask" when nothing's masked, "edit mask" / "release" when one exists. Standard contextual-menu pattern, worth confirming.
+
+---
+
+## 11. `EditorState` container
+
+Implementation-level. As tools, vector-edit state, eraser state, snapping, and transform handles all become first-class, `CanvasUiState` becomes a grab-bag. Possible factoring:
+
+```kotlin
+EditorState
+ ├── activeTool
+ ├── selectedObjects
+ ├── activeAppearanceEditor
+ ├── vectorEditState
+ ├── eraserState
+ ├── snappingState
+ └── transformState
+```
+
+Open questions:
+
+- **Split now or grow `CanvasUiState` and split later?** Premature factoring vs. landing tool work into a state object that's already past its limit.
+- **Where does the popup / appearance-editor open-state live?** Today probably in `CanvasUiState`; would move to `activeAppearanceEditor`.
+- **Persistence boundary.** Which of these survive process death? `activeTool` probably yes; `eraserState` (mid-stroke) probably no.
 
 ---
 
 > Recently graduated out of this file:
+> - Per-tool gesture maps (`FreeDraw`, `Shape`, `Text`, `VectorEdit`, `Eraser`) + Eraser modes **decided 2026-05-24 (late)** → `docs/architecture/editor-tools.md § 4.2–4.6`. Settles the old § 4 (per-tool maps) and old § 6 (Eraser modes). Per-tool highlights: `StrokeNode` raw-samples-plus-bezier-cache; `ShapeNode` separate from `FrameNode` with topbar primitive picker + aspect-ratio toggle; `TextNode` autosized (fixed width, auto height) with overlay `BasicTextField`; `VectorEdit` hybrid selection state (canvas node + per-tool anchor set), explicit-switch-only exit; `Eraser` one tool with Object + Vector-partial modes (raster partial post-MVP via future `MediaAppearance.alphaMask`), frame-delete-without-contents default, one-gesture-equals-one-Compound-undo, two-finger finalizes-and-pans. All six tools: stay-in-tool persistence; long-press always opens global popup (no per-tool override). `MaskEdit` remains deferred — gesture map blocked on `MaskNode` design in § 8.
+> - Active-tool framework + `SelectionTool` gesture map **decided 2026-05-24** → `docs/architecture/editor-tools.md` (status: proposal, partially implementable). Settles the old § 3 (three-axis model: `EditorMode` × `ActiveTool` × `GlobalNav`; strict 2-finger nav in Edit; View-mode 1-finger pan exception; tool axis Edit-only; Present as separate fullscreen action) and the `SelectionTool` portion of the old § 4 (tap clears, drag-empty marquees, rect MVP + lasso later, default rule `Intersects`, selection persists across tool switches, `VectorEditTool` enabled only for exactly-one-vector-node). Drag-on-empty migration changes today's [`selection.md § 2`](architecture/selection.md#2-gesture-mapping) rect-select gesture.
 > - Presentation profiles → `docs/architecture/presentation-profile.md` (per-frame multi-profile variants captured in § 9 / § 11 Deferred).
 > - Long-press context menu + selection rules → `docs/architecture/context-menu.md` (status: proposal, not yet implemented).
 > - Appearance / overlays / frame decoration separation → `docs/architecture/appearance.md` + `docs/architecture/media-appearance.md`.
@@ -170,3 +245,5 @@ But it's a real design call — flagging for explicit decision.
 > - Tablet vs. phone editor split **decided 2026-05-19** → one codebase, popup-first for both device classes for MVP; tablet-specific docked panels deferred. Decision and remaining `todo.md` pointer at `todo.md § 5c` (panel rework note) + `todo.md § 5d` (tablet panels — deferred placeholder). Per-concept editor popup design captured in `docs/architecture/appearance.md § 12.7` and `docs/architecture/context-menu.md` (committed). Settled design points: modal popups, compound undo per popup session, nesting allowed within a single editor, cross-editor switching closes, same content composables wrapped per surface.
 > - Multi-selection appearance editing **decided 2026-05-19** → captured in `docs/architecture/appearance.md § 14`. No "Edit common appearance" umbrella; per-concept popups handle multi-edit natively; Figma-style "Mixed" label for indeterminate fields; type-specific popups gated by homogeneous selection; preset application is type-scoped per `MediaStylePreset` / future `FrameStylePreset`.
 > - Overlay-field unification (`MediaAppearance.overlays` + `FrameAppearance.contentOverlays` → `NodeAppearance.overlays`) **shipped 2026-05-19** in commit `d17efcb`. Captured in `docs/architecture/appearance.md §§ 1, 4` (current model + per-type rationale) with a brief design-history note in § 13. Behavior-preserving rename; serializer reads legacy `contentOverlays` JSON on a frame and lifts it into the unified field.
+> - Album-level frame chrome settings + temporary session overrides **decided 2026-05-23** → `docs/architecture/frame-chrome.md` (status: proposal, not yet implemented; implementation scheduled in `docs/todo.md § 23`). Registered in `data-model.md` and `decisions.md § 9`. Resolves to: closed `FrameChromeStyle` enum, pick-one resolver, most-specific-target-wins with most-recent tiebreaker, chrome paints edge/outside/label only (never inside frame content), defaults nested under `AlbumPresentationProfile.frameChrome`, session overrides in `CanvasUiState`, MVP targets `ALL`/`SELECTED`/`CURRENT` (HOVERED, RELATED, NAV_TARGET deferred), `reason` field is diagnostic-only.
+> - Multi-selection z-order semantics **decided 2026-05-24** → `docs/architecture/z-order.md` (status: proposal, single-selection ships today; multi-selection implementation extended in `docs/todo.md § 13.5`). Figma-aligned: `BringToFront` / `SendToBack` use block-extreme (selection moves to extreme as a contiguous block, internal order preserved); `BringForward` / `SendBackward` use independent-with-skip (each selected node moves one step, treating other selected nodes as transparent). Pure functions in `core/math/ZOrder.kt`; one Compound undo per command; no frame-membership recompute needed; no-op-at-extreme acceptable for MVP (greyed-out state is a follow-up).

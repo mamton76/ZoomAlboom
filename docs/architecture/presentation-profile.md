@@ -1,6 +1,6 @@
 # Presentation Form Factor
 
-> Related: [data-model](data-model.md) | [coordinates](coordinates.md) | [navigation](navigation.md) | [TODO § 22](../todo.md#22-presentation-form-factor)
+> Related: [data-model](data-model.md) | [coordinates](coordinates.md) | [navigation](navigation.md) | [frame-chrome](frame-chrome.md) | [TODO § 22](../todo.md#22-presentation-form-factor)
 
 The infinite canvas remains infinite. **Presentation profile** describes the *intended* screen shape for viewing/presenting the album — it shapes new-frame defaults, View-mode camera transforms, and editor overlays. It does **not** constrain or resize the canvas itself.
 
@@ -32,6 +32,9 @@ data class AlbumPresentationProfile(
     val safeAreaInset: Float = 0.1f, // fractional inset on the shorter axis
     val defaultTransitionPreset: TransitionPreset = TransitionPreset.SOFT,
     val defaultEasing: EasingType = EasingType.EASE_IN_OUT,
+    // Mode-dependent frame chrome (hint layer, never serialized into appearance).
+    // See `docs/architecture/frame-chrome.md`.
+    val frameChrome: FrameChromeDefaults = FrameChromeDefaults(),
 )
 
 @Serializable

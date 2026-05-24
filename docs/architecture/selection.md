@@ -1,6 +1,8 @@
 # Selection
 
-> Related: [overview](overview.md) | [coordinates](coordinates.md) | [rendering](rendering.md) | [context-menu](context-menu.md) *(proposal — will replace § 2's long-press row when it lands)*
+> Related: [overview](overview.md) | [coordinates](coordinates.md) | [rendering](rendering.md) | [context-menu](context-menu.md) *(proposal — will replace § 2's long-press row when it lands)* | [editor-tools](editor-tools.md) *(decided 2026-05-24 — future-state authority on gesture allocation)*
+
+**Future-model note (2026-05-24, not yet implemented).** This doc describes today's selection behavior. [`editor-tools.md`](editor-tools.md) locks the next-generation gesture model: (a) drag-on-empty initiates rect-select directly without long-press; (b) two-finger gestures become the only navigation path in Edit mode (no single-finger pan); (c) tap dispatch becomes tool-aware (`activeTool.onTap(...)`); (d) long-press becomes the universal popup invoker across all tools, with contents derived per `editor-tools.md § 5`. Migration sequencing in `editor-tools.md § 7.3` / `§ 10` and `todo.md § 24`. This doc will be updated section-by-section as each piece lands.
 
 Selection is the canvas's interaction focus — the set of nodes that group operations (move, resize, rotate, delete, duplicate) apply to. This doc covers what's selected (state), how the user changes it (gestures and actions), and the gesture-stack rules that make it work consistently across viewport changes.
 

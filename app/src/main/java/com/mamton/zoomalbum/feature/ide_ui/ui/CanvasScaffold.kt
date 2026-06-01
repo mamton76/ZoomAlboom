@@ -70,6 +70,24 @@ fun CanvasScaffold(
     var mediaApprEditing by remember { mutableStateOf<CanvasNode.Media?>(null) }
     var contextMenuRequest by remember { mutableStateOf<ContextMenuRequest?>(null) }
 
+    // Top-level chrome controls (top bar, FAB, ContextualActionBar) treat their
+    // tap as an outside-tap of the context-menu popup: dismiss-then-act. The
+    // single exception is `FrameEditOptionsBar`, whose toggles are selection-
+    // scoped gesture modifiers — the popup remains contextual to the same
+    // selection. See `to_discuss.md § 1` (chrome gating, resolved 2026-06-01).
+    val dismissPopupAnd: (() -> Unit) -> () -> Unit = { action ->
+        {
+            contextMenuRequest = null
+            action()
+        }
+    }
+    // Variant for callbacks that consume a single argument (e.g. ContextualActionBar's
+    // action-label dispatcher). Same rule: dismiss popup, then forward the call.
+    fun <T> dismissPopupAndAccept(action: (T) -> Unit): (T) -> Unit = { arg ->
+        contextMenuRequest = null
+        action(arg)
+    }
+
     // Mirror the popup's anchor into MVI state so `SelectionOverlay` can draw
     // an outer halo around the anchor node. When the popup closes (or the user
     // picks a different anchor in the inline picker), the halo follows.
@@ -161,39 +179,39 @@ fun CanvasScaffold(
                 lodStubCount = lodCounts[RenderDetail.Stub] ?: 0,
                 lodSimplifiedCount = lodCounts[RenderDetail.Simplified] ?: 0,
                 onUndo = if (canUndo) {
-                    {
+                    dismissPopupAnd {
                         canvasViewModel.onAction(
-                            com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.Undo,
+                            CanvasAction.Undo,
                         )
                     }
                 } else null,
                 onRedo = if (canRedo) {
-                    {
+                    dismissPopupAnd {
                         canvasViewModel.onAction(
-                            com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.Redo,
+                            CanvasAction.Redo,
                         )
                     }
                 } else null,
-                onNavigateBack = onNavigateBack,
-                onOpenFrameList = { showFrameList = true },
-                onOpenPanelConfig = { showPanelConfig = true },
-                onOpenAlbumSettings = { showAlbumSettings = true },
+                onNavigateBack = dismissPopupAnd { onNavigateBack() },
+                onOpenFrameList = dismissPopupAnd { showFrameList = true },
+                onOpenPanelConfig = dismissPopupAnd { showPanelConfig = true },
+                onOpenAlbumSettings = dismissPopupAnd { showAlbumSettings = true },
                 mode = canvasState.mode,
-                onToggleMode = {
+                onToggleMode = dismissPopupAnd {
                     val next = if (canvasState.mode == CanvasInteractionMode.Edit) {
                         CanvasInteractionMode.View
                     } else {
                         CanvasInteractionMode.Edit
                     }
                     canvasViewModel.onAction(
-                        com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.SetMode(next),
+                        CanvasAction.SetMode(next),
                     )
                 },
             )
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { showAddSheet = true },
+                onClick = dismissPopupAnd { showAddSheet = true },
                 containerColor = MaterialTheme.colorScheme.primary,
             ) {
                 Text("+", style = MaterialTheme.typography.headlineSmall)
@@ -255,13 +273,13 @@ fun CanvasScaffold(
                 showFrameMembershipActions = pinDetachEnabled,
                 showAutoAction = pinDetachEnabled && anyOverrideExists,
                 modifier = Modifier.align(Alignment.BottomCenter),
-                onAction = { label ->
+                onAction = dismissPopupAndAccept { label: String ->
                     when (label) {
                         "Delete" -> canvasViewModel.onAction(
-                            com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.DeleteSelection,
+                            CanvasAction.DeleteSelection,
                         )
                         "Duplicate" -> canvasViewModel.onAction(
-                            com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.DuplicateSelection,
+                            CanvasAction.DuplicateSelection,
                         )
                         "Background" -> singleSelectedFrame?.let { frameBgEditing = it }
                         "Appearance" -> singleSelectedMedia?.let { mediaApprEditing = it }
@@ -270,22 +288,22 @@ fun CanvasScaffold(
                         "Auto" -> dispatchFrameMembership(FrameMembershipIntent.Reset)
                         "ToFront" -> selectedNodeIds.firstOrNull()?.let {
                             canvasViewModel.onAction(
-                                com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.BringToFront(it),
+                                CanvasAction.BringToFront(it),
                             )
                         }
                         "Forward" -> selectedNodeIds.firstOrNull()?.let {
                             canvasViewModel.onAction(
-                                com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.BringForward(it),
+                                CanvasAction.BringForward(it),
                             )
                         }
                         "Backward" -> selectedNodeIds.firstOrNull()?.let {
                             canvasViewModel.onAction(
-                                com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.SendBackward(it),
+                                CanvasAction.SendBackward(it),
                             )
                         }
                         "ToBack" -> selectedNodeIds.firstOrNull()?.let {
                             canvasViewModel.onAction(
-                                com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.SendToBack(it),
+                                CanvasAction.SendToBack(it),
                             )
                         }
                     }
@@ -341,7 +359,7 @@ fun CanvasScaffold(
             visibleFrameIds = visibleFrameIds,
             onFocusFrame = { frameId ->
                 canvasViewModel.onAction(
-                    com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.FocusNode(frameId),
+                    CanvasAction.FocusNode(frameId),
                 )
                 showFrameList = false
             },
@@ -353,7 +371,7 @@ fun CanvasScaffold(
             initial = canvasState.albumBackground,
             onApply = { bg ->
                 canvasViewModel.onAction(
-                    com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.SetAlbumBackground(bg),
+                    CanvasAction.SetAlbumBackground(bg),
                 )
                 showAlbumSettings = false
             },
@@ -366,7 +384,7 @@ fun CanvasScaffold(
             initial = frame.appearance,
             onApply = { nextAppearance ->
                 canvasViewModel.onAction(
-                    com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.SetFrameAppearance(
+                    CanvasAction.SetFrameAppearance(
                         nodeId = frame.id,
                         appearance = nextAppearance,
                     ),
@@ -382,7 +400,7 @@ fun CanvasScaffold(
             initial = media.appearance,
             onApply = { nextAppearance ->
                 canvasViewModel.onAction(
-                    com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction.SetMediaAppearance(
+                    CanvasAction.SetMediaAppearance(
                         nodeId = media.id,
                         appearance = nextAppearance,
                     ),

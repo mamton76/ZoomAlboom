@@ -2,6 +2,7 @@ package com.mamton.zoomalbum.feature.canvas.view
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -23,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.mamton.zoomalbum.domain.model.CanvasNode
@@ -52,7 +55,15 @@ data class ContextMenuRequest(
 )
 
 /**
- * One menu entry. Either a clickable action or a structural separator.
+ * One menu entry. Three rendered shapes:
+ *
+ * - **Text item** — default; a single clickable row with [label].
+ * - **Divider** — structural separator (`isDivider = true`).
+ * - **Inline action row** — non-null [inlineRow] renders a compact row of
+ *   icon buttons inside the menu. Used for short groups of related actions
+ *   that share an axis (z-order, frame membership) so four siblings fit in
+ *   one tap target each without expanding the menu vertically. See
+ *   `docs/architecture/context-menu.md § 4` rendering convention.
  *
  * Disabled entries render with reduced opacity and absorb taps without firing
  * [onClick] or dismissing the popup. Use sparingly — entries that don't apply
@@ -64,16 +75,28 @@ data class ContextMenuRequest(
  * the [onClick]'s responsibility (see `docs/architecture/context-menu.md § 4.4`).
  */
 data class ContextMenuItem(
-    val label: String,
+    val label: String = "",
     val onClick: () -> Unit = {},
     val enabled: Boolean = true,
     val isDivider: Boolean = false,
     val keepOpenOnClick: Boolean = false,
+    val inlineRow: List<InlineRowButton>? = null,
 ) {
     companion object {
-        val Divider = ContextMenuItem(label = "", isDivider = true)
+        val Divider = ContextMenuItem(isDivider = true)
     }
 }
+
+/**
+ * One button in a [ContextMenuItem]'s inline action row. Tap fires [onClick]
+ * and dismisses the popup (the row inherits the parent item's dismissal rule).
+ */
+data class InlineRowButton(
+    val icon: String,
+    val label: String,
+    val enabled: Boolean = true,
+    val onClick: () -> Unit,
+)
 
 /**
  * Transient popover anchored at the long-press touch point.
@@ -167,10 +190,16 @@ fun ContextMenuPopup(
                 }
 
                 items.forEach { item ->
-                    if (item.isDivider) {
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                    } else {
-                        DropdownMenuItem(
+                    when {
+                        item.isDivider -> HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                        item.inlineRow != null -> ContextMenuInlineRow(
+                            buttons = item.inlineRow,
+                            onAction = { onTap ->
+                                onTap()
+                                if (!item.keepOpenOnClick) onDismiss()
+                            },
+                        )
+                        else -> DropdownMenuItem(
                             text = { Text(item.label) },
                             onClick = {
                                 item.onClick()
@@ -180,6 +209,29 @@ fun ContextMenuPopup(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContextMenuInlineRow(
+    buttons: List<InlineRowButton>,
+    onAction: (onTap: () -> Unit) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        for (button in buttons) {
+            IconButton(
+                onClick = { onAction(button.onClick) },
+                enabled = button.enabled,
+            ) {
+                Text(text = button.icon, fontSize = 20.sp)
             }
         }
     }

@@ -233,8 +233,11 @@ A dedicated surface for editing properties of a selected node. Today these contr
 - [ ] **Widget** (§21) — per-widget-type config form
 - [ ] Header row: node type + id + transform readout (cx, cy, w, h, scale, rotation)
 
-### 5c.3 Action Bar simplification
-- [ ] Once 5c.1 ships, the ContextualActionBar shrinks back to Delete / Duplicate / Open Properties. Move the Frame Background button (§19.6) into the panel and delete it from the bar.
+### 5c.3 Action Bar removal (supersedes the older "shrinks back to…" plan)
+
+> **Decided 2026-06-02.** `ContextualActionBar` is removed entirely (see [context-menu.md § 6](architecture/context-menu.md#6-contextualactionbar-removal)). All actions migrate into the long-press context menu. The bar shrinks-to-zero rather than shrinks-back-to-Delete/Duplicate.
+
+Tracked under [§ 15.5](#155-contextualactionbar-removal--inline-rows) below — bar deletion + the inline z-order row + the inline frame-membership row land together.
 
 ### 5c.4 Dependencies
 - §13 layers (for "Move to Layer" control)
@@ -535,6 +538,16 @@ Pure-gesture slice that verifies the rule shift in isolation. Behavior-preservin
 - [x] Overlap picker uses additive `AddNodesToSelection(ids)` (already wired in `CanvasScaffold.kt`). The original "picker replaces selection" issue was resolved separately; this slice keeps the additive semantic.
 - [x] Update `selection.md § 2` long-press row to **Add-or-keep**; expand § 3 action list with `AddNodeToSelection` / `AddNodesToSelection`.
 - [x] Update `selection.md § 6` to remove the resolved overlap-picker bullet.
+
+### 15.5 ContextualActionBar removal + inline rows — **shipped 2026-06-02**
+
+> **Decided 2026-06-02** ([context-menu.md § 4 + § 6](architecture/context-menu.md#4-menu-content-by-selection-type)). Bar removal + the two inline action rows landed together after the [§ 25](#25-editor-action-catalog) catalog refactor.
+
+- [x] **Z-order inline row** — four-button row (`⤒ ▲ ▼ ⤓`) added to single-selection menus via `EditorActionCatalog.visibleByCategory(ctx)[ZOrder]` and the `List<EditorAction>.toInlineRowItem(...)` helper in `EditContextMenuItems.kt`. Multi-selection row stays empty until §13.5 ships (the actions' `isVisible` already gates on `size == 1`).
+- [x] **Frame-membership inline row** — three-button row (`⊕ Pin · ⊖ Detach · ⟲ Auto`). Visibility comes from `ctx.pinDetachEnabled` / `ctx.anyOverrideExists`, derived once in `CanvasScaffold.kt`. Direct dispatch for the unambiguous single-target case; opens `FrameTargetPickerDialog` for the multi-frame case (existing wiring, via `EditorActionEffect.FrameMembership` → `dispatchFrameMembership`).
+- [x] **Popup container** — `ContextMenuItem` gained `inlineRow: List<InlineRowButton>?`; `ContextMenuPopup` renders the inline-row branch via a private `ContextMenuInlineRow` composable. Dismissal rules unchanged.
+- [x] **Delete `ContextualActionBar`** — composable file removed; call site removed from `CanvasScaffold.kt`; the conditional-visibility props (`showBackgroundAction`, `showMediaAppearanceAction`, `showZOrderActions`, `showFrameMembershipActions`, `showAutoAction`) are now visible-by-construction on the catalog; `dismissPopupAndAccept` helper deleted (no remaining consumer). `dispatchFrameMembership` retained — used by the popup's frame-membership row via the central effect dispatcher.
+- [x] **Verify** — every action the bar exposed is reachable from the popup; tests in `EditContextMenuItemsTest` cover the new menu shape (header / z-order row / membership row / Delete / anchor block / Clear selection).
 
 ---
 
@@ -1197,6 +1210,92 @@ Each lands as its own slice once its data-model dependency is ready. Order per `
 - Single-finger pan fallback in Edit mode (predictability over convenience, per `editor-tools.md § 9`).
 - Present as a third position on the View/Edit toggle.
 - Per-tool camera control (camera always belongs to Layer 3).
+
+---
+
+## 25. Editor Action Catalog
+
+> **Decided 2026-06-02.** Replace stringly-typed action dispatch (`onAction(label: String) → when(label)`) with a typed `EditorAction` model. Foundational refactor that precedes § 15.5 (`ContextualActionBar` removal + inline rows) — both bar and popup will consume the catalog.
+
+### 25.1 Motivation
+
+Today's bar dispatches actions via `(String) -> Unit`:
+- `ContextualActionBar.kt` defines `ActionItem(icon, label)` lists, calls `onAction(label)` per tap.
+- `CanvasScaffold.kt` matches `when (label) { "Delete" -> ...; "ToFront" -> ... }` to `CanvasAction` variants.
+- Visibility is plumbed as parallel booleans (`hasSelection`, `showBackgroundAction`, `showMediaAppearanceAction`, `showZOrderActions`, `showFrameMembershipActions`, `showAutoAction`, plus computed `pinDetachEnabled` + `anyOverrideExists`).
+- The popup (`buildEditContextMenuItems`) duplicates the same vocabulary via a separate path.
+
+This costs: magic strings (typos pass compile), divergence between bar and popup, fan-out for adding a single action (definition + visibility flag + when branch + plumbing), and a hard cap on growth before § 10's category grouping lands.
+
+### 25.2 Model
+
+`feature/canvas/actions/EditorAction.kt`:
+
+```kotlin
+sealed interface EditorAction {
+    val id: String                    // stable id, used as list key
+    val label: String
+    val icon: String?                 // null = text-only menu item; non-null = renders in inline row
+    val category: ActionCategory
+    fun isVisible(ctx: SelectionContext): Boolean = true
+    fun isEnabled(ctx: SelectionContext): Boolean = true
+    /** null return = caller handles fallback (e.g. opening FrameTargetPickerDialog). */
+    fun dispatch(ctx: SelectionContext): CanvasAction?
+}
+
+enum class ActionCategory { Edit, Navigation, Transform, ZOrder, Membership, Lifecycle, SelectionMeta }
+
+data class SelectionContext(
+    val selectedNodeIds: Set<String>,
+    val selectedFrames: List<CanvasNode.Frame>,
+    val anchorNodeId: String?,
+    val singleSelectedFrame: CanvasNode.Frame?,
+    val singleSelectedMedia: CanvasNode.Media?,
+    val pinDetachEnabled: Boolean,
+    val anyOverrideExists: Boolean,
+)
+```
+
+`feature/canvas/actions/EditorActionCatalog.kt`:
+
+```kotlin
+object EditorActionCatalog {
+    val all: List<EditorAction> = listOf(
+        DeleteSelection, DuplicateSelection, ClearSelection,
+        BringToFront, BringForward, SendBackward, SendToBack,
+        PinToFrame, DetachFromFrame, ClearOverrides,
+        EditFrameBackground, EditMediaAppearance, NavigateToFrame,
+        RemoveFromSelection, EditThisOnly,
+    )
+    fun visibleByCategory(ctx: SelectionContext): Map<ActionCategory, List<EditorAction>> =
+        all.filter { it.isVisible(ctx) }.groupBy { it.category }
+}
+```
+
+Each concrete action is a `data object` implementing `EditorAction`. Visibility / enable / dispatch are co-located with definition.
+
+### 25.3 Decisions (recap from 2026-06-02 discussion)
+
+- **Sealed interface** — exhaustive compile-time check at the catalog level; data-object boilerplate is the cost.
+- **`SelectionContext` as a single bundle** — adding a field doesn't break every action signature.
+- **`dispatch` returns `CanvasAction?`** — single dispatch for MVP; switch to `List<CanvasAction>` if compound actions (e.g. Align) need it later.
+- **Lives in `feature/canvas/actions/`** — close to `CanvasAction` (its dispatch target), not in `domain/` (UI-facing concern).
+- **Lands before § 15.5** — catalog ships first, bar + popup both migrate to consume it, then § 15.5 is purely UI deletion.
+
+### 25.4 Migration tasks — **shipped 2026-06-02**
+- [x] Add `EditorAction` sealed interface, `ActionCategory`, `EditorActionEffect`, `SelectionContext`, `EditorActionCatalog` under `feature/canvas/actions/`.
+- [x] Implement every action as a `data object` — visibility / enable / effect co-located with the action definition.
+- [x] Derive `SelectionContext` in `CanvasScaffold.kt` from `CanvasUiState` + the existing `singleSelectedFrame` / `singleSelectedMedia` / `selectedFramesInOrder` / `pinDetachEnabled` / `anyOverrideExists` projections. (Did *not* move the projections out of the composable — they live as `remember` cells next to the popup state, which is the right scope; pure-derivation extraction would only matter when popup state lifts into `EditorState`.)
+- [x] Migrate `ContextualActionBar` to render from `EditorActionCatalog.visibleByCategory(ctx)`. (Subsequently deleted in §15.5; for one commit it consumed the catalog directly.)
+- [x] Migrate `buildEditContextMenuItems` to render from the same catalog. Per-concept popup entries (`Edit appearance`, etc.) are catalog entries that produce `EditorActionEffect.OpenMediaAppearance` / `OpenFrameBackground`; anchor-scoped items (`Remove this from selection`, `Edit this only`) stay out of the catalog because of their `keepOpenOnClick` + `onAnchorRemoved` semantics.
+- [x] Drop the stringly-typed `onAction(label)` indirection. Tap → `action.effect(ctx)?.let(runEditorActionEffect)`; a single sealed-type `when` in `CanvasScaffold.runEditorActionEffect` handles every effect kind.
+- [x] No behavior change at this step — verified via `EditContextMenuItemsTest`. (Bar order regression: catalog declaration order put Duplicate before Delete in the bar, where the old bar had Delete first; accepted because §15.5 deletes the bar immediately afterward.)
+- **Effect-type model.** The pure-`CanvasAction?` dispatch proposed in § 25.2 wasn't enough — Pin/Detach/Auto need to flow through `dispatchFrameMembership`, and Edit appearance / Edit frame background mutate local UI state (`mediaApprEditing`, `frameBgEditing`). Replaced with a sealed `EditorActionEffect` (`Dispatch(CanvasAction)`, `FrameMembership(intent)`, `OpenMediaAppearance`, `OpenFrameBackground`, `OpenAddSheet`). Effects are a one-place `when` in the host. Same single-source-of-truth wins; richer than originally planned.
+- **Context-aware labels.** `label` became a function of `SelectionContext` instead of a property, so `Duplicate` / `Delete` can render as `Duplicate selection` / `Delete selection` for group selections. Most actions ignore the parameter.
+
+### 25.5 Dependencies
+- Precondition for [§ 15.5](#155-contextualactionbar-removal--inline-rows). Land § 25 first; § 15.5 then becomes a pure UI deletion + two row composables consuming `Category.ZOrder` / `Category.Membership`.
+- Connects to (but doesn't block) § 11 `EditorState` discussion in `to_discuss.md` — `SelectionContext` is the action-dispatch view of editor state; if `EditorState` later splits out of `CanvasUiState`, `SelectionContext` derives from it instead.
 
 ---
 

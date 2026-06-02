@@ -27,6 +27,9 @@ import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
 import com.mamton.zoomalbum.domain.model.RenderDetail
+import com.mamton.zoomalbum.feature.canvas.actions.EditorAction
+import com.mamton.zoomalbum.feature.canvas.actions.EditorActionEffect
+import com.mamton.zoomalbum.feature.canvas.actions.SelectionContext
 import com.mamton.zoomalbum.feature.canvas.view.CanvasScreen
 import com.mamton.zoomalbum.feature.canvas.view.ContextMenuPopup
 import com.mamton.zoomalbum.feature.canvas.view.ContextMenuRequest
@@ -70,22 +73,16 @@ fun CanvasScaffold(
     var mediaApprEditing by remember { mutableStateOf<CanvasNode.Media?>(null) }
     var contextMenuRequest by remember { mutableStateOf<ContextMenuRequest?>(null) }
 
-    // Top-level chrome controls (top bar, FAB, ContextualActionBar) treat their
-    // tap as an outside-tap of the context-menu popup: dismiss-then-act. The
-    // single exception is `FrameEditOptionsBar`, whose toggles are selection-
-    // scoped gesture modifiers — the popup remains contextual to the same
-    // selection. See `to_discuss.md § 1` (chrome gating, resolved 2026-06-01).
+    // Top-level chrome controls (top bar, FAB) treat their tap as an outside-tap
+    // of the context-menu popup: dismiss-then-act. The single exception is the
+    // top bar's two frame-edit toggles (`frameEditOptions`), which are
+    // selection-scoped gesture modifiers — the popup remains contextual to the
+    // same selection. See `docs/architecture/context-menu.md § 3 — Dismissal rules`.
     val dismissPopupAnd: (() -> Unit) -> () -> Unit = { action ->
         {
             contextMenuRequest = null
             action()
         }
-    }
-    // Variant for callbacks that consume a single argument (e.g. ContextualActionBar's
-    // action-label dispatcher). Same rule: dismiss popup, then forward the call.
-    fun <T> dismissPopupAndAccept(action: (T) -> Unit): (T) -> Unit = { arg ->
-        contextMenuRequest = null
-        action(arg)
     }
 
     // Mirror the popup's anchor into MVI state so `SelectionOverlay` can draw
@@ -167,6 +164,31 @@ fun CanvasScaffold(
         }
     }
 
+    // Snapshot of the editor state consumed by `EditorActionCatalog` for
+    // visibility / dispatch in the long-press popup. See
+    // `docs/architecture/editor-actions.md` for the catalog model.
+    val selectionContext = SelectionContext(
+        selectedNodeIds = selectedNodeIds,
+        anchorNodeId = canvasState.contextAnchorNodeId,
+        singleSelectedFrame = singleSelectedFrame,
+        singleSelectedMedia = singleSelectedMedia,
+        selectedFramesInOrder = selectedFramesInOrder,
+        pinDetachEnabled = pinDetachEnabled,
+        anyOverrideExists = anyOverrideExists,
+    )
+
+    // Central effect dispatcher: every `EditorAction` tap (bar or popup) routes
+    // here. New effect kinds become a single `when` branch addition.
+    fun runEditorActionEffect(effect: EditorActionEffect) {
+        when (effect) {
+            is EditorActionEffect.Dispatch -> canvasViewModel.onAction(effect.action)
+            is EditorActionEffect.FrameMembership -> dispatchFrameMembership(effect.intent)
+            EditorActionEffect.OpenMediaAppearance -> singleSelectedMedia?.let { mediaApprEditing = it }
+            EditorActionEffect.OpenFrameBackground -> singleSelectedFrame?.let { frameBgEditing = it }
+            EditorActionEffect.OpenAddSheet -> showAddSheet = true
+        }
+    }
+
     Scaffold(
         topBar = {
             val lodCounts = canvasState.visibleNodes.groupingBy { it.detail }.eachCount()
@@ -206,6 +228,14 @@ fun CanvasScaffold(
                     canvasViewModel.onAction(
                         CanvasAction.SetMode(next),
                     )
+                },
+                // Frame-gesture modifiers — visible only while a frame is in
+                // the selection; toggling them does **not** dismiss the popup
+                // (per `context-menu.md § 3 — Dismissal rules`).
+                frameEditOptions = canvasState.frameEditOptions
+                    .takeIf { selectedFramesInOrder.isNotEmpty() },
+                onFrameEditOptionsChange = {
+                    canvasViewModel.onAction(CanvasAction.SetFrameEditOptions(it))
                 },
             )
         },
@@ -250,65 +280,6 @@ fun CanvasScaffold(
                 )
             }
 
-            FrameEditOptionsBar(
-                // Visible whenever the selection contains at least one frame — the
-                // toggles apply to every selected frame's gesture (move / resize / rotate).
-                visible = selectedFramesInOrder.isNotEmpty(),
-                options = canvasState.frameEditOptions,
-                onOptionsChange = {
-                    canvasViewModel.onAction(
-                        CanvasAction.SetFrameEditOptions(it),
-                    )
-                },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 64.dp),
-            )
-
-            ContextualActionBar(
-                hasSelection = selectedNodeIds.isNotEmpty(),
-                showBackgroundAction = singleSelectedFrame != null,
-                showMediaAppearanceAction = singleSelectedMedia != null,
-                showZOrderActions = selectedNodeIds.size == 1,
-                showFrameMembershipActions = pinDetachEnabled,
-                showAutoAction = pinDetachEnabled && anyOverrideExists,
-                modifier = Modifier.align(Alignment.BottomCenter),
-                onAction = dismissPopupAndAccept { label: String ->
-                    when (label) {
-                        "Delete" -> canvasViewModel.onAction(
-                            CanvasAction.DeleteSelection,
-                        )
-                        "Duplicate" -> canvasViewModel.onAction(
-                            CanvasAction.DuplicateSelection,
-                        )
-                        "Background" -> singleSelectedFrame?.let { frameBgEditing = it }
-                        "Appearance" -> singleSelectedMedia?.let { mediaApprEditing = it }
-                        "Pin" -> dispatchFrameMembership(FrameMembershipIntent.Pin)
-                        "Detach" -> dispatchFrameMembership(FrameMembershipIntent.Detach)
-                        "Auto" -> dispatchFrameMembership(FrameMembershipIntent.Reset)
-                        "ToFront" -> selectedNodeIds.firstOrNull()?.let {
-                            canvasViewModel.onAction(
-                                CanvasAction.BringToFront(it),
-                            )
-                        }
-                        "Forward" -> selectedNodeIds.firstOrNull()?.let {
-                            canvasViewModel.onAction(
-                                CanvasAction.BringForward(it),
-                            )
-                        }
-                        "Backward" -> selectedNodeIds.firstOrNull()?.let {
-                            canvasViewModel.onAction(
-                                CanvasAction.SendBackward(it),
-                            )
-                        }
-                        "ToBack" -> selectedNodeIds.firstOrNull()?.let {
-                            canvasViewModel.onAction(
-                                CanvasAction.SendToBack(it),
-                            )
-                        }
-                    }
-                },
-            )
         }
     }
 
@@ -434,16 +405,13 @@ fun CanvasScaffold(
         // not the stored snapshot) and so the menu structure (single vs group)
         // stays in sync if the user changes selection via the picker.
         val request = storedRequest.copy(selection = canvasState.selectedNodeIds)
-        val nodesById = remember(canvasState.visibleNodes) {
-            canvasState.visibleNodes.associate { it.node.id to it.node }
-        }
         val items = buildEditContextMenuItems(
             request = request,
-            nodesById = nodesById,
-            dispatch = canvasViewModel::onAction,
-            openMediaAppearance = { mediaApprEditing = it },
-            openFrameAppearance = { frameBgEditing = it },
-            openAddSheet = { showAddSheet = true },
+            // `selectionContext` is rebuilt every recomposition from
+            // `canvasState.selectedNodeIds`, so picker toggles that mutate the
+            // selection are reflected here without any extra plumbing.
+            ctx = selectionContext,
+            runEffect = ::runEditorActionEffect,
             // `Remove this from selection` keeps the popup open; per Option A
             // (see `docs/architecture/context-menu.md § 4.4`), removing the
             // anchor clears it — anchor-scoped items disappear until the user

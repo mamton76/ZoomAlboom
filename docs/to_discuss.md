@@ -4,28 +4,6 @@
 
 ---
 
-## 2. Remove `ContextualActionBar`; migrate all actions into the popup
-
-Direction (decided 2026-06-01): the `ContextualActionBar` is going away entirely. The popup becomes the single surface for selection-scoped actions. This supersedes the older `todo.md § 5c.3` plan ("bar shrinks back to Delete / Duplicate / Open Properties") which was written before the context-menu work.
-
-Bar currently uniquely owns:
-
-- **Frame membership** — `Pin` / `Detach` / `Auto` (when selection ≥ 1 frame + ≥ 1 other node, or ≥ 2 frames).
-- **Z-order** (single selection only) — `Bring to Front` / `Bring Forward` / `Send Backward` / `Send to Back`.
-- **Per-type quick edit** — `Background` (frame) and `Appearance` (media) — partially already in the popup as `Edit frame appearance` / `Edit appearance`, so this is the duplication.
-- **Delete / Duplicate** — also exposed in the popup; bar version is redundant.
-
-Open sub-questions (about the migration, not whether to do it):
-
-- **Pin / Detach / Auto in the menu.** These require a *target frame* and currently trigger `FrameTargetPickerDialog` for multi-frame cases. Wiring through the menu means the menu item launches the same dialog — doable, but adds inter-modal navigation. Confirm the popup → dialog hop is acceptable, or design an inline target picker.
-- **Z-order ordering convention.** Bar uses ToFront / Forward / Backward / ToBack. In a menu, what order — front-first or back-first? Material's text menus tend to read "Bring to front, Bring forward, Send backward, Send to back" top-to-bottom.
-- **Menu sub-grouping.** With z-order + membership added, the single-node menu grows. Section headers (Edit / Order / Membership / Lifecycle), submenu drilldown, or flat with dividers? Connects to § 10 (context-menu grouping).
-- **Loss of one-tap access for frequent actions.** The bar was *persistent on selection* and one-tap-away; the popup is two gestures (long-press → tap an item). For Delete in particular, this is a regression. Mitigations: dedicated delete key (none on phone), a swipe gesture, or accept the cost.
-
-Implementation note: most actions already exist as `CanvasAction` variants (`BringToFront`, `BringForward`, `SendBackward`, `SendToBack`, `PinToFrame`, `DetachFromFrame`, `ClearFrameOverrides`). Wiring into the popup is straightforward; the design questions are *organization* and the Delete-frequency mitigation above.
-
----
-
 ## 5 Album Storage & Cloud Sync — Discussion Notes / Future Direction
 
 ### Context of the discussion
@@ -63,89 +41,19 @@ The current decision is intentionally conservative:
 
 ---
 
-## 7. Appearance layer expansion (border / feather / glow / shadow / overlay anchoring)
+## 8. `MaskNode` editing UX + `MaskEdit` gesture map
 
-Realization: most "masking-looking" visual effects can be achieved with a richer appearance layer rather than true clipping. Masks are expensive (offscreen composition, alpha pipelines); appearance effects are cheap and compose well.
+The data-model and constraints for `MaskNode` were decided 2026-06-02 and captured in `docs/architecture/appearance.md § 12.10`. Recap of the constraints:
 
-Extends `docs/architecture/appearance.md` and `docs/architecture/media-appearance.md`. Today's `MediaAppearance` already has crop / color / frame decoration / overlays. Proposal: treat borders, feathering, glow/shadow as first-class appearance fields, not as decorative-frame variants.
+- A `MaskNode` masks **siblings within the same frame / group** only (not "everything below in global z-order").
+- A `MaskNode` **can live inside a frame** and **can be pinned**; it is **not** a navigation target.
+- Inline `appearance.alphaMask` and `MaskNode` cohabit (per-node convenience vs. shared/group-scoped).
 
-### Border as a rendering layer
+What remains open (blocks the `MaskEdit` tool gesture map in `editor-tools.md`):
 
-Border is not just a line — it's a configurable layer. Capabilities: rounded corners, gradients, glow, shadow, feathering, overlays, decorative frames, opacity, per-side settings. Sources: purely visual, procedural, raster-based, vector-based.
-
-### Decorative frames
-
-Compatible with all other effects (shadow / glow / feathering / overlays / rounded corners still apply). Examples: film frame, polaroid, torn paper, notebook edge, watercolor edge, contact sheet.
-
-### Feathering / soft edges
-
-Soft-edge rendering gives mask-like visual results without true masking.
-
-- per-side feathering (e.g. soft top, hard bottom)
-- asymmetric strength per edge
-- types: transparency fade, color fade, blur fade
-- properties: size, opacity, curve, asymmetry
-
-### Glow and shadow
-
-Same rendering model — only sign of luminance differs. Shared params: color, blur radius, spread, opacity, offset, blend mode. Future: inner shadow / inner glow.
-
-### Overlay anchoring modes
-
-Overlays already exist as `NodeAppearance.overlays` (unified 2026-05-19). New question: anchoring. Examples — film scratches, dust, paper texture, grain, halftone, vignette, light leaks, reflections, lens dirt.
-
-Properties: opacity, blend mode, tiling, procedural or raster source.
-
-Four anchoring modes proposed:
-
-- **object-locked** — moves / rotates with the node (paper texture, lens dirt on a photo)
-- **frame-locked** — moves with the frame (vignette inside a polaroid)
-- **world-locked** — fixed to world coords (light leak over a canvas region)
-- **camera-locked** — fixed to the viewport (film grain across the whole screen regardless of pan/zoom)
-
-Open questions:
-
-- Per-overlay anchoring or per-overlay-type default?
-- Camera-locked overlays live *above* the canvas, not in it. Render-pass order vs. the existing overlay model?
-- Today's `NodeAppearance.overlays` has no anchoring field. Additive (default `OBJECT`) or breaking?
-
----
-
-## 8. Masks as a first-class concept — and a future `MaskNode`
-
-Already partially discussed in `docs/architecture/appearance.md § 12` (`clip: ClipShape` + `alphaMask: AlphaMask?` as appearance fields — status: proposal). This section extends that with a *separate* MaskNode concept.
-
-### Why masks remain necessary even with rich appearance
-
-Masks fundamentally:
-
-- clip geometry (vs. fade it)
-- limit visible content
-- can be animated
-- may require offscreen composition
-
-Types: rectangle, rounded rect, ellipse, polygon, vector path, image, alpha, gradient.
-
-Cost: clipping, alpha compositing, offscreen render targets, nested mask composition. Animated and soft masks are especially expensive.
-
-### `MaskNode` (post-MVP) — distinct from a navigation frame
-
-Important: a MaskNode is **not** a frame. Frames are navigation anchors; MaskNode is a purely clipping object.
-
-```kotlin
-MaskNode
-```
-
-Scope variants: object mask, group mask, scene / camera mask.
-
-Use cases: cinematic vignette, spotlight, comic-panel layouts, transition masks.
-
-Open questions:
-
-- **Relationship to appearance-level mask.** `appearance.md § 12` puts mask *inside* a node's appearance. MaskNode is a separate node that masks *other* nodes. Both? Or pick one?
-- **Z-order semantics.** Where does a MaskNode sit in z-order — does it mask everything below it, everything in its group, or everything it overlaps?
-- **Interaction with frames.** Can a MaskNode live inside a frame? Be pinned? Be a navigation target?
-- **Editing UX.** Almost certainly needs its own tool / popup — see § 10.
+- **Editing UX.** `MaskNode` almost certainly needs its own tool / popup. Shape editing (path/anchor edits), shared-mask binding (which sibling nodes are affected), preview while editing. Connects to § 10 (context-menu grouping: "Mask" category).
+- **Z-order tiebreaker within siblings.** "Masks siblings *below* it in z-order" is one rule; "masks all siblings in the same group" is another. Decide once we know the typical authoring flow.
+- **Multi-mask composition.** When two `MaskNode`s overlap on the same sibling set, do their masks compose (intersection?), or does the higher-z mask override? Defer until a real use case emerges.
 
 ---
 
@@ -166,23 +74,6 @@ Open questions:
 - **Tablet vs. phone.** Tablet/phone editor split was decided 2026-05-19 (one codebase, popup-first for MVP, tablet docked panels deferred — `todo.md § 5d`). Does this section *become* the deferred tablet-panel design, or stays separate?
 - **Phone story.** Phones can't host left/right panels. Does the left toolbar collapse to a floating tool switcher, and the right panel collapse to the popup? If so, the popup design from `context-menu.md` is already doing the right-panel job.
 - **Tool grouping.** Procreate-style nested drawers (e.g. "drawing tools" expands to free draw / pencil / marker / watercolor) vs. a flat single-level toolbar?
-
----
-
-## 10. Context-menu grouping (Transform / Appearance / Mask / Vector / Frame)
-
-As the popup grows (per § 2 above + new tool actions), a flat menu won't scale. Proposed top-level categories:
-
-- **Transform** — move, rotate, align, distribute
-- **Appearance** — border, glow, shadow, overlays, opacity
-- **Mask** — create, edit, release
-- **Vector** — edit nodes, simplify path, boolean operations
-- **Frame** — navigation, presentation settings, camera behavior
-
-Open questions:
-
-- **Section headers vs. submenu drilldown vs. dividers-only.** Three UI patterns; depends on how many items each category holds. (Also raised in § 2.)
-- **Visibility depends on selection type.** Vector group only for vector nodes; Frame group only for frames; Mask group: "create mask" when nothing's masked, "edit mask" / "release" when one exists. Standard contextual-menu pattern, worth confirming.
 
 ---
 
@@ -210,6 +101,8 @@ Open questions:
 ---
 
 > Recently graduated out of this file:
+> - **§ 2 ContextualActionBar removal + § 10 context-menu grouping** **fully decided 2026-06-02** → `docs/architecture/context-menu.md § 4` (rendering convention + per-selection-type menus) and `§ 6` (bar removal). Locked: bar disappears entirely; popup is the single surface for selection-scoped actions. MVP rendering uses dividers between groups, no section headers, no drill-down submenus. Two compact inline action rows defined: **z-order row** (`⏫ ↑ ↓ ⏬`, Material order) and **frame-membership row** (`📌 Pin · 🔓 Detach · 🔄 Auto`). Pin / Detach / Auto direct-dispatch when target is unambiguous; open existing `FrameTargetPickerDialog` when multiple frames in selection. One-tap Delete regression accepted (Delete is rare; one-tap Undo limits the cost). § 10's category list (Transform / Appearance / Mask / Vector / Frame) graduated as a **deferred-but-committed** future grouping — applied as section headers when any selection type accumulates ~15+ items. Implementation tracked in `todo.md § 15` (existing context-menu section grows the bar-removal subsection).
+> - **§ 7 Appearance layer expansion + inline-mask portion of § 8** **fully decided 2026-06-02** → `docs/architecture/appearance.md § 12` (expanded into the full layered evolution). Locked: three-layer separation (`NodeShape` owns boundary + feathering; `BorderStyle` owns parametric stroke; `effects: List<LuminanceEffect>` owns shadow/glow/inner-*); `NodeShape` sealed (intro now with `Rect` variant carrying `CornerRadii` + `feather`; future `Ellipse`/`Polygon`/`Path`); shadow + glow unified into `effects` list (multiple effects allowed); inline `alphaMask: AlphaMask?` on base; overlay anchoring via `OverlayStyle.anchoring: OverlayAnchoring` (Object default, plus Frame/World/Camera; Camera renders in a separate top-level pass); base promotion of `colorAdjustments` and `caption` from `MediaAppearance` (frames pick them up); rename `frameDecoration` → `decoration` (eliminates the "frame" name collision with `CanvasNode.Frame`); `crop` stays media-only. `MaskNode` data-model constraints also locked (siblings-within-frame/group only; can live in frames + pinnable; not a nav-target). Implementation order in `§ 12.8`. `MaskNode` editing UX + `MaskEdit` gesture map remain open in § 8 above.
 > - **§ 1 FAB / chrome gating around the context menu** **fully decided 2026-06-01** → wired in `CanvasScaffold.kt` via a `dismissPopupAnd { ... }` / `dismissPopupAndAccept { ... }` helper applied uniformly to the FAB, top-bar handlers (Undo, Redo, Back, Frame List, Panel Config, Album Settings, mode toggle), and `ContextualActionBar.onAction`. Three resolutions: (1) **FAB stays visible and enabled at all times**, including when a selection exists — the select-then-add-more workflow is real; ContextualActionBar is going away anyway (see § 2). (2) **FAB tap with popup open dismisses the popup, then opens the Add sheet** (outside-tap semantics; selection untouched). (3) **All top-level chrome dismisses the popup on tap**, with one exception: `FrameEditOptionsBar` toggles keep the popup open because they're selection-scoped gesture modifiers — the popup remains contextual to the same selection.
 > - Per-tool gesture maps (`FreeDraw`, `Shape`, `Text`, `VectorEdit`, `Eraser`) + Eraser modes **decided 2026-05-24 (late)** → `docs/architecture/editor-tools.md § 4.2–4.6`. Settles the old § 4 (per-tool maps) and old § 6 (Eraser modes). Per-tool highlights: `StrokeNode` raw-samples-plus-bezier-cache; `ShapeNode` separate from `FrameNode` with topbar primitive picker + aspect-ratio toggle; `TextNode` autosized (fixed width, auto height) with overlay `BasicTextField`; `VectorEdit` hybrid selection state (canvas node + per-tool anchor set), explicit-switch-only exit; `Eraser` one tool with Object + Vector-partial modes (raster partial post-MVP via future `MediaAppearance.alphaMask`), frame-delete-without-contents default, one-gesture-equals-one-Compound-undo, two-finger finalizes-and-pans. All six tools: stay-in-tool persistence; long-press always opens global popup (no per-tool override). `MaskEdit` remains deferred — gesture map blocked on `MaskNode` design in § 8.
 > - Active-tool framework + `SelectionTool` gesture map **decided 2026-05-24** → `docs/architecture/editor-tools.md` (status: proposal, partially implementable). Settles the old § 3 (three-axis model: `EditorMode` × `ActiveTool` × `GlobalNav`; strict 2-finger nav in Edit; View-mode 1-finger pan exception; tool axis Edit-only; Present as separate fullscreen action) and the `SelectionTool` portion of the old § 4 (tap clears, drag-empty marquees, rect MVP + lasso later, default rule `Intersects`, selection persists across tool switches, `VectorEditTool` enabled only for exactly-one-vector-node). Drag-on-empty migration changes today's [`selection.md § 2`](architecture/selection.md#2-gesture-mapping) rect-select gesture.

@@ -30,7 +30,20 @@ The `overlays` semantic is uniform but the renderer's pipeline position differs 
 
 The renderer dispatches by node type — the data model is one field. See [§ 13 — Design history](#13-design-history--overlay-unification) for the prior two-field design.
 
-> **Proposed evolution.** `cornerRadius: Float` will be replaced by `clip: ClipShape` + `alphaMask: AlphaMask?`. See [§ 12](#12-proposed-evolution--clip--alphamask). Not yet implemented; the rest of this doc describes shipped state.
+> **Proposed evolution (decided 2026-06-02).** The base grows into a layered model:
+> - `cornerRadius: Float` → `shape: NodeShape` (sealed; `Rect` variant carries per-corner radii + feathering; `Ellipse`/`Polygon`/`Path` come later).
+> - `shadow: ShadowStyle?` → `effects: List<LuminanceEffect>` (shadow / glow / inner-shadow / inner-glow unified — same render model, only sign of luminance differs).
+> - `alphaMask: AlphaMask?` added (soft mask inside the shape — see [§ 12](#12-proposed-evolution--appearance-layers)).
+> - `colorAdjustments` and `caption` lift from `MediaAppearance` to `NodeAppearance` (frames want them too).
+> - `OverlayStyle` gains `anchoring: OverlayAnchoring` (Object / Frame / World / Camera; default Object).
+> - `MediaAppearance.frameDecoration` → `MediaAppearance.decoration` (rename; "frame" collided with `CanvasNode.Frame`).
+>
+> **Three-layer separation rule** — each visual property has exactly one home, no overlap:
+> - `NodeShape` owns the *boundary*: shape variant, corner radii, feathering (soft content fade).
+> - `BorderStyle` owns the *drawn stroke* on the boundary: color, width, opacity, per-side, gradient, dash. No feathering, no glow on the border itself.
+> - `effects` owns *radiating light/depth*: outer/inner shadow + outer/inner glow.
+>
+> Not yet implemented; the rest of this doc describes shipped state until [§ 12](#12-proposed-evolution--appearance-layers).
 
 ---
 
@@ -311,18 +324,26 @@ Still pending (each has its own todo entry under [§ 20](../todo.md#20-appearanc
 
 ---
 
-## 12. Proposed evolution — `clip` + `alphaMask`
+## 12. Proposed evolution — appearance layers
 
-> **Status — proposal.** Not yet implemented. Replaces `NodeAppearance.cornerRadius: Float`. Migration is a one-shot read-time lift in `SceneGraphSerializer`; no runtime feature flag.
+> **Status — proposal, decided 2026-06-02; implementation pending.** Replaces multiple base-level fields. Migration is a one-shot read-time lift in `SceneGraphSerializer`; no runtime feature flag.
 
-### 12.1 Why two fields, not one
+This section captures the full set of decisions made 2026-06-02 graduating `to_discuss.md § 7` (appearance layer expansion) and the inline-mask portion of `to_discuss.md § 8` (masks). The remaining open piece is `MaskNode` editing UX + the `MaskEdit` gesture map (still in `to_discuss.md § 8`).
 
-`cornerRadius` answers a single question: "give the node's rectangle rounded corners." A general visibility model needs to answer two questions, and they have different costs:
+### 12.1 Why split into layers
+
+`cornerRadius` answers a single question: "give the node's rectangle rounded corners." A general appearance model needs to answer several, each with a different cost class:
 
 1. **What shape is the rendered output clipped to?** (Binary on/off per pixel — `clipRect` / `clipPath`. Cheap.)
 2. **What continuous alpha is applied within that shape?** (0..1 per pixel — requires an offscreen compositing layer with `BlendMode.DstIn`. Expensive.)
+3. **What stroke is drawn on the boundary?** (Parametric line — cheap.)
+4. **What luminance effects radiate from the shape?** (Outer/inner shadow + glow — extra blurred draws, moderate.)
+5. **What overlays composite above the content?** (Existing `overlays` list — handled.)
 
-A unified field would conflate the cheap geometric case (picking `Ellipse` for a circular photo) with the expensive continuous case (adding a vignette mask) — easy to confuse, easy to accidentally upgrade rendering cost. Keeping them as separate fields means the geometric path never pays for an offscreen layer, and the alpha path is an explicit second knob that composes on top: clip first, then alpha mask operates within the clipped region.
+Each lives in a separate field with a clear render role; no field is the "junk drawer" for all decoration. Critically, **the three boundary-related layers — shape, border, effects — don't overlap**:
+- Feathering (soft content fade) is a *shape* property, not a border property.
+- Glow / inner-glow are *effects*, not border properties — a "soft-edged border" is functionally identical to a tight inner glow.
+- A border draws *over* a feathered shape; the border stays sharp because the shape's geometry is unchanged, only the content fill fades.
 
 ### 12.2 Model
 
@@ -330,28 +351,80 @@ A unified field would conflate the cheap geometric case (picking `Ellipse` for a
 @Serializable
 sealed class NodeAppearance {
     abstract val opacity: Float
-    abstract val clip: ClipShape           // default = RoundedRect(0); supersedes cornerRadius
-    abstract val alphaMask: AlphaMask?     // null = no alpha mask (default)
-    abstract val border: BorderStyle?
-    abstract val shadow: ShadowStyle?
+    abstract val shape: NodeShape                 // boundary; supersedes cornerRadius
+    abstract val colorAdjustments: ColorAdjustments?  // promoted from MediaAppearance
+    abstract val overlays: List<OverlayStyle>     // unchanged; now anchoring-aware
+    abstract val alphaMask: AlphaMask?            // null = no alpha mask (default)
+    abstract val border: BorderStyle?             // parametric stroke; no feathering, no glow
+    abstract val effects: List<LuminanceEffect>   // shadow/glow/inner-* unified; supersedes shadow
+    abstract val caption: CaptionStyle?           // promoted from MediaAppearance
 }
 
 @Serializable
-sealed class ClipShape {
-    @Serializable @SerialName("RoundedRect")
-    data class RoundedRect(val cornerRadius: Float = 0f) : ClipShape()
+sealed class NodeShape {
+    @Serializable @SerialName("Rect")
+    data class Rect(
+        val cornerRadii: CornerRadii = CornerRadii(),
+        /** Soft content fade at the shape edge, in world units. 0 = hard edge. */
+        val feather: Float = 0f,
+    ) : NodeShape()
 
-    @Serializable @SerialName("PerCornerRoundedRect")
-    data class PerCornerRoundedRect(
-        val topLeft: Float = 0f,
-        val topRight: Float = 0f,
-        val bottomRight: Float = 0f,
-        val bottomLeft: Float = 0f,
-    ) : ClipShape()
-
-    @Serializable @SerialName("Ellipse")
-    data object Ellipse : ClipShape()
+    // Future variants — slot in without breaking the wire format.
+    // @Serializable @SerialName("Ellipse")
+    // data object Ellipse : NodeShape()
+    //
+    // @Serializable @SerialName("Polygon")
+    // data class Polygon(val points: List<Vec2>) : NodeShape()
+    //
+    // @Serializable @SerialName("Path")
+    // data class Path(val svg: String) : NodeShape()
 }
+
+@Serializable
+data class CornerRadii(
+    val topLeft: Float = 0f,
+    val topRight: Float = 0f,
+    val bottomRight: Float = 0f,
+    val bottomLeft: Float = 0f,
+) {
+    companion object { fun uniform(r: Float) = CornerRadii(r, r, r, r) }
+}
+
+@Serializable
+sealed class LuminanceEffect {
+    abstract val color: String
+    abstract val opacity: Float
+    abstract val offsetX: Float
+    abstract val offsetY: Float
+    abstract val blurRadius: Float
+
+    @Serializable @SerialName("Shadow")
+    data class Shadow(
+        override val color: String = "#000000",
+        override val opacity: Float = 0.5f,
+        override val offsetX: Float = 4f,
+        override val offsetY: Float = 4f,
+        override val blurRadius: Float = 8f,
+    ) : LuminanceEffect()
+
+    @Serializable @SerialName("Glow")
+    data class Glow(
+        override val color: String = "#FFFFFF",
+        override val opacity: Float = 0.6f,
+        override val offsetX: Float = 0f,
+        override val offsetY: Float = 0f,
+        override val blurRadius: Float = 12f,
+    ) : LuminanceEffect()
+
+    @Serializable @SerialName("InnerShadow")
+    data class InnerShadow(...) : LuminanceEffect()
+
+    @Serializable @SerialName("InnerGlow")
+    data class InnerGlow(...) : LuminanceEffect()
+}
+```
+
+Order of operations in `effects`: list order, painted from index `[0]` to `[n-1]`. Outer effects draw before the node's own content; inner effects draw after (over the masked content). The renderer partitions the list by variant.
 
 @Serializable
 data class AlphaMask(
@@ -497,13 +570,73 @@ Both popups use the shared content composable pattern (`feature/<name>/ui/conten
 
 ### 12.8 Implementation order
 
-1. **Model + serializer migration.** Add `ClipShape`, `AlphaMask`, `AlphaMaskSource`, `GradientStop`, `MaskChannel`, `MaskFitMode` to `domain/model/`. Replace `cornerRadius` on the three appearance classes. Add migration lift in `SceneGraphSerializer`. Behavior-preserving — existing albums look identical.
-2. **Geometric clip variants.** `Ellipse` and `PerCornerRoundedRect` rendering (cheap clip-path calls). Editor: shape picker. No alpha mask yet.
-3. **Gradient alpha masks.** `LinearGradient` and `RadialGradient` — offscreen layer + brush draw with DstIn. Editor: gradient stops editor. The cheap procedurals: no asset loading.
-4. **Image alpha mask.** Coil-loaded bitmap + DstIn. Editor: asset picker, channel toggle.
-5. **Procedural alpha mask.** Reuse `ProceduralPattern` + `ProceduralPatternEditor.kt`.
-6. **Border / shadow path-aware rendering.** Stroke the clip path instead of a hardcoded rounded rect.
-7. **LOD dropout.** Skip offscreen layer below `Full` tier.
+The order below cheapens migration risk by landing the data-model reshape first, then features per-layer.
+
+1. **Renames (mechanical).** `MediaAppearance.frameDecoration` → `decoration`, `MediaFrameDecoration` → `Decoration`. Serializer reads legacy keys once.
+2. **Base promotion.** Lift `colorAdjustments` and `caption` from `MediaAppearance` to `NodeAppearance`. Rename `MediaColorAdjustments` → `ColorAdjustments`. Frames pick them up; one renderer pass on the frame's combined output for color, one extra draw for caption.
+3. **`NodeShape` sealed.** Add `NodeShape` with `Rect` variant only; `Rect` carries `CornerRadii` + `feather`. Replace `cornerRadius: Float` on base. Migration: legacy `cornerRadius: r` → `Rect(CornerRadii.uniform(r), feather=0)`.
+4. **Feathering renderer.** Soft content fade at the shape edge for `Rect`. (Implementation: offscreen layer + radial/linear alpha gradient at the edge, blended with `DstIn` against the content.)
+5. **`effects: List<LuminanceEffect>` on base.** Unifies shadow + glow + inner-shadow + inner-glow. Legacy `shadow: ShadowStyle?` lifts to `effects = [Shadow(...)]`. Renderer iterates the list, partitioning outer (drawn before content) from inner (drawn after, masked).
+6. **`alphaMask: AlphaMask?` on base** + the mask renderer described in § 12.4. Inline mask is independent of `MaskNode`.
+7. **Overlay anchoring.** Add `anchoring: OverlayAnchoring` to `OverlayStyle`; default `Object` (backwards-compatible). Renderer: in-tree pass handles Object/Frame/World; a top-level Camera-overlay collector renders after the canvas pass (see § 12.9).
+8. **Geometric shape variants.** `Ellipse`, `Polygon`, `Path` variants of `NodeShape`. Editor: shape picker.
+9. **Border path-aware rendering.** Strokes the `NodeShape` outline instead of a hardcoded rounded rect.
+10. **Per-side / gradient / dash on `BorderStyle`.** Independent feature; can ship any time after step 1.
+11. **LOD dropout.** Skip the offscreen layer (feather, alpha mask, inner effects) below `Full` tier.
+12. **`MaskNode`** — see § 12.10. Post-MVP; gesture map blocked on the deeper editing UX design.
+
+### 12.9 Overlay anchoring
+
+```kotlin
+@Serializable
+enum class OverlayAnchoring {
+    /** Default — overlay moves with the node (today's behavior). */
+    Object,
+    /** Overlay moves with the node's parent frame. Falls back to Object if no parent frame. */
+    Frame,
+    /** Overlay fixed to world coordinates — pans and zooms with the canvas. */
+    World,
+    /** Overlay fixed to the viewport — does not transform with pan/zoom. Renders in a separate pass. */
+    Camera,
+}
+
+// Extends OverlayStyle (§ 7.1):
+data class OverlayStyle(
+    val source: OverlaySource,
+    val opacity: Float = 0.2f,
+    val blendMode: NodeBlendMode = NodeBlendMode.Normal,
+    val anchoring: OverlayAnchoring = OverlayAnchoring.Object,
+)
+```
+
+**Use cases:** object-locked paper texture (today); frame-locked vignette inside a polaroid; world-locked light leak fixed to a canvas region; camera-locked film grain across the whole screen regardless of pan/zoom.
+
+**Render passes:**
+- `Object` / `Frame` / `World` overlays draw in the existing in-tree pass at their owner's pipeline position; the renderer computes their transform from their anchor type.
+- `Camera` overlays render in a **separate top-level pass after the canvas pass**, in screen coordinates, untransformed by pan/zoom. The renderer collects all `Camera`-anchored overlays from visible nodes into a flat list, sorts by z-order, and draws them as a viewport-fixed layer above the canvas.
+- `Frame` anchoring on a node without a parent frame **silently falls back to `Object`** — same effect as today's default.
+
+Migration: existing overlays default to `Object`; no JSON change.
+
+### 12.10 `MaskNode` boundaries
+
+Inline `alphaMask` (above) covers single-node masking. `MaskNode` is a **separate scene-graph node** that clips other nodes, for the cases where:
+
+- The same irregular mask shape is shared across multiple nodes (edit once, applies everywhere).
+- A mask needs to be animated independently of the content it clips.
+- A mask groups several nodes that should be masked together.
+
+**Constraints decided 2026-06-02 (the gesture map and editor UX are still open in `to_discuss.md § 8`):**
+
+- **Z-order scope.** A `MaskNode` masks its **siblings within the same frame / group** only — not "everything below in global z-order." Keeps the mental model local; avoids cross-frame masking surprises.
+- **Frame relationship.** A `MaskNode` **can live inside a frame** and **can be pinned** to one. It is **not** a navigation target — that role is reserved for `CanvasNode.Frame`.
+- **Z-order semantics within siblings.** A `MaskNode` clips siblings *below* it in z-order (or, equivalently, siblings in the same group depending on the chosen rule — TBD in the editor-UX slice).
+
+Inline mask vs. `MaskNode` cohabit:
+- `appearance.alphaMask` — cheap, per-node, edit-where-you-paint.
+- `MaskNode` — shared, group-scoped, edit-once-applies-everywhere.
+
+Both ship; no "pick one" rule.
 
 ---
 

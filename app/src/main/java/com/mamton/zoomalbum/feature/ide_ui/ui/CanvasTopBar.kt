@@ -3,6 +3,8 @@ package com.mamton.zoomalbum.feature.ide_ui.ui
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -16,6 +18,7 @@ import com.mamton.zoomalbum.core.designsystem.TextPrimary
 import com.mamton.zoomalbum.core.designsystem.TextSecondary
 import com.mamton.zoomalbum.core.math.Camera
 import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
+import com.mamton.zoomalbum.domain.model.FrameEditOptions
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,6 +38,13 @@ fun CanvasTopBar(
     onOpenAlbumSettings: () -> Unit = {},
     mode: CanvasInteractionMode = CanvasInteractionMode.Edit,
     onToggleMode: () -> Unit = {},
+    /**
+     * Per-session toggles that shape how frame-transform gestures behave (see
+     * [FrameEditOptions]). `null` hides the two toggles entirely — typically
+     * because the current selection contains no frame.
+     */
+    frameEditOptions: FrameEditOptions? = null,
+    onFrameEditOptionsChange: (FrameEditOptions) -> Unit = {},
 ) {
     TopAppBar(
         title = {
@@ -66,6 +76,31 @@ fun CanvasTopBar(
         actions = {
             IconButton(onClick = onUndo ?: {}, enabled = onUndo != null) { Text("↶") } // undo
             IconButton(onClick = onRedo ?: {}, enabled = onRedo != null) { Text("↷") } // redo
+            if (frameEditOptions != null) {
+                // Selection-scoped frame-gesture modifiers. Visible only while a
+                // frame is selected. Same persistence semantics as before — the
+                // toggles apply to subsequent frame transform gestures and are
+                // **not** wrapped in `dismissPopupAnd`, so toggling them while
+                // the long-press popup is open keeps the popup in place (the
+                // popup is still contextual to the same selection). See
+                // `docs/architecture/context-menu.md § 3 — Dismissal rules`.
+                FrameEditFilterChip(
+                    selected = frameEditOptions.transformContents,
+                    icon = "🔗",
+                    label = "Content",
+                    onSelectedChange = {
+                        onFrameEditOptionsChange(frameEditOptions.copy(transformContents = it))
+                    },
+                )
+                FrameEditFilterChip(
+                    selected = frameEditOptions.rebindAfterEdit,
+                    icon = "🔄",
+                    label = "Rebind",
+                    onSelectedChange = {
+                        onFrameEditOptionsChange(frameEditOptions.copy(rebindAfterEdit = it))
+                    },
+                )
+            }
             IconButton(onClick = onToggleMode) {
                 Text(
                     text = when (mode) {
@@ -85,6 +120,32 @@ fun CanvasTopBar(
             titleContentColor = TextPrimary,
             navigationIconContentColor = TextPrimary,
             actionIconContentColor = TextPrimary,
+        ),
+    )
+}
+
+/**
+ * Compact filter chip used by the frame-edit toggles in the top bar. Renders
+ * `[icon] label` with a clearly differentiated selected state — `FilterChip`
+ * adds a tonal background + check leading-icon affordance when selected, so
+ * the on/off state is visible at a glance.
+ */
+@Composable
+private fun FrameEditFilterChip(
+    selected: Boolean,
+    icon: String,
+    label: String,
+    onSelectedChange: (Boolean) -> Unit,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = { onSelectedChange(!selected) },
+        label = { Text(label, fontSize = 12.sp) },
+        leadingIcon = { Text(icon) },
+        modifier = Modifier.padding(horizontal = 2.dp),
+        colors = FilterChipDefaults.filterChipColors(
+            labelColor = TextSecondary,
+            selectedLabelColor = TextPrimary,
         ),
     )
 }

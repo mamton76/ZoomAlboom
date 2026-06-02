@@ -110,6 +110,7 @@ When the popup is open, canvas gestures behave differently — discrete gestures
 | Camera pan / pinch / rotate (two-finger, Layer 3) | Dismisses popup on first event. Camera updates **proceed** — the user's pinch/pan/rotate of the canvas continues normally. |
 | Node body drag / resize / rotation handle (Layer 1) | Dismisses popup. Interaction **proceeds** — the user's move/resize/rotate of the selection continues normally. |
 | Long-press another node | Replaces the popup in-place with a new request (selection-resolution + anchor for the new target). Single gesture, no intermediate dismiss step. Selection is not lost; the new node is additively added. |
+| Top-level chrome tap (top bar buttons, FAB) | Dismisses popup, then runs the chrome action. Wired via a single `dismissPopupAnd { … }` helper in `CanvasScaffold` so the rule lives in one place. The one exception is the top bar's two **frame-edit toggles** (`🔗` transform-with-contents, `🔄` rebind-after-edit) — selection-scoped gesture modifiers, not new editor commands, so they leave the popup open (the popup is still contextual to the same selection). |
 | Back-press | Dismisses popup. Implemented by a `BackHandler(enabled = contextMenuRequest != null)` in `CanvasScaffold` — *not* by `Popup.dismissOnBackPress`, because the popup uses `focusable = false` and a non-focusable popup window never receives key events. |
 | Menu item tap (non-anchor) | Runs the item's action; popup dismisses. |
 | `Remove this from selection` | Removes the anchor from selection; **popup stays open**. If the removed node was the anchor, anchor clears (`anchorNodeId = null`) and anchor-scoped items disappear. See § 4.4. |
@@ -122,6 +123,15 @@ The `CanvasScreen` Composable takes `isContextMenuOpen: Boolean`, wraps it with 
 ## 4. Menu content by selection type
 
 The menu is a pure function of `(selection, anchorNodeId, nodeTypes)`. Sections below are *possible actions*; the renderer will hide irrelevant ones for the concrete selection.
+
+**Rendering convention (decided 2026-06-02).** MVP menus use **dividers between groups** (no section headers, no drill-down submenus). Compact action sets that share a domain (z-order, frame membership) render as a single **inline action row** — a row of icon buttons inside the menu — to keep four sibling actions in one tap without expanding the menu vertically. Two inline rows are defined today:
+
+| Row | Layout (left → right) | Notes |
+|---|---|---|
+| **Z-order row** | `⏫ Bring to Front` · `↑ Bring Forward` · `↓ Send Backward` · `⏬ Send to Back` | Material order. Single-selection only today; multi-selection semantics in [z-order.md § 3](z-order.md#3-multi-selection-semantics). |
+| **Frame-membership row** | `📌 Pin` · `🔓 Detach` · `🔄 Auto` | Visibility identical to today's bar. Direct dispatch for unambiguous target; opens `FrameTargetPickerDialog` when multiple frames are in the selection. |
+
+Future growth into the § 10 category list (Transform / Appearance / Mask / Vector / Frame) is committed but deferred: once any selection type accumulates ~15+ items, the renderer adds section headers grouped by those categories. Until then, dividers + inline rows scale.
 
 ### 4.1 `selection.size == 0` — long-press on empty space, finger lifts
 
@@ -146,19 +156,37 @@ Per-concept popups (each opens a focused editor — `to_discuss.md`-decided popu
 - `Edit crop` — media-specific
 - `Edit color adjustments` — media-specific
 - `Edit border` / `Edit shadow` / `Edit opacity`
-- `Edit frame decoration` — media-specific
+- `Edit decoration` — media-specific (was `Edit frame decoration` before the rename)
 - `Replace media`
-- `Duplicate` / `Delete`
+
+Group operations:
+
+- `Duplicate`
+- **Z-order row** — `⏫ ↑ ↓ ⏬` (Front / Forward / Backward / To Back)
+- **Frame-membership row** — `📌 Pin · 🔓 Detach · 🔄 Auto` (visible when the media is selected alongside ≥ 1 frame; Auto shown only when an override exists for this media)
+- `Delete`
 
 ### 4.3 `selection.size == 1` — single frame
+
+Per-concept popups:
 
 - `Edit frame` — title, bounds, …
 - `Edit frame background` — frame-specific
 - `Edit clip shape` / `Edit alpha mask` / `Edit overlays` / `Edit border` / `Edit shadow` / `Edit opacity` — base-level concepts, same popups as in § 4.2 (different host node)
 - `Edit title style` — frame-specific
+- `Edit color adjustments` / `Edit caption` — base-level concepts promoted from media (appearance.md § 1, § 12)
+
+Navigation:
+
 - `Navigate to frame`
 - `Edit frame contents` — opens the frame as an editing context (post-MVP)
-- `Duplicate frame` / `Delete frame`
+
+Group operations:
+
+- `Duplicate frame`
+- **Z-order row** — `⏫ ↑ ↓ ⏬`
+- **Frame-membership row** — `📌 Pin · 🔓 Detach · 🔄 Auto` (visible when this frame is selected alongside ≥ 1 other node; this frame acts as the *target* for Pin/Detach against the other selected nodes — or, when ≥ 2 frames are selected, opens `FrameTargetPickerDialog` to pick which frame is the target)
+- `Delete frame`
 
 ### 4.4 `selection.size >= 2` — group (any mix of media + frames)
 
@@ -179,6 +207,8 @@ Multi-only group actions:
 - `Align` → submenu: left / center-x / right / top / middle-y / bottom
 - `Distribute` → submenu: horizontally / vertically
 - `Duplicate selection`
+- **Z-order row** — `⏫ ↑ ↓ ⏬` (blocked on [todo.md § 13.5](../todo.md#135-multi-selection-z-order); row hidden until multi-selection z-order ships)
+- **Frame-membership row** — `📌 Pin · 🔓 Detach · 🔄 Auto` (when applicable to the selection; opens `FrameTargetPickerDialog` for the ambiguous-target case)
 - `Delete selection`
 - `Clear selection`
 
@@ -215,19 +245,29 @@ This should land independent of the long-press redesign — it can hang off `Con
 
 ---
 
-## 6. Interaction with `ContextualActionBar`
+## 6. `ContextualActionBar` removal
 
-`ContextualActionBar` stays. The two surfaces have different jobs:
+**Decided 2026-06-02.** `ContextualActionBar` is removed entirely; the popup becomes the single surface for selection-scoped actions. Supersedes the older [todo.md § 5c.3](../todo.md) plan ("bar shrinks back to Delete / Duplicate / Open Properties") and the previous "two-surface" framing this section used to describe.
 
-| | `ContextualActionBar` | Context menu |
-|---|---|---|
-| When visible | Whole time `selection` is non-empty | Transient — opens on long-press, closes on outside-tap or item-tap |
-| Position | Fixed (bottom or top, per layout) | At touch point |
-| Triggered by | Selection becoming non-empty | Long-press gesture |
-| Action set | Most-common 3–5 actions only | Full action set, with submenus |
-| Reflects anchor? | No — selection only | Yes — anchor adds "Remove this / Edit this only" |
+What was on the bar and where it lives now:
 
-Both read the same selection state; both dispatch the same `CanvasAction` variants. The menu is the discoverable "everything I can do" surface; the bar is the always-visible shortcut for the actions the user does constantly.
+| Bar action | New home |
+|---|---|
+| Delete | Per-selection-type menus (§ 4.2 / 4.3 / 4.4), bottom of the list |
+| Duplicate | Per-selection-type menus, group-operations block |
+| Background (frame) | `Edit frame background` per-concept popup (§ 4.3) |
+| Appearance (media) | `Edit appearance` per-concept popup (§ 4.2) |
+| Pin / Detach / Auto | **Frame-membership inline row** (§ 4 rendering convention) |
+| ToFront / Forward / Backward / ToBack | **Z-order inline row** (§ 4 rendering convention) |
+
+**Accepted regression:** Delete loses one-tap access (was persistent on the bar; now requires long-press → tap Delete). The team accepts this — Delete isn't high-frequency in this app, and one-tap Undo from the top bar limits the cost of accidental deletes. Revisit if usage indicates otherwise.
+
+**Implementation status:** popup item set + inline rows are not wired yet. The bar still ships today; its onClick handlers route through `dismissPopupAndAccept` (CanvasScaffold.kt) so the popup dismissal contract is already correct.
+
+Removal lands in two slices:
+
+1. **[todo.md § 25](../todo.md#25-editor-action-catalog)** — typed `EditorAction` catalog replaces stringly-typed `onAction(label)` dispatch. Bar and popup both migrate to consume `EditorActionCatalog.visibleByCategory(ctx)`. Foundational refactor; no UI change.
+2. **[todo.md § 15.5](../todo.md#155-contextualactionbar-removal--inline-rows)** — delete the bar composable + call site; add z-order and frame-membership inline-row composables that consume the catalog by category. Pure UI work after § 25 lands.
 
 ---
 

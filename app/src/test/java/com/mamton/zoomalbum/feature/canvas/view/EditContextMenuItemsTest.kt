@@ -2,6 +2,8 @@ package com.mamton.zoomalbum.feature.canvas.view
 
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.Transform
+import com.mamton.zoomalbum.feature.canvas.actions.EditorActionEffect
+import com.mamton.zoomalbum.feature.canvas.actions.SelectionContext
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -34,75 +36,122 @@ class EditContextMenuItemsTest {
         anchorScreenY = 0f,
     )
 
-    /** Sink to capture dispatched actions / lambda calls. */
+    private fun ctxFromNodes(
+        selection: Set<String>,
+        anchorNodeId: String? = null,
+        nodes: List<CanvasNode> = emptyList(),
+        pinDetachEnabled: Boolean = false,
+        anyOverrideExists: Boolean = false,
+    ): SelectionContext {
+        val byId = nodes.associateBy { it.id }
+        val singleNode = if (selection.size == 1) byId[selection.first()] else null
+        return SelectionContext(
+            selectedNodeIds = selection,
+            anchorNodeId = anchorNodeId,
+            singleSelectedFrame = singleNode as? CanvasNode.Frame,
+            singleSelectedMedia = singleNode as? CanvasNode.Media,
+            selectedFramesInOrder = selection.mapNotNull { byId[it] as? CanvasNode.Frame },
+            pinDetachEnabled = pinDetachEnabled,
+            anyOverrideExists = anyOverrideExists,
+        )
+    }
+
+    /** Sink to capture effects produced by tapped menu items. */
     private class Sink {
-        val actions = mutableListOf<CanvasAction>()
-        var openedMedia: CanvasNode.Media? = null
-        var openedFrame: CanvasNode.Frame? = null
-        var addSheetOpened: Int = 0
+        val effects = mutableListOf<EditorActionEffect>()
         var anchorRemovedCalls: Int = 0
+
+        val dispatchedActions: List<CanvasAction>
+            get() = effects.filterIsInstance<EditorActionEffect.Dispatch>().map { it.action }
+        val addSheetOpened: Int
+            get() = effects.count { it == EditorActionEffect.OpenAddSheet }
+        val mediaAppearanceOpened: Int
+            get() = effects.count { it == EditorActionEffect.OpenMediaAppearance }
+        val frameAppearanceOpened: Int
+            get() = effects.count { it == EditorActionEffect.OpenFrameBackground }
     }
 
     private fun build(
         request: ContextMenuRequest,
         nodes: List<CanvasNode> = emptyList(),
+        pinDetachEnabled: Boolean = false,
+        anyOverrideExists: Boolean = false,
     ): Pair<List<ContextMenuItem>, Sink> {
         val sink = Sink()
         val items = buildEditContextMenuItems(
             request = request,
-            nodesById = nodes.associateBy { it.id },
-            dispatch = { sink.actions += it },
-            openMediaAppearance = { sink.openedMedia = it },
-            openFrameAppearance = { sink.openedFrame = it },
-            openAddSheet = { sink.addSheetOpened++ },
+            ctx = ctxFromNodes(
+                selection = request.selection,
+                anchorNodeId = request.anchorNodeId,
+                nodes = nodes,
+                pinDetachEnabled = pinDetachEnabled,
+                anyOverrideExists = anyOverrideExists,
+            ),
+            runEffect = { sink.effects += it },
             onAnchorRemoved = { sink.anchorRemovedCalls++ },
         )
         return items to sink
     }
 
-    private fun labels(items: List<ContextMenuItem>): List<String> =
-        items.filterNot { it.isDivider }.map { it.label }
+    /** Text-row labels only — skips dividers and inline rows. */
+    private fun textLabels(items: List<ContextMenuItem>): List<String> =
+        items.filterNot { it.isDivider || it.inlineRow != null }.map { it.label }
+
+    private fun inlineRows(items: List<ContextMenuItem>): List<List<InlineRowButton>> =
+        items.mapNotNull { it.inlineRow }
 
     @Test
     fun `empty selection shows Add… and opens the add sheet`() {
         val (items, sink) = build(req(selection = emptySet()))
 
-        assertEquals(listOf("Add…"), labels(items))
+        assertEquals(listOf("Add…"), textLabels(items))
         items.single { it.label == "Add…" }.onClick()
         assertEquals(1, sink.addSheetOpened)
     }
 
     @Test
-    fun `single media selection shows Edit appearance Duplicate Delete`() {
+    fun `single media selection — header, z-order row, Delete at bottom`() {
         val m = media("m1")
         val (items, sink) = build(req(selection = setOf("m1")), nodes = listOf(m))
 
         assertEquals(
             listOf("Edit appearance", "Duplicate", "Delete"),
-            labels(items),
+            textLabels(items),
         )
-        // Sanity: hooks fire correctly.
+        // Exactly one inline row — the z-order four-button row.
+        val rows = inlineRows(items)
+        assertEquals(1, rows.size)
+        assertEquals(
+            listOf("Bring to Front", "Bring Forward", "Send Backward", "Send to Back"),
+            rows.single().map { it.label },
+        )
+
+        // Effects route correctly.
         items.single { it.label == "Edit appearance" }.onClick()
-        assertEquals(m, sink.openedMedia)
+        assertEquals(1, sink.mediaAppearanceOpened)
         items.single { it.label == "Duplicate" }.onClick()
-        assertTrue(sink.actions.contains(CanvasAction.DuplicateSelection))
+        assertTrue(sink.dispatchedActions.contains(CanvasAction.DuplicateSelection))
         items.single { it.label == "Delete" }.onClick()
-        assertTrue(sink.actions.contains(CanvasAction.DeleteSelection))
+        assertTrue(sink.dispatchedActions.contains(CanvasAction.DeleteSelection))
+        rows.single()[0].onClick()
+        assertTrue(sink.dispatchedActions.any { it is CanvasAction.BringToFront && it.nodeId == "m1" })
     }
 
     @Test
-    fun `single frame selection shows Edit frame appearance Navigate Duplicate Delete`() {
+    fun `single frame selection — header includes Navigate + Duplicate, z-order row, Delete`() {
         val f = frame("f1")
         val (items, sink) = build(req(selection = setOf("f1")), nodes = listOf(f))
 
         assertEquals(
             listOf("Edit frame appearance", "Navigate to frame", "Duplicate", "Delete"),
-            labels(items),
+            textLabels(items),
         )
+        assertEquals(1, inlineRows(items).size) // z-order row
+
         items.single { it.label == "Edit frame appearance" }.onClick()
-        assertEquals(f, sink.openedFrame)
+        assertEquals(1, sink.frameAppearanceOpened)
         items.single { it.label == "Navigate to frame" }.onClick()
-        assertTrue(sink.actions.any { it is CanvasAction.FocusNode && it.nodeId == "f1" })
+        assertTrue(sink.dispatchedActions.any { it is CanvasAction.FocusNode && it.nodeId == "f1" })
     }
 
     @Test
@@ -113,7 +162,49 @@ class EditContextMenuItemsTest {
     }
 
     @Test
-    fun `group selection without anchor shows group items only`() {
+    fun `frame-membership row appears when pinDetachEnabled with single target frame`() {
+        // Selection is one frame + one media — the frame is the target. Pin/Detach
+        // applies; Auto only when an override exists.
+        val f = frame("f1")
+        val m = media("m1")
+        val (items, sink) = build(
+            req(selection = setOf("f1", "m1")),
+            nodes = listOf(f, m),
+            pinDetachEnabled = true,
+            anyOverrideExists = false,
+        )
+
+        val rows = inlineRows(items)
+        // Single z-order row hidden (size != 1); only membership row present.
+        assertEquals(1, rows.size)
+        assertEquals(listOf("Pin", "Detach"), rows.single().map { it.label })
+
+        // Tap Pin — produces a FrameMembership effect (host dispatches to the picker
+        // or directly per selection shape).
+        rows.single()[0].onClick()
+        assertTrue(
+            "Pin must produce a FrameMembership effect",
+            sink.effects.any { it is EditorActionEffect.FrameMembership },
+        )
+    }
+
+    @Test
+    fun `frame-membership row includes Auto when an override exists`() {
+        val f = frame("f1")
+        val m = media("m1")
+        val (items, _) = build(
+            req(selection = setOf("f1", "m1")),
+            nodes = listOf(f, m),
+            pinDetachEnabled = true,
+            anyOverrideExists = true,
+        )
+
+        val rows = inlineRows(items)
+        assertEquals(listOf("Pin", "Detach", "Auto"), rows.single().map { it.label })
+    }
+
+    @Test
+    fun `group selection without anchor — Duplicate selection, Delete selection, Clear selection`() {
         val m1 = media("m1")
         val m2 = media("m2")
         val (items, _) = build(
@@ -123,9 +214,10 @@ class EditContextMenuItemsTest {
 
         assertEquals(
             listOf("Duplicate selection", "Delete selection", "Clear selection"),
-            labels(items),
+            textLabels(items),
         )
-        // No anchor-scoped items.
+        // No inline rows (z-order multi-select is blocked until §13.5).
+        assertEquals(0, inlineRows(items).size)
         assertNull(items.firstOrNull { it.label == "Remove this from selection" })
         assertNull(items.firstOrNull { it.label == "Edit this only" })
     }
@@ -142,12 +234,12 @@ class EditContextMenuItemsTest {
 
         assertEquals(
             listOf("Duplicate selection", "Delete selection", "Clear selection"),
-            labels(items),
+            textLabels(items),
         )
     }
 
     @Test
-    fun `group selection with anchor in selection shows anchor-scoped items`() {
+    fun `group selection with anchor in selection inserts anchor block between Delete and Clear`() {
         val m1 = media("m1")
         val m2 = media("m2")
         val (items, _) = build(
@@ -157,10 +249,13 @@ class EditContextMenuItemsTest {
 
         assertEquals(
             listOf(
-                "Duplicate selection", "Delete selection", "Clear selection",
-                "Remove this from selection", "Edit this only",
+                "Duplicate selection",
+                "Delete selection",
+                "Edit this only",
+                "Remove this from selection",
+                "Clear selection",
             ),
-            labels(items),
+            textLabels(items),
         )
     }
 
@@ -189,7 +284,7 @@ class EditContextMenuItemsTest {
         removeItem.onClick()
         assertTrue(
             "Click must dispatch ToggleNodeSelection on the anchor",
-            sink.actions.any { it is CanvasAction.ToggleNodeSelection && it.nodeId == "m1" },
+            sink.dispatchedActions.any { it is CanvasAction.ToggleNodeSelection && it.nodeId == "m1" },
         )
         assertEquals(
             "Click must notify the host so it can clear the anchor (Option A)",
@@ -213,30 +308,21 @@ class EditContextMenuItemsTest {
         )
         edit.onClick()
         assertTrue(
-            sink.actions.any { it is CanvasAction.SelectNode && it.nodeId == "m1" },
+            sink.dispatchedActions.any { it is CanvasAction.SelectNode && it.nodeId == "m1" },
         )
     }
 
     @Test
-    fun `divider entries appear between sections`() {
-        val (singleMediaItems, _) = build(
-            req(selection = setOf("m")),
-            nodes = listOf(media("m")),
-        )
-        // Edit appearance / divider / Duplicate / Delete
-        assertEquals(4, singleMediaItems.size)
-        assertTrue(singleMediaItems[1].isDivider)
-
-        val (groupWithAnchor, _) = build(
-            req(selection = setOf("m1", "m2"), anchorNodeId = "m1"),
-            nodes = listOf(media("m1"), media("m2")),
-        )
-        // 3 group items, divider, then 2 anchor items = 6 entries
-        assertEquals(6, groupWithAnchor.size)
-        assertTrue(
-            "Divider must sit between group and anchor sections",
-            groupWithAnchor[3].isDivider,
-        )
+    fun `dividers separate sections in the single-media menu`() {
+        val (items, _) = build(req(selection = setOf("m")), nodes = listOf(media("m")))
+        // Edit appearance, Duplicate, divider, [z-order row], divider, Delete
+        assertEquals(6, items.size)
+        assertEquals("Edit appearance", items[0].label)
+        assertEquals("Duplicate", items[1].label)
+        assertTrue(items[2].isDivider)
+        assertNotNull(items[3].inlineRow)
+        assertTrue(items[4].isDivider)
+        assertEquals("Delete", items[5].label)
     }
 
     @Test

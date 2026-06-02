@@ -1157,12 +1157,25 @@ See [architecture/frame-chrome.md](architecture/frame-chrome.md) for the full de
 
 Framework itself is small. Per-tool implementations are each gated on the data-model concept the tool depends on.
 
+### 24.0 `EditorState` extraction — **shipped 2026-06-02**
+
+Foundational refactor that lands before any tool slice. See `editor-tools.md § 7.1` and `to_discuss.md § 11` graduation.
+
+- [x] Declare `EditorState` + `EditorTool` under `feature/canvas/editor/` (editor interaction concepts, not persisted album content — kept out of `domain/model/`).
+- [x] Nest `mode`, `selectedNodeIds`, `selectionRect`, `groupSelectionTransform`, `frameEditOptions`, `contextAnchorNodeId`, and the new `activeTool` under `CanvasState.editor`.
+- [x] Add `CanvasAction.SetActiveTool(tool)` + ViewModel handler. Selection persists across tool switches by construction.
+- [x] Migrate every call site (`CanvasViewModel`, `CanvasScreen`, `CanvasScaffold`) to nested access. Helper `updateEditor { ... }` for editor-only updates.
+- [x] Behavior-preserving: build + `:app:testDebugUnitTest` pass; existing `EditContextMenuItemsTest` works unchanged because it operates on `SelectionContext`, not `CanvasState`.
+- [x] UI-surface state (`mediaApprEditing`, `frameBgEditing`, `contextMenuRequest`, `showAddSheet`, `showFrameList`, `showPanelConfig`, `showAlbumSettings`) deliberately remains local to `CanvasScaffold` — phone uses bottom sheets, tablet later uses docked panels; editor-session state must not couple to that.
+
+`SelectionState` extraction deferred until `SelectionTool` accumulates substantial own state (Rectangle / Lasso modes, selection rules, in-progress lasso path, hover, additive flag, anchor-level selection). Today selection is flat on `EditorState`.
+
 ### 24.1 Type declarations
-- [ ] Declare `EditorTool` sealed interface in `domain/model/EditorTool.kt`. Seven `data object` variants: `Selection`, `FreeDraw`, `Shape`, `Text`, `VectorEdit`, `Eraser`, `MaskEdit`.
+- [x] `EditorTool` sealed interface in `feature/canvas/editor/EditorTool.kt`. Initial variants: `Selection`, `Eraser`. Other variants (`FreeDraw`, `Shape`, `Text`, `VectorEdit`, `MaskEdit`) are added one at a time as each tool actually ships — disabled toolbar slots are not predeclared. (Shipped 2026-06-02.)
 
 ### 24.2 State
-- [ ] Add `activeTool: EditorTool = EditorTool.Selection` to `CanvasUiState`.
-- [ ] Add `CanvasAction.SetActiveTool(tool)` + ViewModel handler. Selection persists across tool switches by construction (no per-switch clear).
+- [x] `activeTool: EditorTool = EditorTool.Selection` added to `EditorState`. (Shipped 2026-06-02.)
+- [x] `CanvasAction.SetActiveTool(tool)` + ViewModel handler. (Shipped 2026-06-02.)
 - [ ] Confirm `editorMode` plumbing. Today's `CanvasInteractionMode` covers View / Edit / Presentation in the type but the UI toggle only cycles View ↔ Edit. Rename to `EditorMode` only if it reduces confusion.
 
 ### 24.3 Layer 2 dispatch wiring (per `editor-tools.md § 7.2`)
@@ -1182,8 +1195,8 @@ Framework itself is small. Per-tool implementations are each gated on the data-m
   - Add a dedicated `viewModePanGestures` modifier active only in View
 
 ### 24.6 TopBar tool selector
-- [ ] Placeholder for MVP. With only `Selection` actually implemented, no UI needed.
-- [ ] Add when the second tool ships.
+- [ ] Placeholder for MVP. With only `Selection` actually functional, no UI needed (Eraser variant exists in the type but has no behavior yet).
+- [ ] Add when the second tool ships behavior.
 
 ### 24.7 Present-mode trigger
 - [ ] View/Edit toggle stays as today. Present is reached via a separate fullscreen / play action — location TBD with the Present surface (out of scope for this section).
@@ -1204,7 +1217,7 @@ Each lands as its own slice once its data-model dependency is ready. Order per `
 - Raster partial erase (`editor-tools.md § 4.6` topbar post-MVP section) — depends on `MediaAppearance.alphaMask` per `appearance.md § 12` becoming load-bearing.
 - Lasso geometry beyond bounding-box overlap (true per-path intersection).
 - "Restore last tool" preference across app restarts (`editor-tools.md § 6`).
-- `EditorState` container refactor (`editor-tools.md § 7.1` / `to_discuss.md § 11`) — defer until 3+ tools accumulate per-tool transient state.
+- `SelectionState` extraction inside `EditorState` (`editor-tools.md § 7.1` / `to_discuss.md § 11` graduation note) — defer until `SelectionTool` accumulates substantial own state (Rectangle / Lasso modes, selection rules, in-progress lasso path, hover, additive flag, anchor-level selection).
 
 ### Out of scope
 - Single-finger pan fallback in Edit mode (predictability over convenience, per `editor-tools.md § 9`).

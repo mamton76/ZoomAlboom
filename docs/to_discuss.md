@@ -77,30 +77,14 @@ Open questions:
 
 ---
 
-## 11. `EditorState` container
-
-Implementation-level. As tools, vector-edit state, eraser state, snapping, and transform handles all become first-class, `CanvasUiState` becomes a grab-bag. Possible factoring:
-
-```kotlin
-EditorState
- ├── activeTool
- ├── selectedObjects
- ├── activeAppearanceEditor
- ├── vectorEditState
- ├── eraserState
- ├── snappingState
- └── transformState
-```
-
-Open questions:
-
-- **Split now or grow `CanvasUiState` and split later?** Premature factoring vs. landing tool work into a state object that's already past its limit.
-- **Where does the popup / appearance-editor open-state live?** Today probably in `CanvasUiState`; would move to `activeAppearanceEditor`.
-- **Persistence boundary.** Which of these survive process death? `activeTool` probably yes; `eraserState` (mid-stroke) probably no.
-
----
-
 > Recently graduated out of this file:
+> - **§ 11 `EditorState` container** **decided 2026-06-02; extraction shipped same day** → `docs/architecture/editor-tools.md § 7.1`. The earlier flat grab-bag proposal (`activeTool` + `selectedObjects` + `activeAppearanceEditor` + per-tool transient states + snapping + transform handles, all siblings) is **superseded**. The decision split editor concerns three ways:
+>   1. **Editor-session state** → flat `EditorState` under `CanvasState.editor`. Owns `mode`, `activeTool`, `selectedNodeIds`, `selectionRect`, `groupSelectionTransform`, `frameEditOptions`, `contextAnchorNodeId`. Read by canvas + overlays + action catalog.
+>   2. **Tool settings + transient interaction state** → added on demand when a tool actually requires them, via dedicated `toolSettings` / `activeInteraction` fields on `EditorState`. Do NOT encode them inside `EditorTool` variants (which conflates identity, settings, and active-gesture state). Do NOT predeclare speculative state for tools that don't yet exist.
+>   3. **UI-surface state (popups / bottom sheets / dialogs)** → stays local to `CanvasScaffold` as `remember` cells (`mediaApprEditing`, `frameBgEditing`, `contextMenuRequest`, `showAddSheet`, etc.). The same editor operation may later surface as a phone bottom sheet or a tablet docked panel; coupling that decision to editor-session state would leak presentation concerns into the model. **Exception:** `contextAnchorNodeId` belongs on `EditorState` because the canvas (`SelectionOverlay` halo) reads it, even though the popup itself stays in `CanvasScaffold`.
+>
+>   Selection is flat on `EditorState` for now (`selectedNodeIds` + `selectionRect` + `groupSelectionTransform`). A dedicated `SelectionState` extraction is deferred until `SelectionTool` accumulates substantial own state — Rectangle / Lasso modes, `Intersects` / `FullyContained` rules, in-progress lasso path, hover, additive flag, anchor-level selection. Two-level nesting (`canvasState.editor.selection.selectedNodeIds`) was rejected today because the cohesion gain didn't yet justify the call-site cost. Types live under `feature/canvas/editor/`, not `domain/model/`. The earlier "wait until 3+ tools accumulate transient state" trigger in `editor-tools.md § 7.1` is also superseded — extraction landed before any per-tool transient state existed, because the editor-session subset of `CanvasState` was already coherent on its own.
+>
 > - **§ 2 ContextualActionBar removal + § 10 context-menu grouping** **fully decided 2026-06-02** → `docs/architecture/context-menu.md § 4` (rendering convention + per-selection-type menus) and `§ 6` (bar removal). Locked: bar disappears entirely; popup is the single surface for selection-scoped actions. MVP rendering uses dividers between groups, no section headers, no drill-down submenus. Two compact inline action rows defined: **z-order row** (`⏫ ↑ ↓ ⏬`, Material order) and **frame-membership row** (`📌 Pin · 🔓 Detach · 🔄 Auto`). Pin / Detach / Auto direct-dispatch when target is unambiguous; open existing `FrameTargetPickerDialog` when multiple frames in selection. One-tap Delete regression accepted (Delete is rare; one-tap Undo limits the cost). § 10's category list (Transform / Appearance / Mask / Vector / Frame) graduated as a **deferred-but-committed** future grouping — applied as section headers when any selection type accumulates ~15+ items. Implementation tracked in `todo.md § 15` (existing context-menu section grows the bar-removal subsection).
 > - **§ 7 Appearance layer expansion + inline-mask portion of § 8** **fully decided 2026-06-02** → `docs/architecture/appearance.md § 12` (expanded into the full layered evolution). Locked: three-layer separation (`NodeShape` owns boundary + feathering; `BorderStyle` owns parametric stroke; `effects: List<LuminanceEffect>` owns shadow/glow/inner-*); `NodeShape` sealed (intro now with `Rect` variant carrying `CornerRadii` + `feather`; future `Ellipse`/`Polygon`/`Path`); shadow + glow unified into `effects` list (multiple effects allowed); inline `alphaMask: AlphaMask?` on base; overlay anchoring via `OverlayStyle.anchoring: OverlayAnchoring` (Object default, plus Frame/World/Camera; Camera renders in a separate top-level pass); base promotion of `colorAdjustments` and `caption` from `MediaAppearance` (frames pick them up); rename `frameDecoration` → `decoration` (eliminates the "frame" name collision with `CanvasNode.Frame`); `crop` stays media-only. `MaskNode` data-model constraints also locked (siblings-within-frame/group only; can live in frames + pinnable; not a nav-target). Implementation order in `§ 12.8`. `MaskNode` editing UX + `MaskEdit` gesture map remain open in § 8 above.
 > - **§ 1 FAB / chrome gating around the context menu** **fully decided 2026-06-01** → wired in `CanvasScaffold.kt` via a `dismissPopupAnd { ... }` / `dismissPopupAndAccept { ... }` helper applied uniformly to the FAB, top-bar handlers (Undo, Redo, Back, Frame List, Panel Config, Album Settings, mode toggle), and `ContextualActionBar.onAction`. Three resolutions: (1) **FAB stays visible and enabled at all times**, including when a selection exists — the select-then-add-more workflow is real; ContextualActionBar is going away anyway (see § 2). (2) **FAB tap with popup open dismisses the popup, then opens the Add sheet** (outside-tap semantics; selection untouched). (3) **All top-level chrome dismisses the popup on tap**, with one exception: `FrameEditOptionsBar` toggles keep the popup open because they're selection-scoped gesture modifiers — the popup remains contextual to the same selection.

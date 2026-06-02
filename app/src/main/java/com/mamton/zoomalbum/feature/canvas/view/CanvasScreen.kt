@@ -121,7 +121,7 @@ fun CanvasScreen(
             // Only active when something is selected. Consumes events on
             // handles and selected node body; passes through otherwise.
             .nodeInteractionGestures(
-                selectedNodeIds = state.selectedNodeIds,
+                selectedNodeIds = state.editor.selectedNodeIds,
                 hitTestBody = { x, y -> viewModel.isOnSelectedNode(x, y) },
                 hitTestHandle = { x, y -> viewModel.hitTestHandle(x, y) },
                 hitTestRotationHandle = { x, y -> viewModel.hitTestRotationHandle(x, y) },
@@ -220,7 +220,7 @@ fun CanvasScreen(
                         return@tapAndLongPressGestures
                     }
                     val hit = viewModel.hitTest(offset.x, offset.y)
-                    when (state.mode) {
+                    when (state.editor.mode) {
                         CanvasInteractionMode.Edit -> {
                             // Tap = replace-style selection. Hit → {node}; miss → clear.
                             // To add/remove individual nodes, use long-press (toggle).
@@ -253,7 +253,7 @@ fun CanvasScreen(
 
                     // View / Presentation: swallow long-press — no selection
                     // resolution, no rect-select drag, no context menu.
-                    if (state.mode != CanvasInteractionMode.Edit) {
+                    if (state.editor.mode != CanvasInteractionMode.Edit) {
                         menuCtx.skipMenu = true
                         return@tapAndLongPressGestures true
                     }
@@ -285,10 +285,10 @@ fun CanvasScreen(
                     // resolution actions already fired in `onLongPress`; we just open
                     // the menu scoped to the post-resolution selection + anchor.
                     if (menuCtx.skipMenu) return@tapAndLongPressGestures
-                    if (state.mode != CanvasInteractionMode.Edit) return@tapAndLongPressGestures
+                    if (state.editor.mode != CanvasInteractionMode.Edit) return@tapAndLongPressGestures
                     onShowContextMenu(
                         ContextMenuRequest(
-                            selection = viewModel.state.value.selectedNodeIds,
+                            selection = viewModel.state.value.editor.selectedNodeIds,
                             anchorNodeId = menuCtx.anchor,
                             anchorScreenX = screenX,
                             anchorScreenY = screenY,
@@ -329,12 +329,12 @@ fun CanvasScreen(
                     )
                 },
                 onDragEnd = {
-                    val rect = state.selectionRect
+                    val rect = state.editor.selectionRect
                     if (rect != null) {
                         // Additive iff selection was non-empty when the rect started.
                         // Rect-select doesn't mutate selectedNodeIds during drag,
                         // so reading it at onDragEnd reflects the pre-drag state.
-                        val additive = state.selectedNodeIds.isNotEmpty()
+                        val additive = state.editor.selectedNodeIds.isNotEmpty()
                         viewModel.onAction(
                             CanvasAction.SelectNodesInRect(
                                 rect,
@@ -410,18 +410,18 @@ fun CanvasScreen(
 
             // Selection overlay — drawn on top of all nodes
             val selectedNodes = state.visibleNodes
-                .filter { it.node.id in state.selectedNodeIds }
+                .filter { it.node.id in state.editor.selectedNodeIds }
                 .map { it.node }
             if (selectedNodes.isNotEmpty()) {
                 SelectionOverlay(
                     selectedNodes = selectedNodes,
                     cameraScale = state.camera.scale,
                     rotationHandleEnabled = true, // TODO: wire to InteractionSettings
-                    groupTransform = state.groupSelectionTransform,
-                    anchorNodeId = state.contextAnchorNodeId,
+                    groupTransform = state.editor.groupSelectionTransform,
+                    anchorNodeId = state.editor.contextAnchorNodeId,
                 )
             }
-            state.selectionRect?.let { rect -> SelectionRectOverlay(rect) }
+            state.editor.selectionRect?.let { rect -> SelectionRectOverlay(rect) }
 
             // Membership visualisation: for EVERY frame in the selection, draw thin
             // borders around its effective members so the membership relation is visible.

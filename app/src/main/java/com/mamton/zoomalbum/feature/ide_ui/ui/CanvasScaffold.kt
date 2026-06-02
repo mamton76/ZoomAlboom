@@ -92,6 +92,8 @@ fun CanvasScaffold(
         canvasViewModel.onAction(CanvasAction.SetContextAnchor(contextMenuRequest?.anchorNodeId))
     }
 
+    val editorState = canvasState.editor
+
     // Back-press dismissal for the context menu.
     //
     // The popup itself uses `focusable = false` so a long-press elsewhere can
@@ -105,7 +107,7 @@ fun CanvasScaffold(
         contextMenuRequest = null
     }
 
-    val selectedNodeIds = canvasState.selectedNodeIds
+    val selectedNodeIds = editorState.selectedNodeIds
     // Single-Frame selection enables the Background button in the action bar.
     val singleSelectedFrame: CanvasNode.Frame? = remember(selectedNodeIds, canvasState.visibleNodes) {
         if (selectedNodeIds.size != 1) null
@@ -169,7 +171,7 @@ fun CanvasScaffold(
     // `docs/architecture/editor-actions.md` for the catalog model.
     val selectionContext = SelectionContext(
         selectedNodeIds = selectedNodeIds,
-        anchorNodeId = canvasState.contextAnchorNodeId,
+        anchorNodeId = editorState.contextAnchorNodeId,
         singleSelectedFrame = singleSelectedFrame,
         singleSelectedMedia = singleSelectedMedia,
         selectedFramesInOrder = selectedFramesInOrder,
@@ -218,9 +220,9 @@ fun CanvasScaffold(
                 onOpenFrameList = dismissPopupAnd { showFrameList = true },
                 onOpenPanelConfig = dismissPopupAnd { showPanelConfig = true },
                 onOpenAlbumSettings = dismissPopupAnd { showAlbumSettings = true },
-                mode = canvasState.mode,
+                mode = editorState.mode,
                 onToggleMode = dismissPopupAnd {
-                    val next = if (canvasState.mode == CanvasInteractionMode.Edit) {
+                    val next = if (editorState.mode == CanvasInteractionMode.Edit) {
                         CanvasInteractionMode.View
                     } else {
                         CanvasInteractionMode.Edit
@@ -232,7 +234,7 @@ fun CanvasScaffold(
                 // Frame-gesture modifiers — visible only while a frame is in
                 // the selection; toggling them does **not** dismiss the popup
                 // (per `context-menu.md § 3 — Dismissal rules`).
-                frameEditOptions = canvasState.frameEditOptions
+                frameEditOptions = editorState.frameEditOptions
                     .takeIf { selectedFramesInOrder.isNotEmpty() },
                 onFrameEditOptionsChange = {
                     canvasViewModel.onAction(CanvasAction.SetFrameEditOptions(it))
@@ -404,11 +406,11 @@ fun CanvasScaffold(
         // checkbox dispatches `ToggleNodeSelection`, which mutates state but
         // not the stored snapshot) and so the menu structure (single vs group)
         // stays in sync if the user changes selection via the picker.
-        val request = storedRequest.copy(selection = canvasState.selectedNodeIds)
+        val request = storedRequest.copy(selection = editorState.selectedNodeIds)
         val items = buildEditContextMenuItems(
             request = request,
             // `selectionContext` is rebuilt every recomposition from
-            // `canvasState.selectedNodeIds`, so picker toggles that mutate the
+            // `editorState.selectedNodeIds`, so picker toggles that mutate the
             // selection are reflected here without any extra plumbing.
             ctx = selectionContext,
             runEffect = ::runEditorActionEffect,

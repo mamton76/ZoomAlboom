@@ -26,6 +26,8 @@ import com.mamton.zoomalbum.domain.model.EasingType
 import com.mamton.zoomalbum.domain.model.FrameAppearance
 import com.mamton.zoomalbum.domain.model.FrameEditOptions
 import com.mamton.zoomalbum.domain.model.MediaAppearance
+import com.mamton.zoomalbum.feature.canvas.editor.EditorState
+import com.mamton.zoomalbum.feature.canvas.editor.EditorTool
 import com.mamton.zoomalbum.domain.model.FrameFitMode
 import com.mamton.zoomalbum.domain.model.MembershipOrigin
 import com.mamton.zoomalbum.domain.model.MembershipState
@@ -71,34 +73,31 @@ data class VisibleNode(
     val detail: RenderDetail,
 )
 
+/**
+ * Top-level canvas state. Split into two coherent groups:
+ *
+ *  - **Canvas / rendering state** (camera, visible nodes, profile, album
+ *    background, in-flight focus animation, loading flag). Read by the renderer
+ *    and culling.
+ *  - **Editor-session state** (`editor`). Owns gesture interpretation +
+ *    overlay rendering — see [EditorState].
+ *
+ * UI-surface state (open popups / bottom sheets / dialogs) deliberately lives
+ * outside this class, in `CanvasScaffold`'s `remember` cells, because the
+ * presentation surface for a given editor operation may differ between phone
+ * (bottom sheet / popup) and tablet (docked panel) without changing the
+ * editor-session semantics.
+ */
 data class CanvasState(
     val camera: Camera = Camera(),
     val visibleNodes: List<VisibleNode> = emptyList(),
     val totalNodeCount: Int = 0,
     val isLoading: Boolean = true,
-    val selectedNodeIds: Set<String> = emptySet(),
-    val selectionRect: BoundingBox? = null,
-    /** Group selection bounding rect — computed on selection change, rotation accumulated. */
-    val groupSelectionTransform: Transform? = null,
     val profile: AlbumPresentationProfile? = null,
-    val mode: CanvasInteractionMode = CanvasInteractionMode.Edit,
     /** Transient in-flight focus animation. Cancelled by any pan/pinch gesture. */
     val cameraAnimation: CameraAnimation? = null,
     val albumBackground: AlbumBackground? = null,
-    /**
-     * Transient toggles for frame transform gestures. See `frame-membership.md`.
-     * Defaults are session-level, not persisted with the album.
-     */
-    val frameEditOptions: FrameEditOptions = FrameEditOptions(),
-    /**
-     * Node id of the current long-press anchor — the node the user just
-     * long-pressed (or last toggled in the overlap picker). Non-null only
-     * while the context menu popup is open. Drawn with an outer halo by
-     * `SelectionOverlay` to communicate which node anchor-scoped menu items
-     * (`Remove this from selection`, `Edit this only`) operate on.
-     * See `docs/architecture/context-menu.md § 2`.
-     */
-    val contextAnchorNodeId: String? = null,
+    val editor: EditorState = EditorState(),
 )
 
 // ── Actions ───────────────────────────────────────────────────────────
@@ -160,6 +159,12 @@ sealed interface CanvasAction : Intent {
     data class SetMode(val mode: CanvasInteractionMode) : CanvasAction
     /** Animated camera focus on the given node (frame or media). */
     data class FocusNode(val nodeId: String) : CanvasAction
+
+    /**
+     * Sets the active editor tool. Selection persists across tool switches by
+     * construction — see `docs/architecture/editor-tools.md § 6`.
+     */
+    data class SetActiveTool(val tool: EditorTool) : CanvasAction
 
     /**
      * Sets the long-press anchor node id — the node decorated with an outer
@@ -314,11 +319,13 @@ class CanvasViewModel @Inject constructor(
 
     fun addNode(node: CanvasNode) {
         _allNodes.update { it + node }
-        _state.update {
-            it.copy(
+        _state.update { s ->
+            s.copy(
                 totalNodeCount = _allNodes.value.size,
-                selectedNodeIds = setOf(node.id),
-                groupSelectionTransform = null,
+                editor = s.editor.copy(
+                    selectedNodeIds = setOf(node.id),
+                    groupSelectionTransform = null,
+                ),
             )
         }
         commit(
@@ -383,33 +390,33 @@ class CanvasViewModel @Inject constructor(
         when (action) {
             is CanvasAction.SelectNode -> {
                 val ids = setOf(action.nodeId)
-                _state.update { it.copy(selectedNodeIds = ids) }
+                updateEditor { it.copy(selectedNodeIds = ids) }
                 recomputeGroupTransform(ids)
             }
 
             is CanvasAction.ToggleNodeSelection -> {
                 _state.update { s ->
-                    val updated = if (action.nodeId in s.selectedNodeIds)
-                        s.selectedNodeIds - action.nodeId
+                    val updated = if (action.nodeId in s.editor.selectedNodeIds)
+                        s.editor.selectedNodeIds - action.nodeId
                     else
-                        s.selectedNodeIds + action.nodeId
-                    s.copy(selectedNodeIds = updated)
+                        s.editor.selectedNodeIds + action.nodeId
+                    s.copy(editor = s.editor.copy(selectedNodeIds = updated))
                 }
-                recomputeGroupTransform(_state.value.selectedNodeIds)
+                recomputeGroupTransform(_state.value.editor.selectedNodeIds)
             }
 
             is CanvasAction.AddNodeToSelection -> {
-                if (action.nodeId in _state.value.selectedNodeIds) return
-                val updated = _state.value.selectedNodeIds + action.nodeId
-                _state.update { it.copy(selectedNodeIds = updated) }
+                if (action.nodeId in _state.value.editor.selectedNodeIds) return
+                val updated = _state.value.editor.selectedNodeIds + action.nodeId
+                updateEditor { it.copy(selectedNodeIds = updated) }
                 recomputeGroupTransform(updated)
             }
 
             is CanvasAction.AddNodesToSelection -> {
                 if (action.nodeIds.isEmpty()) return
-                val merged = _state.value.selectedNodeIds + action.nodeIds
-                if (merged.size == _state.value.selectedNodeIds.size) return
-                _state.update { it.copy(selectedNodeIds = merged) }
+                val merged = _state.value.editor.selectedNodeIds + action.nodeIds
+                if (merged.size == _state.value.editor.selectedNodeIds.size) return
+                updateEditor { it.copy(selectedNodeIds = merged) }
                 recomputeGroupTransform(merged)
             }
 
@@ -419,23 +426,23 @@ class CanvasViewModel @Inject constructor(
                     .map { it.id }
                     .toSet()
                 val ids = if (action.additive) {
-                    _state.value.selectedNodeIds + rectHits
+                    _state.value.editor.selectedNodeIds + rectHits
                 } else {
                     rectHits
                 }
-                _state.update { it.copy(selectedNodeIds = ids, selectionRect = null) }
+                updateEditor { it.copy(selectedNodeIds = ids, selectionRect = null) }
                 recomputeGroupTransform(ids)
             }
 
             is CanvasAction.DeselectAll -> {
-                _state.update { it.copy(selectedNodeIds = emptySet(), groupSelectionTransform = null) }
+                updateEditor { it.copy(selectedNodeIds = emptySet(), groupSelectionTransform = null) }
             }
 
             is CanvasAction.MoveSelection -> {
                 // During a frame-edit move-with-content gesture, `pendingGestureNodeIds`
                 // expands the moved set to include the frame's effective members captured
                 // at BeginInteraction. Outside such a gesture, plain selection moves.
-                val ids = pendingGestureNodeIds ?: _state.value.selectedNodeIds
+                val ids = pendingGestureNodeIds ?: _state.value.editor.selectedNodeIds
                 _allNodes.update { nodes ->
                     nodes.map { node ->
                         if (node.id in ids) {
@@ -452,8 +459,8 @@ class CanvasViewModel @Inject constructor(
                     t.copy(cx = t.cx + action.worldDx, cy = t.cy + action.worldDy)
                 }
                 // Shift group rect center
-                _state.value.groupSelectionTransform?.let { gt ->
-                    _state.update {
+                _state.value.editor.groupSelectionTransform?.let { gt ->
+                    updateEditor {
                         it.copy(
                             groupSelectionTransform = gt.copy(
                                 cx = gt.cx + action.worldDx,
@@ -467,7 +474,7 @@ class CanvasViewModel @Inject constructor(
             is CanvasAction.ResizeSelection -> {
                 // Frame-edit resize-with-content uses the augmented set captured at
                 // BeginInteraction; the pivot is supplied by the gesture detector.
-                val ids = pendingGestureNodeIds ?: _state.value.selectedNodeIds
+                val ids = pendingGestureNodeIds ?: _state.value.editor.selectedNodeIds
                 val selected = _allNodes.value.filter { it.id in ids }
                 if (selected.isEmpty()) return
 
@@ -493,10 +500,10 @@ class CanvasViewModel @Inject constructor(
                     t.copy(cx = newCx, cy = newCy, scale = newScale)
                 }
                 // Group rect: its center moves with the pivot too, w/h scale uniformly.
-                _state.value.groupSelectionTransform?.let { gt ->
+                _state.value.editor.groupSelectionTransform?.let { gt ->
                     val newGtCx = px + (gt.cx - px) * factor
                     val newGtCy = py + (gt.cy - py) * factor
-                    _state.update {
+                    updateEditor {
                         it.copy(
                             groupSelectionTransform = gt.copy(
                                 cx = newGtCx,
@@ -513,14 +520,14 @@ class CanvasViewModel @Inject constructor(
                 // Frame-edit rotate-with-content: rotate the augmented set, but the pivot
                 // must come from the user's selection (the frame center) — using the
                 // centroid of (frame + members) would orbit the wrong point.
-                val ids = pendingGestureNodeIds ?: _state.value.selectedNodeIds
-                val pivotIds = _state.value.selectedNodeIds
+                val ids = pendingGestureNodeIds ?: _state.value.editor.selectedNodeIds
+                val pivotIds = _state.value.editor.selectedNodeIds
                 val selected = _allNodes.value.filter { it.id in ids }
                 if (selected.isEmpty()) return
 
                 // Use group transform center if available (stable during rotation),
                 // otherwise compute from the user-selected node positions.
-                val gt = _state.value.groupSelectionTransform
+                val gt = _state.value.editor.groupSelectionTransform
                 val (gcx, gcy) = if (gt != null) {
                     gt.cx to gt.cy
                 } else {
@@ -553,7 +560,7 @@ class CanvasViewModel @Inject constructor(
                 }
                 // Accumulate rotation on group rect (size stays fixed)
                 if (gt != null) {
-                    _state.update {
+                    updateEditor {
                         it.copy(
                             groupSelectionTransform = gt.copy(
                                 rotation = gt.rotation + action.angleDelta,
@@ -564,7 +571,7 @@ class CanvasViewModel @Inject constructor(
             }
 
             is CanvasAction.DeleteSelection -> {
-                val ids = _state.value.selectedNodeIds
+                val ids = _state.value.editor.selectedNodeIds
                 if (ids.isEmpty()) return
                 val current = _allNodes.value
                 val removedWithIdx = current.withIndex()
@@ -572,10 +579,10 @@ class CanvasViewModel @Inject constructor(
                     .map { it.index to it.value }
                 if (removedWithIdx.isEmpty()) return
                 _allNodes.update { nodes -> nodes.filter { it.id !in ids } }
-                _state.update {
-                    it.copy(
-                        selectedNodeIds = emptySet(),
+                _state.update { s ->
+                    s.copy(
                         totalNodeCount = _allNodes.value.size,
+                        editor = s.editor.copy(selectedNodeIds = emptySet()),
                     )
                 }
                 commit(
@@ -591,7 +598,7 @@ class CanvasViewModel @Inject constructor(
             }
 
             is CanvasAction.DuplicateSelection -> {
-                val ids = _state.value.selectedNodeIds
+                val ids = _state.value.editor.selectedNodeIds
                 val sources = _allNodes.value.filter { it.id in ids }
                 if (sources.isEmpty()) return
                 // Diagonal offset constant in screen pixels — visible at any zoom,
@@ -619,10 +626,10 @@ class CanvasViewModel @Inject constructor(
                 }
                 _allNodes.update { it + copies }
                 val newIds = copies.map { c -> c.id }.toSet()
-                _state.update {
-                    it.copy(
-                        selectedNodeIds = newIds,
+                _state.update { s ->
+                    s.copy(
                         totalNodeCount = _allNodes.value.size,
+                        editor = s.editor.copy(selectedNodeIds = newIds),
                     )
                 }
                 // Rebuild group rect for the new selection — without this the rect stays
@@ -643,7 +650,7 @@ class CanvasViewModel @Inject constructor(
                 // Idempotent: both gesture detectors fire one Begin per gesture, but
                 // be defensive — if a snapshot is already pending, keep it.
                 if (pendingSnapshot != null) return
-                val ids = _state.value.selectedNodeIds
+                val ids = _state.value.editor.selectedNodeIds
                 if (ids.isEmpty()) return
 
                 // Frame-edit augmentation: for EVERY Frame in the selection, optionally
@@ -653,7 +660,7 @@ class CanvasViewModel @Inject constructor(
                 // `transformContents` (geometry can change for frame-only edits too).
                 val allNodes = _allNodes.value
                 val selectedFrames = allNodes.filter { it.id in ids }.filterIsInstance<CanvasNode.Frame>()
-                val opts = _state.value.frameEditOptions
+                val opts = _state.value.editor.frameEditOptions
                 val gestureIds: Set<String> = if (selectedFrames.isNotEmpty() && opts.transformContents) {
                     val members = selectedFrames.flatMap {
                         frameMembershipUseCase.effectiveMembers(it, allNodes)
@@ -694,24 +701,24 @@ class CanvasViewModel @Inject constructor(
             }
 
             is CanvasAction.UpdateSelectionRect -> {
-                _state.update { it.copy(selectionRect = action.worldRect) }
+                updateEditor { it.copy(selectionRect = action.worldRect) }
             }
 
             is CanvasAction.SetMode -> {
                 val target = action.mode
-                if (_state.value.mode == target) return
-                _state.update { s ->
+                if (_state.value.editor.mode == target) return
+                updateEditor { e ->
                     if (target != CanvasInteractionMode.Edit) {
                         // Any non-Edit mode is read-only — clear selection so
                         // overlays/handles/action bar are auto-hidden.
-                        s.copy(
+                        e.copy(
                             mode = target,
                             selectedNodeIds = emptySet(),
                             groupSelectionTransform = null,
                             selectionRect = null,
                         )
                     } else {
-                        s.copy(mode = target)
+                        e.copy(mode = target)
                     }
                 }
             }
@@ -721,9 +728,14 @@ class CanvasViewModel @Inject constructor(
                 startCameraAnimation(node.transform)
             }
 
+            is CanvasAction.SetActiveTool -> {
+                if (_state.value.editor.activeTool == action.tool) return
+                updateEditor { it.copy(activeTool = action.tool) }
+            }
+
             is CanvasAction.SetContextAnchor -> {
-                if (_state.value.contextAnchorNodeId == action.nodeId) return
-                _state.update { it.copy(contextAnchorNodeId = action.nodeId) }
+                if (_state.value.editor.contextAnchorNodeId == action.nodeId) return
+                updateEditor { it.copy(contextAnchorNodeId = action.nodeId) }
             }
 
             is CanvasAction.SetAlbumBackground -> {
@@ -816,7 +828,7 @@ class CanvasViewModel @Inject constructor(
             )
 
             is CanvasAction.SetFrameEditOptions -> {
-                _state.update { it.copy(frameEditOptions = action.options) }
+                updateEditor { it.copy(frameEditOptions = action.options) }
             }
 
             is CanvasAction.BringToFront -> applyZIndexReorder(action.nodeId, ZReorder.ToFront)
@@ -996,24 +1008,25 @@ class CanvasViewModel @Inject constructor(
 
     /**
      * Effective transform for the current selection:
-     * - Multi-select: group rect ([CanvasState.groupSelectionTransform]).
+     * - Multi-select: group rect ([EditorState.groupSelectionTransform]).
      * - Single-select: that node's transform (looked up in [_allNodes], not
      *   visibleNodes — selection must behave consistently even when nodes are
      *   culled out of the viewport).
      * - Empty selection: null.
      */
     fun selectionTransform(): com.mamton.zoomalbum.domain.model.Transform? {
-        val ids = _state.value.selectedNodeIds
+        val editor = _state.value.editor
+        val ids = editor.selectedNodeIds
         return when {
             ids.isEmpty() -> null
             ids.size == 1 -> _allNodes.value.firstOrNull { it.id == ids.first() }?.transform
-            else -> _state.value.groupSelectionTransform
+            else -> editor.groupSelectionTransform
         }
     }
 
     /** True if the screen point is on ANY currently selected node. */
     fun isOnSelectedNode(screenX: Float, screenY: Float): Boolean {
-        val ids = _state.value.selectedNodeIds
+        val ids = _state.value.editor.selectedNodeIds
         if (ids.isEmpty()) return false
         val cam = _state.value.camera
         val (wx, wy) = TransformUtils.screenToWorld(screenX, screenY, cam)
@@ -1153,7 +1166,7 @@ class CanvasViewModel @Inject constructor(
     }
 
     /**
-     * Recomputes [CanvasState.groupSelectionTransform] from the current selected nodes.
+     * Recomputes [EditorState.groupSelectionTransform] from the current selected nodes.
      * Called when selection changes (add/remove/rect-select).
      *
      * The rect is screen-aligned at formation time (rotation = -camera.rotation),
@@ -1162,17 +1175,22 @@ class CanvasViewModel @Inject constructor(
      */
     private fun recomputeGroupTransform(selectedIds: Set<String>) {
         if (selectedIds.size < 2) {
-            _state.update { it.copy(groupSelectionTransform = null) }
+            updateEditor { it.copy(groupSelectionTransform = null) }
             return
         }
         val selected = _allNodes.value.filter { it.id in selectedIds }
         if (selected.size < 2) {
-            _state.update { it.copy(groupSelectionTransform = null) }
+            updateEditor { it.copy(groupSelectionTransform = null) }
             return
         }
         val cameraRotation = _state.value.camera.rotation
         val gt = TransformUtils.screenAlignedGroupTransform(selected, cameraRotation)
-        _state.update { it.copy(groupSelectionTransform = gt) }
+        updateEditor { it.copy(groupSelectionTransform = gt) }
+    }
+
+    /** Mutates only [EditorState] under [CanvasState.editor]. */
+    private inline fun updateEditor(crossinline block: (EditorState) -> EditorState) {
+        _state.update { s -> s.copy(editor = block(s.editor)) }
     }
 
     private fun loadAlbum() {
@@ -1341,13 +1359,13 @@ class CanvasViewModel @Inject constructor(
     private fun applyPendingRebindSuppression() {
         if (pendingEditedFrameIds.isEmpty()) return
         val snapshot = pendingSnapshot ?: return
-        if (_state.value.frameEditOptions.rebindAfterEdit) return
+        if (_state.value.editor.frameEditOptions.rebindAfterEdit) return
 
         val current = _allNodes.value
         val snapshotById = snapshot.associateBy { it.id }
         // Reconstruct the pre-gesture world by overlaying snapshot versions onto current nodes.
         val allNodesBefore = current.map { node -> snapshotById[node.id] ?: node }
-        val options = _state.value.frameEditOptions
+        val options = _state.value.editor.frameEditOptions
 
         val updatedById = mutableMapOf<String, CanvasNode.Frame>()
         for (frameId in pendingEditedFrameIds) {
@@ -1437,11 +1455,13 @@ class CanvasViewModel @Inject constructor(
             to == null && from != null -> emptySet()
             else -> to!!.map { it.id }.toSet()
         }
-        _state.update {
-            it.copy(
-                selectedNodeIds = newSel,
+        _state.update { s ->
+            s.copy(
                 totalNodeCount = _allNodes.value.size,
-                groupSelectionTransform = null,
+                editor = s.editor.copy(
+                    selectedNodeIds = newSel,
+                    groupSelectionTransform = null,
+                ),
             )
         }
         recomputeGroupTransform(newSel)

@@ -298,21 +298,52 @@ A "Restore last tool" preference is post-MVP and not part of the locked design.
 
 ### 7.1 State
 
-Initial MVP lives directly on `CanvasUiState`:
+`CanvasState` (the actual class in `CanvasViewModel.kt`; older drafts of this doc called it `CanvasUiState`) is split into canvas / rendering state at the top level and an `EditorState` sub-object that owns gesture interpretation and overlay rendering:
 
 ```kotlin
-data class CanvasUiState(
-    // …existing fields…
-    val editorMode: EditorMode = EditorMode.Edit,
+data class CanvasState(
+    // …canvas / rendering fields…
+    val camera: Camera = Camera(),
+    val visibleNodes: List<VisibleNode> = emptyList(),
+    val totalNodeCount: Int = 0,
+    val isLoading: Boolean = true,
+    val profile: AlbumPresentationProfile? = null,
+    val cameraAnimation: CameraAnimation? = null,
+    val albumBackground: AlbumBackground? = null,
+
+    val editor: EditorState = EditorState(),
+)
+
+data class EditorState(
+    val mode: CanvasInteractionMode = CanvasInteractionMode.Edit,
     val activeTool: EditorTool = EditorTool.Selection,
+    val selectedNodeIds: Set<String> = emptySet(),
+    val selectionRect: BoundingBox? = null,
+    val groupSelectionTransform: Transform? = null,
+    val frameEditOptions: FrameEditOptions = FrameEditOptions(),
+    val contextAnchorNodeId: String? = null,
 )
 ```
 
-`EditorTool` is a `sealed interface` with `data object` variants for the seven tools today. Per-tool transient state (e.g. `FreeDrawState.currentStroke`) is added as adjacent fields only when each tool ships, not preemptively.
+Both types live under `feature/canvas/editor/` — editor interaction concepts, not persisted album content, so they do not belong in `domain/model/`.
 
-Once 3+ tools accumulate per-tool state and `CanvasUiState` gets crowded, factor out an `EditorState` container per `to_discuss.md § 11`. Premature otherwise.
+**`EditorTool` vocabulary is grown incrementally.** Initial MVP exposes only `Selection` and `Eraser` (the two variants needed for the next implementation slice). `FreeDraw`, `Shape`, `Text`, `VectorEdit`, `MaskEdit` are added one variant at a time as each tool actually ships. Disabled toolbar slots are not pre-declared in the type.
 
-Today's mode field on `CanvasState` is `CanvasInteractionMode` ([selection.md § 7](selection.md#7-mode-interaction)). Treat `EditorMode` in this doc as the same concept; a rename is optional alignment, not a behavior change.
+**Three deliberate separations on `EditorState`:**
+
+1. **Tool identity vs. tool settings vs. active interaction.** When per-tool settings or in-progress gesture state become necessary (e.g. Eraser brush size, FreeDraw current stroke), add dedicated `toolSettings` / `activeInteraction` fields on `EditorState`. Do **not** encode them inside `EditorTool` variants:
+   ```kotlin
+   // wrong — conflates identity, settings, and active gesture state
+   data class Eraser(val size: Float, val currentlyErasedNodeIds: Set<String>) : EditorTool
+   ```
+2. **No speculative state.** Do not predeclare `vectorEditState`, `freeDrawState`, `eraserState`, `snappingState`, `transformState`, `toolSettings`, or `activeInteraction` until an implemented feature requires them.
+3. **UI-surface state stays in `CanvasScaffold`.** Open popup / appearance-editor / bottom sheet / dialog state (`mediaApprEditing`, `frameBgEditing`, `contextMenuRequest`, `showAddSheet`, `showFrameList`, `showPanelConfig`, `showAlbumSettings`) is presentation-surface state — phone today is bottom sheets, tablet later is docked panels. Keeping it out of `EditorState` decouples editor semantics from the presentation surface used to render them.
+
+**`contextAnchorNodeId` is an intentional exception** to (3): the popup itself is UI-surface state, but the anchor id is consumed by canvas rendering (`SelectionOverlay` halo). It belongs on `EditorState`.
+
+**Selection sub-object deferred.** Selection fields are flat on `EditorState` today. A dedicated `SelectionState` will be extracted when `SelectionTool` accumulates substantial own state — selection mode (rectangle / lasso), selection rule (`Intersects` / `FullyContained`), in-progress lasso path, additive flag, hover state, or anchor-level selection. Until then, the cohesion gain doesn't justify the extra navigation depth at every call site.
+
+**Earlier guidance superseded.** A previous version of this doc said "factor `EditorState` only once 3+ tools accumulate per-tool transient state." `EditorState` was extracted earlier — before any per-tool transient state existed — because the editor-session subset of `CanvasState` (mode + selection + frame-edit options + context anchor) was already coherent on its own, and the extraction stays cheaper to do now than after multiple tool slices couple to a flat shape.
 
 ### 7.2 Gesture stack
 
@@ -361,7 +392,7 @@ Today's `Edit ↔ View` TopBar toggle becomes the `EditorMode` selector. Present
 - **Popup derivation: centralized vs distributed.** § 5. Defer until 3+ tools are implemented and one pattern's pain shows up.
 - **Long-press-on-empty intent.** No defined behavior in the locked Selection map (§ 4.1). Options: no-op (MVP), empty-canvas context menu (paste, add node, canvas settings), or "add content" picker. Defer.
 - **`VectorEditTool` invalid-selection UX.** Tool requires exactly-one-vector-node selected (§ 4.5). With invalid selection: greyed-out toolbar slot (can't enter), enterable-but-disabled with hint, or auto-prompt? Defer to first-use UX feedback.
-- **`EditorState` refactor trigger.** § 7.1 says "factor once 3+ tools accumulate transient state." Tighten the trigger when we're closer.
+- ~~`EditorState` refactor trigger.~~ **Resolved 2026-06-02.** `EditorState` was extracted before the first per-tool slice; see § 7.1 for the layered shape and the criterion for a later `SelectionState` extraction.
 
 ---
 
@@ -379,8 +410,8 @@ Today's `Edit ↔ View` TopBar toggle becomes the `EditorMode` selector. Present
 
 The framework is largely a paper architecture until additional tools ship. The MVP work is small.
 
-1. **Declare `EditorTool` sealed interface** in `domain/model/EditorTool.kt`. Seven `data object` variants (`Selection`, `FreeDraw`, `Shape`, `Text`, `VectorEdit`, `Eraser`, `MaskEdit`).
-2. **Add `activeTool` to `CanvasUiState`** with default `EditorTool.Selection`. Add `CanvasAction.SetActiveTool(tool)` and its ViewModel handler. Selection persists across tool switches by construction (no per-switch clear).
+1. **Extract `EditorState`** (shipped 2026-06-02). Declare `EditorState` + `EditorTool` under `feature/canvas/editor/`; nest `mode`, `selectedNodeIds`, `selectionRect`, `groupSelectionTransform`, `frameEditOptions`, `contextAnchorNodeId`, and the new `activeTool` under `CanvasState.editor`. Behavior-preserving. See § 7.1 for the shape.
+2. **Grow `EditorTool` vocabulary as tools ship.** Starts with `Selection` and `Eraser`. Add `FreeDraw`, `Shape`, `Text`, `VectorEdit`, `MaskEdit` one variant at a time when each tool actually lands — do not predeclare disabled toolbar slots. `CanvasAction.SetActiveTool(tool)` + handler land alongside the extraction (no UI exposure until the second tool ships). Selection persists across tool switches by construction (no per-switch clear).
 3. **Make Layer 2 tool-aware.** `tapAndLongPressGestures` consults `activeTool` for tap / long-press dispatch. For MVP, only `Selection` has logic; other tools are no-ops.
 4. **Migrate rect-select to drag-on-empty** (§ 7.3). Inside `SelectionTool`'s gesture handler, single-finger drag on empty (no long-press required) initiates `SelectNodesInRect`. Update [selection.md § 2](selection.md#2-gesture-mapping).
 5. **View-mode single-finger pan** (§ 7.4). Either extend Layer 3 or add a `viewModePanGestures` modifier active only in View.

@@ -109,7 +109,7 @@ The default UI uses minimal chrome to maximize canvas visibility. Three **contex
 
 1. **Navigate mode** (default) — canvas takes ~100% of screen. `CanvasTopBar` (album name, node count HUD, zoom/rotation/xy, back, Edit/View toggle, ☰ frame list, ⚙ panel config) and a FAB [+] bottom-right.
 2. **Add content mode** (FAB tap) — `AddContentBottomSheet` slides up with a content type picker (Frame + media types: Photo, Video, Audio, Text, Sticker, Vector; future: AnimatedPhoto). Canvas remains visible behind the sheet.
-3. **Object selected mode** (node tap in Edit mode) — `ContextualActionBar` appears at the bottom. Disappears on deselection.
+3. **Object selected mode** (node tap in Edit mode) — `SelectionOverlay` paints the selection border + resize / rotation handles. Selection-scoped actions (Delete, Duplicate, z-order, frame membership, open appearance editor, …) are reached via the long-press context-menu popup — the popup is the baseline `SelectionActionSurface` (see [editor-surfaces.md](editor-surfaces.md) + [context-menu.md](context-menu.md)). The earlier persistent `ContextualActionBar` strip was removed 2026-06-02 and is no longer part of the chrome surface.
 
 On top of those contextual modes sits a **global interaction mode** that gates *which* contextual modes are reachable:
 

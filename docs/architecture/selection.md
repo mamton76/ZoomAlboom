@@ -39,7 +39,7 @@ The table below describes **Edit mode** behavior. For non-Edit modes see [§ 7 M
 
 **Rationale:**
 - Tap = replace matches touch UX conventions (iOS, Figma iPad). Tap moves focus, doesn't accumulate.
-- Long-press is the explicit "I want multi-select" affordance — discoverable through ContextualActionBar feedback.
+- Long-press is the explicit "I want multi-select" affordance — discoverable through the long-press [context-menu popup](context-menu.md), which surfaces the resulting selection's available actions.
 - Long-press is **add-or-keep**, not toggle: the removal intent moves into the [context menu's anchor-scoped items](context-menu.md#2-menu-model) (`Remove this from selection`, `Edit this only`) rather than being a hidden long-press semantic. `ToggleNodeSelection` remains in the codebase as the underlying action for those menu items; no gesture dispatches it.
 - Rect-select is additive when extending an existing selection; replace from scratch when starting fresh.
 
@@ -74,7 +74,7 @@ After every selection-membership change, the ViewModel calls `recomputeGroupTran
 - **Single-select** → the node's transform, looked up in `_allNodes` (NOT `visibleNodes`)
 - **Multi-select** → `groupSelectionTransform`
 
-**Critical:** the lookup uses `_allNodes`, not `visibleNodes`. Selected nodes can be culled out of the viewport (panned away, zoomed out), but the user must still be able to drag handles, tap to collapse, or long-press to toggle. Anything that gates on `visibleNodes` for selection operations is wrong. See [coordinates § 10](coordinates.md#10-viewport-independent-selection-operations).
+**Critical:** the lookup uses `_allNodes`, not `visibleNodes`. Selected nodes can be culled out of the viewport (panned away, zoomed out), but the user must still be able to drag handles, tap to collapse, or long-press to open the context menu on them. Anything that gates on `visibleNodes` for selection operations is wrong. See [coordinates § 10](coordinates.md#10-viewport-independent-selection-operations).
 
 The same rule applies to:
 - `isOnSelectedNode(x, y)` — iterates `_allNodes`
@@ -103,7 +103,7 @@ Priority order on DOWN:
 3. **Selected node body hit** → deferred-consume; on slop → `dragLoop` → `onDrag`.
 4. **No hit** → fall through (no consumption).
 
-The deferred-consume rule is what enables tap-on-selected (collapse multi-select) and long-press-on-selected (toggle out of selection). It also matters for handles specifically: the handle touch radius (48 px) often extends over a node's body, so an immediate-consume on a handle hit would silently swallow taps that the user intends as "select this one node from the group."
+The deferred-consume rule is what enables tap-on-selected (collapse multi-select) and long-press-on-selected (re-anchor the context menu on that node). It also matters for handles specifically: the handle touch radius (48 px) often extends over a node's body, so an immediate-consume on a handle hit would silently swallow taps that the user intends as "select this one node from the group."
 
 ### Layer 2 — `tapAndLongPressGestures` (Main pass)
 
@@ -129,12 +129,12 @@ The gesture stack is **selection-aware**, not directly mode-aware. `CanvasAction
 | Layer | Edit | View / Presentation |
 |-------|------|---------------------|
 | 1 — `nodeInteractionGestures` | Active on non-empty selection | Dormant — selection always empty, the modifier early-returns at the top of its `pointerInput` block |
-| 2 — `tapAndLongPressGestures` | Tap → `SelectNode` / `DeselectAll`; long-press → toggle / overlap picker / rect-select | Tap → `FocusNode(hit.id)` if there's a hit, no-op otherwise; long-press is swallowed (returns `true`) — no overlap picker, no rect-select fallthrough |
+| 2 — `tapAndLongPressGestures` | Tap → `SelectNode` / `DeselectAll`; long-press → `AddNodeToSelection` + open context-menu popup (inline overlap picker for stacked nodes); long-press-then-drag → rect-select | Tap → `FocusNode(hit.id)` if there's a hit, no-op otherwise; long-press is swallowed (returns `true`) — no overlap picker, no rect-select fallthrough |
 | 3 — `infiniteCanvasGestures` | Unchanged | Unchanged — pan / pinch / rotate always work, and they cancel any in-flight focus animation |
 
 The branch lives in `CanvasScreen.kt`'s `onTap` / `onLongPress` callbacks, not in the detector itself. This keeps the gesture detectors mode-agnostic and reusable when the `:canvas-engine` extraction lands.
 
-**Selection chrome auto-hides in non-Edit modes** because `SelectionOverlay`, the resize/rotation handle overlays, and `ContextualActionBar` all key off `selectedNodeIds.isNotEmpty()`. No mode flag needed in their composables.
+**Selection chrome auto-hides in non-Edit modes** because `SelectionOverlay` and the resize / rotation handle overlays all key off `selectedNodeIds.isNotEmpty()`. No mode flag needed in those composables. The long-press context-menu popup is separately suppressed in non-Edit modes via the `state.editor.mode != Edit` guard in `CanvasScreen`.
 
 **`FrameListBottomSheet` tap-to-focus works in both Edit and View** — the row-click handler dispatches `FocusNode(frameId)` and dismisses the sheet, regardless of mode. The TopBar toggle currently cycles Edit ↔ View; `Presentation` is reachable only via `SetMode` programmatically (reserved for a future Present surface).
 

@@ -1,8 +1,10 @@
 # Editor Tools
 
-> Related: [selection](selection.md) | [overview](overview.md) | [context-menu](context-menu.md) | [presentation-profile](presentation-profile.md) | [navigation](navigation.md) | [data-model](data-model.md)
+> Related: [editor-surfaces](editor-surfaces.md) | [selection](selection.md) | [overview](overview.md) | [context-menu](context-menu.md) | [presentation-profile](presentation-profile.md) | [navigation](navigation.md) | [data-model](data-model.md)
 
-**Status — decided 2026-05-24, partially implementable.** Settles `to_discuss.md § 3` (active-tool framework), § 4 (per-tool gesture maps), and § 6 (Eraser modes) — except `MaskEdit`, which is deferred and depends on `to_discuss.md § 8` `MaskNode` design.
+This doc owns the **gesture-allocation** axis of the editor (three-axis interaction model, per-tool gesture maps, dispatch, state shape). The **UI rendering** of tools and selection actions — `ToolControlSurface`, `SelectionActionSurface`, `ConceptEditorSurface`, `AddContentSurface`, `GlobalChromeSurface` — lives in [editor-surfaces.md](editor-surfaces.md). The two docs are complementary: tools define what gestures *mean*; surfaces define how the user *reaches* them.
+
+**Status — decided 2026-05-24, fully decided 2026-06-03.** Settles `to_discuss.md § 3` (active-tool framework), § 4 (per-tool gesture maps), § 6 (Eraser modes), and the `MaskEdit` portion of § 8 (`MaskNode` editing UX). All seven tools' gesture maps are now locked.
 
 The editor is fundamentally infinite-canvas, gesture-heavy, camera-driven, stylus-oriented, and spatial. To stay coherent as tool variety grows, gesture meaning is governed by an explicit **active tool**, with **navigation** orthogonal and always available. This doc specifies the three-axis interaction model, the locked `SelectionTool` gesture map, and how the framework lands in code.
 
@@ -82,15 +84,17 @@ In **Present mode**, gestures are presentation-domain (advance / dismiss / pan) 
 | `Text` | Editable text nodes | § 4.4 (locked) | Font, size, color, background, stroke, shadow, alignment |
 | `VectorEdit` | Per-node / per-handle editing of vector geometry | § 4.5 (locked) | Node type (smooth / sharp / mirrored / disconnected), close/open path, simplify |
 | `Eraser` | Object delete + vector partial erase (MVP); raster partial post-MVP | § 4.6 (locked) | Mode (object / vector partial); brush size (partial only) |
-| `MaskEdit` | Edit a `MaskNode`'s clipping geometry | § 4.7 (deferred — blocked on `to_discuss.md § 8`) | Mask shape, feather, scope |
+| `MaskEdit` | Create and edit `MaskNode`s — owns both creation and editing because no other tool produces them | § 4.7 (locked) | Mask geometry picker (Rect / Ellipse / Path / Free); aspect-ratio toggle for primitives |
 
-`VectorEdit`, vector-partial-`Eraser`, and `MaskEdit` depend on data-model concepts not yet implemented (vector nodes, `StrokeNode`, `ShapeNode`, `MaskNode`); their entries may exist as disabled tool-bar slots until the underlying types land.
+`VectorEdit`, vector-partial-`Eraser`, and `MaskEdit` depend on data-model concepts not yet implemented (vector nodes, `StrokeNode`, `ShapeNode`, `MaskNode`).
+
+`EditorTool` is **flat** — brush presets, shape primitives, eraser modes, and mask geometries are *settings of a tool*, not separate tool identities. `VectorEdit` and `MaskEdit` are **context-gated**: they exist in the type vocabulary but don't appear as permanent entries in the primary tool selector — they're entered when a valid target is selected (exact selector discoverability UX is deferred). The user-facing rendering of tool selection + tool controls is the `ToolControlSurface` — see [editor-surfaces.md § 4](editor-surfaces.md#4-toolcontrolsurface--design).
 
 ---
 
 ## 4. Per-tool gesture maps
 
-Locks the gesture map for each of the seven `EditorTool` variants. Six are decided; `§ 4.7 MaskEdit` is deferred — its design depends on `MaskNode` decisions in `to_discuss.md § 8`.
+Locks the gesture map for each of the seven `EditorTool` variants.
 
 ### 4.1 `SelectionTool`
 
@@ -249,9 +253,88 @@ Example: a horizontal line crossed by a vertical eraser becomes two separate pat
 
 **Persistence.** Stay in Eraser after each erase.
 
-### 4.7 `MaskEdit` — deferred
+### 4.7 `MaskEdit`
 
-Tool slot exists in the framework vocabulary (§ 3) but the gesture map is deferred. Depends on `MaskNode` data-model decisions in `to_discuss.md § 8`. Once `MaskNode` is designed, MaskEdit's gesture map will likely mirror `VectorEdit` for vector-shaped masks plus shape-handle editing for primitive masks.
+Creates and edits `MaskNode`s. `MaskNode` constraints (scope, frame relationship, z-order, composition, binding) are defined in [appearance.md § 12.10](appearance.md#1210-masknode-boundaries) — locked 2026-06-03 together with this gesture map.
+
+**Selection-awareness, not selection-gating.** Unlike `VectorEdit`, this tool owns *both* the creation and the editing of its target node — there is no separate creator tool (the way `FreeDraw` / `Shape` produce vector nodes for `VectorEdit`). The tool's entry behavior therefore depends on the current selection:
+
+| Selection on entry | Mode |
+|---|---|
+| Empty | Creation mode |
+| Exactly one `MaskNode` | Edit mode |
+| One non-`MaskNode`, or multi-selection | Disabled toolbar slot (matches `VectorEdit`'s greyed-out feel) |
+
+Entering creation mode on empty + drawing a `MaskNode` immediately selects the new node and transitions the same tool session into edit mode. The user does not switch tools.
+
+**Topbar — mask geometry picker.** Four primitive choices, mirroring `Shape`'s topbar:
+
+| Primitive | Drawing gesture | Editing gesture |
+|---|---|---|
+| `Rect` | Rubber-band drag | Corner + edge handles |
+| `Ellipse` | Rubber-band drag | Corner + edge handles |
+| `Path` (anchored bezier) | Tap-to-place-anchors *or* freehand-then-simplify | Per-anchor + per-handle, like `VectorEdit` |
+| `Free` (raw freehand) | Continuous sample stream | Resample as bezier, then per-anchor editing |
+
+Tap-without-drag in creation mode drops a default-sized primitive at the tap point.
+
+**Creation mode** (no `MaskNode` selected):
+
+| Gesture | Result |
+|---|---|
+| Tap | Drop default-sized primitive (Rect / Ellipse) or single anchor (Path), select it, transition to edit mode |
+| Drag (Rect / Ellipse) | Rubber-band the primitive from start to current point |
+| Drag (Path) | Place anchors along the drag, line-segment preview between them |
+| Drag (Free) | Continuous sample stream, finalize as smoothed bezier `Path` on lift |
+| Release | Commit + select the new `MaskNode`; tool stays in `MaskEdit`, now in edit mode |
+| Long-press | Global popup (per § 5) |
+| Two-finger | Global navigation |
+
+**Edit mode** (one `MaskNode` selected):
+
+Primitive masks (`Rect` / `Ellipse`):
+
+| Gesture | Result |
+|---|---|
+| Drag corner handle | Resize primitive |
+| Drag edge handle | Resize on one axis |
+| Drag the body | Move the `MaskNode` (same as Selection's body-drag) |
+| Drag rotation handle | Rotate primitive |
+| Long-press / two-finger | As above |
+
+Path masks (`Path` / `Free` after simplification):
+
+| Gesture | Result |
+|---|---|
+| Tap anchor | Replace anchor selection with `{anchor}` |
+| Tap curve segment | Add new anchor at nearest point on curve |
+| Tap empty | Clear anchor selection |
+| Drag anchor | Move anchor (with its bezier handles) |
+| Drag bezier handle | Edit curve — move handle only, anchor stays |
+| Drag empty | Marquee-select anchors within rect |
+| Double-tap anchor | Remove anchor; adjacent segments reconnect |
+| Long-press on anchor / segment / empty | Global popup |
+| Two-finger | Global navigation |
+
+**Preview policy — commit-only.** Masked siblings re-clip on **gesture lift**, not continuously during drag. While an anchor / handle / corner is moving, the `MaskNode`'s own outline updates live (so the user sees what they're editing), but the photos / strokes / frames underneath stay in their pre-gesture clipped state until the gesture commits. Rationale: per-frame re-clipping during multi-anchor drags would force every masked sibling to re-render mid-gesture, which is both expensive and visually noisy. Locked 2026-06-03 (`to_discuss.md § 8` graduation, answer 4).
+
+**Hit testing.** Screen-space hit radius for anchors and curve segments — same convention as `VectorEdit § 4.5`.
+
+**Handle visibility.** Primitive corner / edge / rotation handles always visible while the `MaskNode` is selected. Path anchors all visible whenever the mask is in edit mode; bezier handles visible only for selected anchors (otherwise a complex mask becomes a sea of handles).
+
+**Other canvas nodes.** Visible but non-interactive while `MaskEdit` is active — siblings still render through their pre-gesture mask state per the commit-only preview rule.
+
+**Topbar settings (MVP).** Primitive picker (`Rect` / `Ellipse` / `Path` / `Free`); for primitives, aspect-ratio constraint toggle (matches `Shape`). Feather is a `MaskNode` attribute, not a topbar setting — it lives on the long-press popup along with future mask-source options (image / gradient / procedural masks per [appearance.md § 12.2](appearance.md#122-model) — post-MVP).
+
+**Persistence.** Stay in `MaskEdit` after each commit (creation, anchor edit, or primitive resize). Explicit tool-switch exit only. Defensive auto-exit if the edited `MaskNode` is deleted (e.g. undo erases it).
+
+**Undo granularity.** One continuous gesture = one Compound undo entry, matching the other vector tools.
+
+**Z-order convention.** `MaskNode` clips siblings *below* it in z-order within the same frame/group only (per [appearance.md § 12.10](appearance.md#1210-masknode-boundaries)). The tool itself does not impose a z-position on new `MaskNode`s — they land on top of the current frame/group by default like any other freshly-added node, which is also the position where they affect the maximum number of siblings.
+
+**Binding.** Implicit — every sibling within the same frame / group below the `MaskNode` in z is masked. The user does not pick per-sibling binding; placement + z-order *is* the binding (per `to_discuss.md § 8`, answer 2).
+
+**Multi-mask composition.** When more than one `MaskNode` exists in the same frame/group, their shapes **union** (a sibling pixel is visible if **any** above-it `MaskNode` reveals it). No subtractive masks in MVP; adding a mask never hides more content.
 
 ---
 
@@ -388,7 +471,7 @@ Today's `Edit ↔ View` TopBar toggle becomes the `EditorMode` selector. Present
 
 ## 8. Open Questions
 
-- **`MaskEdit` gesture map.** Blocked on `MaskNode` design in `to_discuss.md § 8`. Other six tools locked in § 4.
+- ~~`MaskEdit` gesture map.~~ **Resolved 2026-06-03.** Locked in § 4.7. `MaskNode` constraints in [appearance.md § 12.10](appearance.md#1210-masknode-boundaries).
 - **Popup derivation: centralized vs distributed.** § 5. Defer until 3+ tools are implemented and one pattern's pain shows up.
 - **Long-press-on-empty intent.** No defined behavior in the locked Selection map (§ 4.1). Options: no-op (MVP), empty-canvas context menu (paste, add node, canvas settings), or "add content" picker. Defer.
 - **`VectorEditTool` invalid-selection UX.** Tool requires exactly-one-vector-node selected (§ 4.5). With invalid selection: greyed-out toolbar slot (can't enter), enterable-but-disabled with hint, or auto-prompt? Defer to first-use UX feedback.
@@ -416,13 +499,13 @@ The framework is largely a paper architecture until additional tools ship. The M
 4. **Migrate rect-select to drag-on-empty** (§ 7.3). Inside `SelectionTool`'s gesture handler, single-finger drag on empty (no long-press required) initiates `SelectNodesInRect`. Update [selection.md § 2](selection.md#2-gesture-mapping).
 5. **View-mode single-finger pan** (§ 7.4). Either extend Layer 3 or add a `viewModePanGestures` modifier active only in View.
 6. **Confirm `editorMode` plumbing.** Today's `CanvasInteractionMode` covers View / Edit / Presentation in the type but only View ↔ Edit in the UI toggle. Confirm wiring; rename to `EditorMode` only if it reduces confusion.
-7. **TopBar tool selector** — placeholder. With only Selection implemented, no UI needed; add when the second tool lands.
+7. **`ToolControlBar` (renders `ToolControlSurface`)** — lazy. The bar doesn't render while only `Selection` is implemented and has no editable user-facing controls. Trigger to ship is either a second functional tool (expected first case: Object-mode `Eraser`) or `Selection` gaining real settings. See [editor-surfaces.md § 4](editor-surfaces.md#4-toolcontrolsurface--design).
 8. **Per-tool implementations** land one tool at a time, each gated on the data-model concept it depends on:
    - `FreeDraw` (§ 4.2) depends on `StrokeNode` data-model + sample-stream input pipeline + bezier render-path cache.
    - `Shape` (§ 4.3) depends on `ShapeNode` data-model + rubber-band drag input.
    - `Text` (§ 4.4) depends on `TextNode` (verify exists) + overlay `BasicTextField` integration.
    - `VectorEdit` (§ 4.5) depends on vector-node existence (from `FreeDraw` / `Shape`) + `VectorEditState` per-tool state.
    - `Eraser` (§ 4.6) — object mode is trivial after step 3; vector partial mode depends on `VectorEdit`'s path-splitting math.
-   - `MaskEdit` (§ 4.7) blocked on `MaskNode` design.
+   - `MaskEdit` (§ 4.7) depends on `MaskNode` data-model (per [appearance.md § 12.10](appearance.md#1210-masknode-boundaries)) — gesture map locked, ships once `MaskNode` lands per `appearance.md § 12.8`.
 
 Steps 4 and 5 are the only behavior-changing items in the framework batch. Steps 1-3 are additive type / field declarations that activate Selection-as-tool without removing anything.

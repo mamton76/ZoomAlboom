@@ -220,7 +220,7 @@ Replaces current FAB [+] + BottomSheet. Planned immediately after photo node add
 
 A dedicated surface for editing properties of a selected node. Today these controls live in the Contextual Action Bar (Delete / Duplicate / Edit) plus ad-hoc bottom sheets (Frame Background — §19.6). The action bar is the wrong long-term home for these — too cramped to hold label, color, background, opacity, transform readouts, tags, layer assignment, appearance preset, per-frame presentation override, etc.
 
-> **Status note (2026-05-19):** This section predates the per-concept popup decision. The phone half (`ObjectPropertiesBottomSheet`) is obsolete — phone now uses context-menu popups (`context-menu.md`) as the primary properties surface, with each concept (border, shadow, clip, alpha mask, etc.) opening its own popup. The tablet half (`ObjectPropertiesPanel`) remains the deferred tablet enhancement; see [§ 5d](#5d-tablet-properties-panel-deferred). Per-type sections below still apply — they become the panel's stacked content composables when the panel lands.
+> **Status note (2026-06-03, supersedes 2026-05-19 note):** This section predates the logical-surfaces decision (`editor-surfaces.md`). Phone *and* tablet both use the long-press popup + per-concept editor popups as the baseline `SelectionActionSurface` + `ConceptEditorSurface`. There is no separate "phone properties surface" or "tablet properties surface" — the baseline is the same. The `ObjectPropertiesPanel` placeholder below (§ 5d) is one possible future *alternative placement* for `ConceptEditorSurface` content, not a separate MVP architecture. Per-type sections in this entry remain useful as future content-composable specs.
 
 ### 5c.1 Surface
 - [ ] `ObjectPropertiesPanel` — docked panel slot (right side, fits IDE panel system §6) for tablets/landscape — **deferred**, see § 5d
@@ -246,11 +246,11 @@ Tracked under [§ 15.5](#155-contextualactionbar-removal--inline-rows) below —
 
 ---
 
-## 5d. Tablet Properties Panel (deferred)
+## 5d. Tablet Properties Panel (deferred wide-screen placement)
 
-> **Status:** Placeholder. Decided 2026-05-19 — MVP ships popup-first for both phone and tablet (`to_discuss.md` resolved direction). Tablet docked panels are explicitly post-MVP. This entry exists so the deferred tablet work is visible in the backlog and doesn't become invisible.
+> **Status updated 2026-06-03:** Per [`editor-surfaces.md`](architecture/editor-surfaces.md), there is **no separate tablet editor architecture**. Tablet uses the same baseline layout as phone — global top bar + `ToolControlBar` + canvas + long-press popup + concept-editor popups. This § 5d placeholder is demoted to a **deferred future placement option** for `ConceptEditorSurface` content in wide-screen / configurable-workspace scenarios. The content composables it would host (`BorderEditorContent`, `ShadowEditorContent`, …) are already designed surface-agnostic and ship under their popup hosts first — the panel is an *additional* rendering host, not a parallel surface.
 
-The tablet enhancement reuses the per-concept content composables shipped under §15 + §20.6 + popups. The panel is a wrapper that stacks them vertically; nothing in the panel is new content.
+When (and only when) wide-screen workspace mode is built, this placeholder becomes the docked-inspector implementation. Nothing about the editor model changes when that happens.
 
 ### 5d.1 Surface
 - [ ] `ObjectPropertiesPanel` docked panel — right-side slot, integrates with IDE panel system (§6)
@@ -456,7 +456,7 @@ Multi-selection semantics **decided 2026-05-24**; see [architecture/z-order.md](
 - [x] `CanvasAction.BringForward(nodeId)` — swaps `zIndex` with the next-higher neighbor. No-op if already on top.
 - [x] `CanvasAction.SendBackward(nodeId)` — swaps `zIndex` with the next-lower neighbor. No-op if already at bottom.
 - [x] All four routed through `applyZIndexReorder(nodeId, ZReorder)`; undoable via `CommandKind.REORDER` (snapshot of the one or two affected nodes).
-- [x] `ContextualActionBar` exposes the four actions (icons `⤒ ▲ ▼ ⤓`) when exactly one node is selected.
+- [x] Four actions surfaced when exactly one node is selected. Shipped first on `ContextualActionBar` with icons `⤒ ▲ ▼ ⤓`; migrated 2026-06-02 to the inline z-order row in the long-press popup when the bar was removed (§ 15.5). Visibility predicates now live on `BringToFrontAction` / `BringForwardAction` / `SendBackwardAction` / `SendToBackAction` in `EditorActionCatalog`.
 
 #### Multi-selection (decided, not yet implemented)
 
@@ -466,10 +466,9 @@ Multi-selection semantics **decided 2026-05-24**; see [architecture/z-order.md](
 - [ ] Refactor existing single-id `CanvasAction.BringToFront(nodeId)` etc. to use the new pure functions internally (or replace with `BringSelectionToFront(selection)` and let the single-id path pass `setOf(nodeId)`).
 - [ ] One `CommandKind.REORDER` Compound undo per multi-selection command (snapshot all nodes whose zIndex changed — selected + side-effect-affected unselected).
 - [ ] Frame membership recompute: **not** required (z-order doesn't affect geometry). Confirm in the implementation PR.
-- [ ] `ContextualActionBar` ungated for multi-selection — drop `showZOrderActions = selectedNodeIds.size == 1` constraint.
-- [ ] No-op-at-extreme acceptable for MVP; buttons stay enabled even when no movement is possible. Grey-out per-state is a follow-up (see `z-order.md § 6`).
+- [ ] Z-order popup row ungated for multi-selection — drop the `selectedNodeIds.size == 1` constraint on `BringToFrontAction` / `BringForwardAction` / `SendBackwardAction` / `SendToBackAction` in `EditorActionCatalog`. (The bar is gone; the inline z-order row in the popup is the current host — see `context-menu.md § 4`.)
+- [ ] No-op-at-extreme acceptable for MVP; popup row entries stay enabled even when no movement is possible. Grey-out per-state is a follow-up (see `z-order.md § 6`).
 - [ ] Unit tests for each pure function covering: sparse selection, contiguous selection, full selection, at-extreme no-op, single-node degenerate case, layered-frame interaction.
-- [ ] Move into the Object Properties Panel (§5c) once that exists; current `ContextualActionBar` placement is interim.
 
 ---
 
@@ -511,7 +510,7 @@ Guidelines are **editor metadata, not `CanvasNode`**. They belong to the Guideli
 
 ## 15. Context Menu
 
-Distinct from `ContextualActionBar` — the action bar is persistent on selection; the context menu is transient on long-press. Full design in [context-menu.md](architecture/context-menu.md) (committed 2026-05-18; first slice shipped 2026-05-19).
+The transient popover that appears on long-press. **Baseline rendering of the `SelectionActionSurface`** (see [editor-surfaces.md](architecture/editor-surfaces.md)) and the single host for selection-scoped actions today — the earlier persistent `ContextualActionBar` strip was removed in § 15.5 (shipped 2026-06-02). Full design in [context-menu.md](architecture/context-menu.md).
 
 ### 15.1 Edit mode
 - [x] Long-press on a node → context menu popover at touch point (`ContextMenuPopup` in `feature/canvas/view/ContextMenu.kt`, hosted in `CanvasScaffold`). Popup is non-focusable (transparent to touches outside its surface) so a new long-press on another node immediately replaces the popup; tap / drag / double-tap dismiss via `onCanvasGesture` callback.
@@ -601,7 +600,7 @@ Extends [§4.7 Media adding & editing](#47-media-adding--editing) (single-photo 
 
 ## 18. Create Frame Around Selection
 
-See [context-menu.md § 5](architecture/context-menu.md#5-create-frame-around-selection-net-new-action). Independent of the rest of the context-menu redesign — can ship on `ContextualActionBar` first.
+See [context-menu.md § 5](architecture/context-menu.md#5-create-frame-around-selection-net-new-action). Independent of the rest of the menu wiring — schedule alongside the existing per-selection-type popup contents.
 
 ### 18.1 Pure function
 - [ ] `core/math/FrameAroundSelection.kt` — pure function, not a use case class
@@ -617,8 +616,7 @@ See [context-menu.md § 5](architecture/context-menu.md#5-create-frame-around-se
 - [ ] One `Compound` undo entry per command (depends on §2)
 
 ### 18.3 UI
-- [ ] Button in `ContextualActionBar` (visible when selection size ≥ 1)
-- [ ] Migrate into context menu when §15 lands (group-actions section)
+- [ ] New catalog entry `CreateFrameAroundSelectionAction` in `feature/canvas/actions/EditorActionCatalog.kt` (category `Lifecycle`, visible when `selectedNodeIds.size >= 1`). Renders as a text row in the long-press popup.
 
 ### 18.4 Open
 - [ ] `framePadding` default — world-unit constant or derived from selection bounds?
@@ -664,7 +662,7 @@ See [data-model.md § Backgrounds](architecture/data-model.md#backgrounds-backgr
 ### 19.6 UI
 - [x] Shared `BackgroundEditor` composable in `feature/ide_ui/ui/content/BackgroundEditorContent.kt` — source radio (None / Solid / Texture / Procedural), per-source controls, opacity slider. Used by both album and frame sheets.
 - [x] Album Settings bottom sheet (TopBar palette button) — wraps `BackgroundEditor` and adds the anchor toggle (CameraLocked / WorldLocked)
-- [x] Frame Background bottom sheet (ContextualActionBar `▣` button when one Frame selected) — wraps `BackgroundEditor` with no anchor toggle (frame is its own anchor)
+- [x] Frame Background bottom sheet (popup `▣ Edit frame appearance` entry when one Frame selected — pre-bar-removal this was on `ContextualActionBar`) — wraps `BackgroundEditor` with no anchor toggle (frame is its own anchor)
 - [x] Inline HSV/RGB color picker (no external dep) — SV square + hue slider + alpha slider + hex field + preset swatches
 - [x] Tile-size slider shows unit suffix ("screen px" for CameraLocked album, "world units" for WorldLocked album and Frame) so users know what number they're adjusting
 - [ ] Texture URI persistence — `takePersistableUriPermission` works for picker-issued URIs; for filesystem URIs we still rely on `media_library` (§1.4/§1.5) to own and validate. Acceptable as interim path.
@@ -837,7 +835,7 @@ Post-MVP: additional `NodeBlendMode` values, NineSlice decoration, parametric co
 
 ### 20.6 Clip + alpha mask (replaces `cornerRadius`)
 
-See [appearance.md § 12](architecture/appearance.md#12-proposed-evolution--clip--alphamask). Status: proposal. Replaces `NodeAppearance.cornerRadius: Float` with two composable fields — `clip: ClipShape` (geometric) and `alphaMask: AlphaMask?` (continuous).
+See [appearance.md § 12](architecture/appearance.md#12-proposed-evolution--appearance-layers). Status: proposal. Replaces `NodeAppearance.cornerRadius: Float` with two composable fields — `clip: ClipShape` (geometric) and `alphaMask: AlphaMask?` (continuous).
 
 #### 20.6.1 Domain model
 - [ ] `ClipShape` sealed — `RoundedRect(cornerRadius)`, `PerCornerRoundedRect(tl, tr, br, bl)`, `Ellipse`
@@ -877,7 +875,7 @@ See [appearance.md § 12](architecture/appearance.md#12-proposed-evolution--clip
 
 ### 20.7 Overlay field unification (`MediaAppearance.overlays` + `FrameAppearance.contentOverlays` → `base.overlays`)
 
-See [appearance.md § 13](architecture/appearance.md#13-proposed-evolution--unified-overlays-on-the-base). Code work complete 2026-05-19; doc cleanup (§20.7.5) still pending. Behavior-preserving rename — legacy albums migrate transparently via `SceneGraphSerializer`.
+See [appearance.md § 13](architecture/appearance.md#13-design-history--overlay-unification). Code work complete 2026-05-19; doc cleanup (§20.7.5) still pending. Behavior-preserving rename — legacy albums migrate transparently via `SceneGraphSerializer`.
 
 #### 20.7.1 Domain model
 - [x] Move `overlays: List<OverlayStyle>` to `NodeAppearance` base abstract; default `emptyList()`
@@ -1107,7 +1105,7 @@ See [architecture/frame-chrome.md](architecture/frame-chrome.md) for the full de
 - [ ] Unit tests: empty stack → mode default; per-target specificity; tiebreaker via push order; missing mode → fallback default
 
 ### 23.4 Session state
-- [ ] `CanvasUiState.chromeOverrides: List<FrameChromeOverride>` (push-ordered, oldest first)
+- [ ] `CanvasState.editor.chromeOverrides: List<FrameChromeOverride>` (push-ordered, oldest first). Add to `EditorState` per the editor-session-state rule — chrome overrides drive canvas rendering, like `contextAnchorNodeId`.
 - [ ] `CanvasAction.PushChromeOverride` / `RemoveChromeOverride` (or producer-scoped equivalents)
 - [ ] Lifetime tracker — coroutine in `CanvasViewModel` decrements `Timed` overrides, listens to gesture-end / panel-close, prunes expired
 
@@ -1153,7 +1151,7 @@ See [architecture/frame-chrome.md](architecture/frame-chrome.md) for the full de
 
 ## 24. Editor Tools Framework
 
-> Source: `docs/architecture/editor-tools.md` (decided 2026-05-24, partially implementable). Three-axis interaction model (`EditorMode` × `ActiveTool` × Global navigation) + per-tool gesture maps for six in-scope tools. `MaskEdit` is deferred — blocked on `MaskNode` design (`to_discuss.md § 8`).
+> Source: `docs/architecture/editor-tools.md` (decided 2026-05-24, fully locked 2026-06-03 once `MaskEdit` joined the others). Three-axis interaction model (`EditorMode` × `ActiveTool` × Global navigation) + per-tool gesture maps for all seven in-scope tools. Implementation of each tool is still gated on its data-model dependency landing.
 
 Framework itself is small. Per-tool implementations are each gated on the data-model concept the tool depends on.
 
@@ -1194,9 +1192,16 @@ Foundational refactor that lands before any tool slice. See `editor-tools.md § 
   - Extend Layer 3 (`infiniteCanvasGestures`) to accept one finger when in View
   - Add a dedicated `viewModePanGestures` modifier active only in View
 
-### 24.6 TopBar tool selector
-- [ ] Placeholder for MVP. With only `Selection` actually functional, no UI needed (Eraser variant exists in the type but has no behavior yet).
-- [ ] Add when the second tool ships behavior.
+### 24.6 `ToolControlBar` — renders `ToolControlSurface`
+
+> Source: `docs/architecture/editor-surfaces.md § 4`. Horizontal bar below the global top bar; left = active tool selector, remainder = primary controls of the active tool. Same on phone and tablet — no separate phone "floating tool switcher" route. Hidden in `View` / `Present`.
+
+- [ ] **Lazy ship.** Bar does not render while only `Selection` is implemented and has no editable user-facing controls. Trigger to ship: a second functional tool (expected: Object-mode `Eraser`), or `Selection` gaining real settings.
+- [ ] First slice (with Object-mode Eraser): two-entry selector + Eraser's `Object` mode chip. Vector-partial mode adds the mode selector + brush size later.
+- [ ] Show only implemented / available tools. Do not pre-declare disabled future slots.
+- [ ] Active tool must be clearly visible whenever the bar is shown — destructive/input-changing tools (`Eraser`, `FreeDraw`, `Text`, `Shape`) must never be ambiguous.
+- [ ] Visibility gated on `editor.mode == Edit`. Hidden in View / Present.
+- [ ] `VectorEdit` / `MaskEdit` are **context-gated** in the selector — discoverability UX (shown-only-when-available vs. shown-disabled vs. entered-via-action) deferred to first-use feedback; see `editor-surfaces.md § 6`.
 
 ### 24.7 Present-mode trigger
 - [ ] View/Edit toggle stays as today. Present is reached via a separate fullscreen / play action — location TBD with the Present surface (out of scope for this section).
@@ -1211,7 +1216,7 @@ Each lands as its own slice once its data-model dependency is ready. Order per `
 - [ ] **`VectorEdit` (§ 4.5)** — depends on vector-node existence (from `FreeDraw` / `Shape`), per-tool `VectorEditState.selectedAnchors`, anchor / curve screen-space hit testing, node-type editor topbar.
 - [ ] **`Eraser` (§ 4.6) Object mode** — trivial wrapper over delete after § 24.3 lands.
 - [ ] **`Eraser` (§ 4.6) Vector partial mode** — depends on `VectorEdit`'s path-splitting math; brush-corridor cut + boundary anchor insertion.
-- [ ] **`MaskEdit` (§ 4.7)** — blocked on `MaskNode` design (`to_discuss.md § 8`).
+- [ ] **`MaskEdit` (§ 4.7)** — gesture map locked 2026-06-03. Implementation depends on `MaskNode` data-model landing per `appearance.md § 12.8`. Creation flow: selection-aware (empty → rubber-band a new mask via the topbar primitive picker; one `MaskNode` → edit mode; other selection states → disabled slot). Primitive masks (Rect / Ellipse) edit via corner/edge handles; path masks (Path / Free) edit via per-anchor + per-handle gestures mirroring `VectorEdit`. Preview is commit-only — masked siblings re-clip on gesture lift, not during drag.
 
 ### Deferred (post-MVP)
 - Raster partial erase (`editor-tools.md § 4.6` topbar post-MVP section) — depends on `MediaAppearance.alphaMask` per `appearance.md § 12` becoming load-bearing.
@@ -1298,7 +1303,7 @@ Each concrete action is a `data object` implementing `EditorAction`. Visibility 
 ### 25.4 Migration tasks — **shipped 2026-06-02**
 - [x] Add `EditorAction` sealed interface, `ActionCategory`, `EditorActionEffect`, `SelectionContext`, `EditorActionCatalog` under `feature/canvas/actions/`.
 - [x] Implement every action as a `data object` — visibility / enable / effect co-located with the action definition.
-- [x] Derive `SelectionContext` in `CanvasScaffold.kt` from `CanvasUiState` + the existing `singleSelectedFrame` / `singleSelectedMedia` / `selectedFramesInOrder` / `pinDetachEnabled` / `anyOverrideExists` projections. (Did *not* move the projections out of the composable — they live as `remember` cells next to the popup state, which is the right scope; pure-derivation extraction would only matter when popup state lifts into `EditorState`.)
+- [x] Derive `SelectionContext` in `CanvasScaffold.kt` from `CanvasState` + the existing `singleSelectedFrame` / `singleSelectedMedia` / `selectedFramesInOrder` / `pinDetachEnabled` / `anyOverrideExists` projections. (Did *not* move the projections out of the composable — they live as `remember` cells next to the popup state, which is the right scope. After § 11 `EditorState` extraction landed 2026-06-02, the read is now `canvasState.editor.selectedNodeIds` / `editorState.contextAnchorNodeId` — pure-derivation extraction would only matter when popup state lifts into `EditorState`.)
 - [x] Migrate `ContextualActionBar` to render from `EditorActionCatalog.visibleByCategory(ctx)`. (Subsequently deleted in §15.5; for one commit it consumed the catalog directly.)
 - [x] Migrate `buildEditContextMenuItems` to render from the same catalog. Per-concept popup entries (`Edit appearance`, etc.) are catalog entries that produce `EditorActionEffect.OpenMediaAppearance` / `OpenFrameBackground`; anchor-scoped items (`Remove this from selection`, `Edit this only`) stay out of the catalog because of their `keepOpenOnClick` + `onAnchorRemoved` semantics.
 - [x] Drop the stringly-typed `onAction(label)` indirection. Tap → `action.effect(ctx)?.let(runEditorActionEffect)`; a single sealed-type `when` in `CanvasScaffold.runEditorActionEffect` handles every effect kind.
@@ -1307,8 +1312,8 @@ Each concrete action is a `data object` implementing `EditorAction`. Visibility 
 - **Context-aware labels.** `label` became a function of `SelectionContext` instead of a property, so `Duplicate` / `Delete` can render as `Duplicate selection` / `Delete selection` for group selections. Most actions ignore the parameter.
 
 ### 25.5 Dependencies
-- Precondition for [§ 15.5](#155-contextualactionbar-removal--inline-rows). Land § 25 first; § 15.5 then becomes a pure UI deletion + two row composables consuming `Category.ZOrder` / `Category.Membership`.
-- Connects to (but doesn't block) § 11 `EditorState` discussion in `to_discuss.md` — `SelectionContext` is the action-dispatch view of editor state; if `EditorState` later splits out of `CanvasUiState`, `SelectionContext` derives from it instead.
+- Precondition for [§ 15.5](#155-contextualactionbar-removal--inline-rows--shipped-2026-06-02). Land § 25 first; § 15.5 then becomes a pure UI deletion + two row composables consuming `Category.ZOrder` / `Category.Membership`.
+- Connects to `EditorState` (extracted 2026-06-02 per `editor-tools.md § 7.1`) — `SelectionContext` is the action-dispatch view of editor state, reading `editor.selectedNodeIds` + `editor.contextAnchorNodeId` from the nested container.
 
 ---
 

@@ -2,9 +2,9 @@
 
 > Related: [selection](selection.md) | [navigation](navigation.md) | [appearance](appearance.md) | [TODO § 15](../todo.md#15-context-menu)
 
-**Status — committed (2026-05-18), pending implementation.** The shipped gesture rule is still the one described in [selection.md § 2](selection.md#2-gesture-mapping); the gesture-rule rewrite is scheduled as [todo.md § 15.4](../todo.md#154-gesture-rule-rewrite-lands-first-before-the-popover) and will update `selection.md § 2` when it lands. See [§ 7 — Migration from current toggle behavior](#7-migration-from-current-toggle-behavior) below for what changes.
+**Status — committed 2026-05-18, gesture-rule rewrite + popup shipped 2026-05/06.** `todo.md § 15.4` (gesture rule: `AddNodeToSelection` + open popup on UP) and `§ 15.5` (`ContextualActionBar` removal + inline rows) both shipped — see those todo entries for the exact slices. `selection.md § 2` is updated to match. See [§ 7 — Migration from current toggle behavior](#7-migration-from-current-toggle-behavior) for the historical change.
 
-The context menu is the transient popover that appears on long-press. It is distinct from `ContextualActionBar`, which is a persistent strip rendered while a selection is non-empty.
+The context menu is the transient popover that appears on long-press. It is the **baseline rendering of the `SelectionActionSurface`** (see [editor-surfaces.md § 2](editor-surfaces.md#2-logical-surfaces)) — the single host for selection-scoped actions today. The earlier persistent `ContextualActionBar` strip was removed 2026-06-02 (see § 6 below); the popup is now the only such surface.
 
 The core design choice: **long-press is a two-phase gesture**. Phase one resolves the selection (add or keep); phase two opens a popover scoped to the resulting selection plus an *anchor* — the node the user actually long-pressed. Resolving selection first means the menu always knows what its actions apply to; carrying the anchor means the menu can still offer per-object operations like "remove this from the selection" even when the selection is a group.
 
@@ -17,12 +17,12 @@ A long-press has two outcomes the user wants to express, and they tend to come t
 1. *"This is the object (or these are the objects) I want to act on."* — selection change.
 2. *"Now show me what I can do with it."* — open a menu.
 
-Today's gesture rule conflates step 1 with toggling and never reaches step 2. The current behavior:
+The earlier gesture rule conflated step 1 with toggling and never reached step 2. The shipped behavior unifies both:
 
-> **For a node long-press**, selection resolves on the press (topmost hit is added) and the menu opens on lift. Movement after the press is consumed by the long-press path; the menu still opens on lift.
+> **For a node long-press**, selection resolves on the press (topmost hit is added via `AddNodeToSelection`) and the menu opens on lift. Movement after the press is consumed by the long-press path; the menu still opens on lift.
 > **For an empty-space long-press**, lifting opens the empty-space menu. If the user instead drags past touch-slop after the press, a rect-select starts from the current position and no menu opens (drag = "I want to keep selecting," lift = "show me my options").
 
-This unifies a single discoverable affordance ("long-press = menu") with the existing selection semantics. The removed-by-this-proposal behavior — long-press on an already-selected node toggles it out of the selection — moves into the menu as an explicit "Remove from selection" item.
+The removed behavior — long-press on an already-selected node toggles it out of the selection — moved into the menu as the explicit "Remove from selection" anchor-scoped item (§ 4.4).
 
 ---
 
@@ -241,7 +241,7 @@ The natural workflow this enables:
 Add photos → arrange them → select them → "Create frame around selection"
 ```
 
-This should land independent of the long-press redesign — it can hang off `ContextualActionBar` initially and migrate into the context menu when the rest lands.
+Independent of the rest of the menu wiring — schedule alongside the existing single-frame popup contents. (The earlier "ship on `ContextualActionBar` first, migrate into the menu later" plan is obsolete since the bar was removed 2026-06-02 — see § 6.)
 
 ---
 
@@ -310,7 +310,7 @@ When this lands, update:
 
 1. **Phase 1 only — selection rule change.** Replace `ToggleNodeSelection` dispatch in Layer 2 with `AddNodeToSelection` on long-press; keep menu deferred. Verifies the gesture rewrite in isolation. Update `selection.md § 2`.
 2. **Empty popover stub.** On UP after long-press, open a `Popover` at touch point. No items yet — confirms positioning and dismissal.
-3. **Selection-scoped items.** Wire single-media / single-frame / group menus. `Create frame around selection` can ship here or via `ContextualActionBar` first (see § 5).
+3. **Selection-scoped items.** Wire single-media / single-frame / group menus. `Create frame around selection` ships as a popup entry per § 5.
 4. **Anchor-scoped items.** Add `Remove this from selection` / `Edit this only`. This is the moment the proposal becomes strictly better than the old toggle.
 5. **Overlap picker inline in the popup.** Closes the [selection.md § 6](selection.md#6-open-issues) open issue. The separate `OverlapPickerDialog` is removed; stacked-long-press now opens the context menu with a checkbox row per overlapping node above the menu items. The anchor row is highlighted (semibold + tinted background); toggling a row dispatches `ToggleNodeSelection` and updates the anchor.
 6. **Empty-space menu.** Add Photo / Add Frame / Add Text / Paste / Add Guideline.

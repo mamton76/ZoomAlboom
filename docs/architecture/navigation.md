@@ -30,10 +30,12 @@ MainActivity
     └── canvas/{albumId} -> CanvasScaffold
             ├── CanvasTopBar (album name, HUD, back, frame list, panel config)
             ├── FAB [+] -> AddContentBottomSheet
-            ├── CanvasScreen        // infinite canvas, gestures, node rendering
-            ├── IdeOverlayScreen    // IDE panel overlay (opt-in, hidden by default)
-            └── ContextualActionBar // stub, shown on node selection
+            ├── CanvasScreen           // infinite canvas, gestures, node rendering
+            ├── IdeOverlayScreen       // IDE panel overlay (opt-in, hidden by default)
+            └── ContextMenuPopup       // transient on long-press; selection-scoped actions
 ```
+
+`ContextMenuPopup` is the baseline rendering of the `SelectionActionSurface` (see [editor-surfaces.md](editor-surfaces.md)). The earlier persistent `ContextualActionBar` strip was removed 2026-06-02; the popup is now the single surface for selection-scoped actions.
 
 ## Album List (projects_home/)
 
@@ -46,7 +48,7 @@ MainActivity
 
 1. **`CanvasScreen`** — infinite canvas with gesture handling, node rendering, viewport culling.
 2. **`IdeOverlayScreen`** — IDE-style panel overlay (docked + floating panels, hidden by default).
-3. **`ContextualActionBar`** — stub shown at bottom when a node is selected.
+3. **`ContextMenuPopup`** — transient popup on long-press; hosts selection-scoped actions via `EditorActionCatalog` (see [context-menu.md](context-menu.md)).
 4. **`AddContentBottomSheet`** — slides up from FAB tap; content type picker (Frame + media types: Photo, Video, Audio, Text, Sticker, Vector; future: AnimatedPhoto).
 5. **`FrameListBottomSheet`** — accessible from TopBar ☰; lists frames with delete.
 6. **`PanelConfigDialog`** — accessible from TopBar ⚙; toggle IDE panels on/off.
@@ -59,11 +61,11 @@ MainActivity
 
 | Mode | Tap on a node | Long-press / rect-select | Pan / pinch / rotate | Selection chrome |
 |------|---------------|--------------------------|----------------------|------------------|
-| `Edit` (default) | Replace selection (`SelectNode`) | Toggle / overlap picker / rect-select | Active | Visible |
+| `Edit` (default) | Replace selection (`SelectNode`) | Add-to-selection + open context menu (with inline overlap picker for stacked nodes); long-press-then-drag → rect-select | Active | Visible |
 | `View` | Animated focus on the node (`FocusNode`) | Swallowed (no-op) | Active | Hidden (selection always empty) |
 | `Presentation` | Same as `View`. Reserved for read-only published-album surfaces (post-MVP — no dedicated UI yet) | Swallowed | Active | Hidden |
 
-Entering any non-Edit mode clears `selectedNodeIds`, `groupSelectionTransform`, and `selectionRect`. Selection-keyed chrome (`SelectionOverlay`, handles, `ContextualActionBar`) auto-hides as a result — no per-mode branching needed in those composables.
+Entering any non-Edit mode clears `selectedNodeIds`, `groupSelectionTransform`, and `selectionRect`. Selection-keyed chrome (`SelectionOverlay`, handles) auto-hides as a result — no per-mode branching needed in those composables. The long-press popup is independently suppressed in non-Edit modes via `state.editor.mode != Edit` in `CanvasScreen`.
 
 The toggle lives in `CanvasTopBar`; it currently cycles **Edit ↔ View** only. `Presentation` is reachable programmatically via `CanvasAction.SetMode(Presentation)` and is reserved for the future Present surface.
 

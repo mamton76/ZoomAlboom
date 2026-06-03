@@ -328,7 +328,7 @@ Still pending (each has its own todo entry under [§ 20](../todo.md#20-appearanc
 
 > **Status — proposal, decided 2026-06-02; implementation pending.** Replaces multiple base-level fields. Migration is a one-shot read-time lift in `SceneGraphSerializer`; no runtime feature flag.
 
-This section captures the full set of decisions made 2026-06-02 graduating `to_discuss.md § 7` (appearance layer expansion) and the inline-mask portion of `to_discuss.md § 8` (masks). The remaining open piece is `MaskNode` editing UX + the `MaskEdit` gesture map (still in `to_discuss.md § 8`).
+This section captures the full set of decisions made 2026-06-02 graduating `to_discuss.md § 7` (appearance layer expansion) and `to_discuss.md § 8` (masks): the inline-mask portion landed 2026-06-02; the remaining `MaskNode` editing UX + `MaskEdit` gesture map were resolved 2026-06-03 and live in [editor-tools.md § 4.7](editor-tools.md#47-maskedit) + § 12.10 below.
 
 ### 12.1 Why split into layers
 
@@ -583,7 +583,7 @@ The order below cheapens migration risk by landing the data-model reshape first,
 9. **Border path-aware rendering.** Strokes the `NodeShape` outline instead of a hardcoded rounded rect.
 10. **Per-side / gradient / dash on `BorderStyle`.** Independent feature; can ship any time after step 1.
 11. **LOD dropout.** Skip the offscreen layer (feather, alpha mask, inner effects) below `Full` tier.
-12. **`MaskNode`** — see § 12.10. Post-MVP; gesture map blocked on the deeper editing UX design.
+12. **`MaskNode`** — see § 12.10. Post-MVP. Gesture map and editing UX locked 2026-06-03 in [editor-tools.md § 4.7](editor-tools.md#47-maskedit); ships once the `MaskNode` data type lands.
 
 ### 12.9 Overlay anchoring
 
@@ -626,11 +626,22 @@ Inline `alphaMask` (above) covers single-node masking. `MaskNode` is a **separat
 - A mask needs to be animated independently of the content it clips.
 - A mask groups several nodes that should be masked together.
 
-**Constraints decided 2026-06-02 (the gesture map and editor UX are still open in `to_discuss.md § 8`):**
+**Constraints (decided 2026-06-02, completed 2026-06-03):**
 
 - **Z-order scope.** A `MaskNode` masks its **siblings within the same frame / group** only — not "everything below in global z-order." Keeps the mental model local; avoids cross-frame masking surprises.
 - **Frame relationship.** A `MaskNode` **can live inside a frame** and **can be pinned** to one. It is **not** a navigation target — that role is reserved for `CanvasNode.Frame`.
-- **Z-order semantics within siblings.** A `MaskNode` clips siblings *below* it in z-order (or, equivalently, siblings in the same group depending on the chosen rule — TBD in the editor-UX slice).
+- **Z-order semantics within siblings.** A `MaskNode` at z=N clips siblings at z<N only. Siblings at z≥N are unaffected. Locked 2026-06-03 over the "all in group" alternative — placement-plus-z-order *is* the binding.
+- **Binding.** Implicit. Every sibling within the same frame/group **below** the `MaskNode` in z is masked. The user does not pick per-sibling binding — there is no UI affordance for it.
+- **Multi-mask composition.** When more than one `MaskNode` covers the same sibling, their shapes **union** (a sibling pixel is visible if **any** above-it `MaskNode` reveals it). No subtractive masks in MVP; adding a `MaskNode` never hides more content. Locked 2026-06-03.
+
+**Editor surface — `MaskEdit` tool.** `MaskNode` has a dedicated tool that owns *both* creation and editing (it cannot delegate creation to `Shape` or `FreeDraw` the way `VectorEdit` delegates to them, because `MaskNode` is its own data type). Entry is selection-aware:
+- empty selection → creation mode (rubber-band a new `MaskNode`);
+- exactly one `MaskNode` → edit mode;
+- otherwise → disabled toolbar slot.
+
+Geometry options match `Shape`'s primitive picker: `Rect`, `Ellipse`, `Path` (anchored bezier), `Free` (raw freehand, simplified on lift). Primitive masks edit via corner / edge handles; path masks edit via per-anchor / per-handle gestures mirroring `VectorEdit`. Preview is **commit-only**: masked siblings re-clip on gesture lift, not continuously during drag.
+
+Full gesture map: [editor-tools.md § 4.7](editor-tools.md#47-maskedit).
 
 Inline mask vs. `MaskNode` cohabit:
 - `appearance.alphaMask` — cheap, per-node, edit-where-you-paint.

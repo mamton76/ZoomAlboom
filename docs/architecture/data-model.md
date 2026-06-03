@@ -117,7 +117,7 @@ Album-level declaration of the intended screen shape for viewing/presenting (asp
 
 ### FrameChrome (`FrameChromeStyle`, `FrameChromeDefaults`, `FrameChromeOverride`)
 
-The editor/viewer hint layer drawn on the *edge* of each frame — separate from `FrameAppearance` (album content). Closed `FrameChromeStyle` enum: `Hidden`, `CornersOnly`, `SubtleOutline`, `SoftGlow`, `LabelTab`, `FullOutline`, `DebugBounds`. Per-mode defaults live in `AlbumPresentationProfile.frameChrome: FrameChromeDefaults` (serialized). Transient `FrameChromeOverride(target, style, lifetime, reason?)` instances live in `CanvasUiState.chromeOverrides` and are **never serialized**. A pure resolver picks one style per frame using most-specific-target-wins (MVP targets: `ALL`, `SELECTED`, `CURRENT`) with most-recent-pushed as tiebreaker. Mode default is the implicit lowest-priority entry.
+The editor/viewer hint layer drawn on the *edge* of each frame — separate from `FrameAppearance` (album content). Closed `FrameChromeStyle` enum: `Hidden`, `CornersOnly`, `SubtleOutline`, `SoftGlow`, `LabelTab`, `FullOutline`, `DebugBounds`. Per-mode defaults live in `AlbumPresentationProfile.frameChrome: FrameChromeDefaults` (serialized). Transient `FrameChromeOverride(target, style, lifetime, reason?)` instances live in `CanvasState.editor.chromeOverrides` and are **never serialized**. A pure resolver picks one style per frame using most-specific-target-wins (MVP targets: `ALL`, `SELECTED`, `CURRENT`) with most-recent-pushed as tiebreaker. Mode default is the implicit lowest-priority entry.
 
 **→ Vocabulary, resolver rules, render layer, producers, open questions:** [frame-chrome.md](frame-chrome.md)
 

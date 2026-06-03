@@ -17,11 +17,12 @@ Source-of-truth docs:
 - `docs/architecture/rendering.md`
 - `docs/architecture/coordinates.md` — coordinate spaces, camera math, selection invariants
 - `docs/architecture/selection.md` — selection state, gesture mapping, gesture stack (today's behavior)
-- `docs/architecture/editor-tools.md` — three-axis interaction model (`EditorMode` × `ActiveTool` × Global navigation), per-tool gesture maps, popup-derivation rule. Future-state authority on gesture allocation; selection.md will graduate to match as the migration lands.
+- `docs/architecture/editor-tools.md` — three-axis interaction model (`EditorMode` × `ActiveTool` × Global navigation), per-tool gesture maps (all 7 locked), popup-derivation rule, `EditorState` shape. Future-state authority on gesture allocation; selection.md will graduate to match as the migration lands.
+- `docs/architecture/editor-surfaces.md` — logical editor surfaces (`GlobalChromeSurface`, `ToolControlSurface`, `SelectionActionSurface`, `ConceptEditorSurface`, `AddContentSurface`). One baseline layout for phone + tablet; future panels are alternative placements.
 - `docs/architecture/navigation.md`
-- `docs/architecture/appearance.md` — shared `NodeAppearance` model, `MediaAppearance` vs `FrameAppearance`, `OverlayStyle`
+- `docs/architecture/appearance.md` — shared `NodeAppearance` model, `MediaAppearance` vs `FrameAppearance`, `OverlayStyle`, `MaskNode` constraints.
 - `docs/architecture/media-appearance.md` — media-specific appearance surface (crop, color, frame decoration, presets, derivatives)
-- `docs/architecture/context-menu.md` — long-press context menu proposal; `(selection, anchor)` model. Status: proposal, not implemented.
+- `docs/architecture/context-menu.md` — long-press context menu; `(selection, anchor)` model; baseline rendering of the `SelectionActionSurface`. Status: § 15.4 gesture rewrite + § 15.5 bar removal shipped; remaining slices in `todo.md § 15`.
 - `docs/architecture/presentation-profile.md` — album/frame presentation form factor
 - `docs/architecture/decisions.md` (if present)
 - `docs/architecture/conventions.md`
@@ -32,7 +33,7 @@ Working memory / discovered implementation notes:
 
 Pending discussions (scratch, not source-of-truth — may overlap with or contradict architecture docs until reconciled):
 
-- `docs/to_discuss.md` — open design questions: tablet vs. phone editor split, mask as a first-class concept distinct from crop, multi-selection appearance editing.
+- `docs/to_discuss.md` — open design questions. As of 2026-06-03, one topic remains live: § 5 Album storage & cloud sync. Recent graduations (§ 8 MaskNode UX, § 9 editor surfaces, § 11 EditorState) live in the "Recently graduated" trailer with pointers to their architecture docs.
 
 ## How to work in this repo
 

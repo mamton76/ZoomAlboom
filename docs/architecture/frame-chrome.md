@@ -88,7 +88,7 @@ Nested under `AlbumPresentationProfile` rather than a sibling `AlbumFrameChromeP
 
 ### 3.2 Session-level overrides
 
-Held in `CanvasUiState` (or equivalent session state), **never serialized**. Multiple overrides may be active concurrently.
+Held in `CanvasState.editor` (the editor-session state object — see [editor-tools.md § 7.1](editor-tools.md#71-state)), **never serialized**. Multiple overrides may be active concurrently. Like `contextAnchorNodeId`, chrome overrides drive canvas rendering, so they belong in editor-session state rather than `CanvasScaffold` UI-surface state.
 
 ```kotlin
 data class FrameChromeOverride(
@@ -243,11 +243,11 @@ These are deliberately deferred from MVP. None block the implementation order in
 Depends on [`AlbumPresentationProfile`](presentation-profile.md) being threaded through `SceneGraph` (already done).
 
 1. **Add `FrameChromeStyle` enum + `FrameChromeDefaults` data class** in `domain/model/`. Wire `frameChrome` field into `AlbumPresentationProfile`; default empty map → falls back to `defaultPerMode`. Serializer migration: missing key is fine, no rewrite. Add round-trip test.
-2. **Add `FrameChromeOverride` + targets + lifetimes** in a new `domain/model/FrameChromeOverride.kt`. Held in `CanvasUiState` as `List<FrameChromeOverride>` (push-ordered).
+2. **Add `FrameChromeOverride` + targets + lifetimes** in a new `domain/model/FrameChromeOverride.kt`. Held in `CanvasState.editor` as `chromeOverrides: List<FrameChromeOverride>` (push-ordered).
 3. **Add the resolver** as a pure function in `domain/usecase/FrameChromeResolverUseCase.kt`. Unit tests cover: empty stack → mode default; `ALL` vs `SELECTED` vs `CURRENT` specificity; tiebreaker via push order; missing mode → fallback default.
 4. **Render layer.** New composable `FrameChromeOverlay` in `feature/canvas/view/`. Draws per-frame chrome above `LayeredFrameOverlay` and above `SelectionOverlay`, inside the camera `graphicsLayer`. Strokes scale with `1/camera.scale`. Implements all seven `FrameChromeStyle` cases.
 5. **Migrate the `Frame.color` outline** out of `FullFrameRenderer` / `SimplifiedFrameRenderer` into `FrameChromeOverlay`. Confirm Edit mode is behavior-preserving via screenshot diff (every existing frame should still render its colored outline).
-6. **Lifetime tracker** — a small coroutine in `CanvasViewModel` that decrements `Timed` overrides, listens to gesture-end / panel-close events, and prunes expired overrides from `CanvasUiState`. Producers push; tracker removes.
+6. **Lifetime tracker** — a small coroutine in `CanvasViewModel` that decrements `Timed` overrides, listens to gesture-end / panel-close events, and prunes expired overrides from `CanvasState.editor.chromeOverrides`. Producers push; tracker removes.
 7. **Album-level settings UI.** Extend whatever album-settings surface owns `AlbumPresentationProfile` to expose `frameChrome.perMode` as a per-mode picker. Defer if the album-settings surface itself hasn't shipped — chrome works without UI, just at the defaults.
 8. **First producer:** "Show frame bounds" debug toggle (TopBar HUD menu) → pushes `(ALL, DebugBounds, UntilCancelled)`. Trivial; validates the full path end-to-end.
 9. Additional producers (frame-list highlights, FocusNode-completion glow) land as their host UIs ship.

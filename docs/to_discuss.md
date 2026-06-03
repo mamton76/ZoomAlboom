@@ -41,43 +41,11 @@ The current decision is intentionally conservative:
 
 ---
 
-## 8. `MaskNode` editing UX + `MaskEdit` gesture map
-
-The data-model and constraints for `MaskNode` were decided 2026-06-02 and captured in `docs/architecture/appearance.md § 12.10`. Recap of the constraints:
-
-- A `MaskNode` masks **siblings within the same frame / group** only (not "everything below in global z-order").
-- A `MaskNode` **can live inside a frame** and **can be pinned**; it is **not** a navigation target.
-- Inline `appearance.alphaMask` and `MaskNode` cohabit (per-node convenience vs. shared/group-scoped).
-
-What remains open (blocks the `MaskEdit` tool gesture map in `editor-tools.md`):
-
-- **Editing UX.** `MaskNode` almost certainly needs its own tool / popup. Shape editing (path/anchor edits), shared-mask binding (which sibling nodes are affected), preview while editing. Connects to § 10 (context-menu grouping: "Mask" category).
-- **Z-order tiebreaker within siblings.** "Masks siblings *below* it in z-order" is one rule; "masks all siblings in the same group" is another. Decide once we know the typical authoring flow.
-- **Multi-mask composition.** When two `MaskNode`s overlap on the same sibling set, do their masks compose (intersection?), or does the higher-z mask override? Defer until a real use case emerges.
-
----
-
-## 9. Tool-based UI layout (left toolbar / topbar / right panel)
-
-Long-term editor UI direction, inspired by Figma / Illustrator / Procreate Dreams / Concepts / Infinite Painter:
-
-```
-Left toolbar  = tools (Selection, Free Draw, Shape, Vector Edit, Eraser, Text, …)
-Topbar        = active tool settings
-Right panel   = contextual properties of selection
-```
-
-Expandable / collapsible groups likely needed.
-
-Open questions:
-
-- **Tablet vs. phone.** Tablet/phone editor split was decided 2026-05-19 (one codebase, popup-first for MVP, tablet docked panels deferred — `todo.md § 5d`). Does this section *become* the deferred tablet-panel design, or stays separate?
-- **Phone story.** Phones can't host left/right panels. Does the left toolbar collapse to a floating tool switcher, and the right panel collapse to the popup? If so, the popup design from `context-menu.md` is already doing the right-panel job.
-- **Tool grouping.** Procreate-style nested drawers (e.g. "drawing tools" expands to free draw / pencil / marker / watercolor) vs. a flat single-level toolbar?
-
 ---
 
 > Recently graduated out of this file:
+> - **§ 9 Tool-based UI layout** **fully decided 2026-06-03** → `docs/architecture/editor-surfaces.md` (new source of truth). Replaces the fixed-zone framing (`left toolbar = tools / topbar = settings / right panel = properties`) with **five logical editor surfaces** that have responsibilities, not placements: `GlobalChromeSurface`, `ToolControlSurface`, `SelectionActionSurface`, `ConceptEditorSurface`, `AddContentSurface`. One baseline layout for both phone and tablet — no separate tablet editor architecture. Future wide-screen / configurable workspaces are alternative *placements* of the same logical contributions, not a second editor. Specific resolutions: (Q1) merges with `todo.md § 5d` — § 5d demoted from "tablet MVP architecture" to "deferred future placement for `ConceptEditorSurface`." (Q2) phone uses a horizontal `ToolControlBar` (active-tool selector + primary controls on one line) instead of a floating switcher; bar is lazy — doesn't render until a second functional tool or real `Selection` settings exist; expected trigger is Object-mode `Eraser`. (Q3) `EditorTool` stays flat — brush variants / shape primitives / eraser modes are settings, not separate tools; `VectorEdit` and `MaskEdit` are context-gated, exact discoverability UX deferred. Three contribution categories deliberately separated: `EditorActionCatalog` (discrete actions, already shipped) ≠ `ToolControl` (retained editable values, future surface-agnostic model — boundary recorded, abstraction deferred until Eraser ships) ≠ concept-editor content composables (reusable across surfaces). Documentation-only change; no code in this slice. Implementation gates: `ToolControlBar` deferred to second-tool slice.
+> - **§ 8 `MaskNode` editing UX + `MaskEdit` gesture map** **fully decided 2026-06-03** → `docs/architecture/editor-tools.md § 4.7` (full gesture map) + `docs/architecture/appearance.md § 12.10` (locked constraints). Resolutions: (1) **Own UX**: dedicated `MaskEdit` tool that owns *both* creation and editing — selection-aware entry (empty → creation mode rubber-band; one `MaskNode` → edit mode; other → disabled slot). Geometry picker mirrors `Shape`: `Rect` / `Ellipse` / `Path` (anchored bezier) / `Free` (raw freehand, simplified on lift). Primitives edit via corner / edge handles; path masks edit per-anchor / per-handle like `VectorEdit`. (2) **Binding**: implicit — every sibling within the same frame/group below the `MaskNode` in z-order is masked; no per-sibling selection UI; placement + z-order *is* the binding. (3) **Z-order tiebreaker**: a `MaskNode` at z=N clips siblings at z<N only (locked over the "all in group" alternative). (4) **Multi-mask composition**: union — a sibling pixel is visible wherever any above-it `MaskNode` reveals it; no subtractive masks in MVP. (5) **Preview policy**: commit-only — masked siblings re-clip on gesture lift, not continuously during drag (the `MaskNode`'s own outline does update live). Stay-in-tool persistence; long-press always opens the global popup; two-finger always navigates. Topbar = primitive picker + aspect-ratio toggle (primitives only); feather + future mask-source options (image / gradient / procedural per § 12.2) live on the popup. Implementation depends on `MaskNode` data-model landing per `appearance.md § 12.8`.
 > - **§ 11 `EditorState` container** **decided 2026-06-02; extraction shipped same day** → `docs/architecture/editor-tools.md § 7.1`. The earlier flat grab-bag proposal (`activeTool` + `selectedObjects` + `activeAppearanceEditor` + per-tool transient states + snapping + transform handles, all siblings) is **superseded**. The decision split editor concerns three ways:
 >   1. **Editor-session state** → flat `EditorState` under `CanvasState.editor`. Owns `mode`, `activeTool`, `selectedNodeIds`, `selectionRect`, `groupSelectionTransform`, `frameEditOptions`, `contextAnchorNodeId`. Read by canvas + overlays + action catalog.
 >   2. **Tool settings + transient interaction state** → added on demand when a tool actually requires them, via dedicated `toolSettings` / `activeInteraction` fields on `EditorState`. Do NOT encode them inside `EditorTool` variants (which conflates identity, settings, and active-gesture state). Do NOT predeclare speculative state for tools that don't yet exist.

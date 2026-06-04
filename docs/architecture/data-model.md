@@ -262,6 +262,12 @@ data class AlbumMeta(
 
 Pairs metadata with its scene graph: `AlbumMeta` + `List<CanvasNode>`.
 
+### RemoteBinding *(planned — cloud sync)*
+
+Cloud connection is modeled as an optional, per-provider `RemoteBinding` keyed by stable `AlbumId` — **not** as a `storageMode: Local | GoogleDrive` flag on `Album`. Absence of a binding = local-only album. The binding owns the last-synced revision id, pending-sync queue marker, and provider-specific location fields (e.g. Drive `folderId`). New Room table (`remote_bindings`) when the slice ships. Conflict detection uses **revision lineage** (`headRevisionId` + `parentRevisionId` on the scene-graph root, minted at each `FinishInteraction` commit), never timestamps.
+
+**→ Decision, open-flow gating, conflict policy, encryption constraint, deferred questions:** [cloud-sync.md](cloud-sync.md). Implementation slices (deferred): [todo.md § 26](../todo.md#26-cloud-sync-deferred).
+
 ## Persistence
 
 ### Room (SQLite)

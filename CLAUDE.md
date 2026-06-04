@@ -24,6 +24,7 @@ Source-of-truth docs:
 - `docs/architecture/media-appearance.md` — media-specific appearance surface (crop, color, frame decoration, presets, derivatives)
 - `docs/architecture/context-menu.md` — long-press context menu; `(selection, anchor)` model; baseline rendering of the `SelectionActionSurface`. Status: § 15.4 gesture rewrite + § 15.5 bar removal shipped; remaining slices in `todo.md § 15`.
 - `docs/architecture/presentation-profile.md` — album/frame presentation form factor
+- `docs/architecture/cloud-sync.md` — local-first cloud sync (per-album `RemoteBinding`, revision lineage, conflict-copy policy, encryption-readiness). Decided 2026-06-03, implementation deferred — slices in `todo.md § 26`.
 - `docs/architecture/decisions.md` (if present)
 - `docs/architecture/conventions.md`
 
@@ -33,7 +34,7 @@ Working memory / discovered implementation notes:
 
 Pending discussions (scratch, not source-of-truth — may overlap with or contradict architecture docs until reconciled):
 
-- `docs/to_discuss.md` — open design questions. As of 2026-06-03, one topic remains live: § 5 Album storage & cloud sync. Recent graduations (§ 8 MaskNode UX, § 9 editor surfaces, § 11 EditorState) live in the "Recently graduated" trailer with pointers to their architecture docs.
+- `docs/to_discuss.md` — open design questions. As of 2026-06-03, **no open topics**: § 5 Album storage & cloud sync graduated to `docs/architecture/cloud-sync.md`. Recent graduations (§ 5 cloud sync, § 8 MaskNode UX, § 9 editor surfaces, § 11 EditorState) live in the "Recently graduated" trailer with pointers to their architecture docs.
 
 ## How to work in this repo
 

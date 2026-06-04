@@ -1317,6 +1317,59 @@ Each concrete action is a `data object` implementing `EditorAction`. Visibility 
 
 ---
 
+## 26. Cloud Sync (deferred)
+
+> Source of truth: [cloud-sync.md](architecture/cloud-sync.md). **Decided 2026-06-03, implementation deferred.** Not part of the current `EditorState` / `ActiveTool` / `Eraser` work — do not start any slice below until the active editor-tool track lands.
+
+Local-first automatic snapshot sync with conflict-safe editing. Slices are ordered foundation → first connected provider; none are scheduled.
+
+### 26.1 Revision lineage on local albums (foundation)
+- [ ] Add `headRevisionId: RevisionId` + `parentRevisionId: RevisionId?` to the album / scene-graph root (final field placement decided when the slice ships).
+- [ ] Mint a new `RevisionId` at every stable local commit boundary (existing `FinishInteraction` snapshot — see [undo-redo.md](architecture/undo-redo.md)).
+- [ ] Persist `(headRevisionId, parentRevisionId)` in the JSON scene-graph root; on first read of a legacy album, seed `headRevisionId` and `parentRevisionId = null`.
+- [ ] No remote code in this slice — lineage stands alone as the local versioning boundary.
+
+### 26.2 `RemoteBinding` model (foundation, provider-agnostic)
+- [ ] Sealed `RemoteBinding` keyed by stable `AlbumId`; zero-or-one per album.
+- [ ] Owns: `lastSyncedRevisionId: RevisionId?`, pending-sync queue marker, provider-specific fields.
+- [ ] New Room table (e.g. `remote_bindings`) — separate from `albums`; absence = local-only.
+- [ ] **Explicitly do not** add `storageMode: Local | GoogleDrive` to `Album`. Cloud-connection is the *presence* of a binding, not a field on the album.
+
+### 26.3 Sync engine (provider-agnostic core)
+- [ ] Define stable-commit → sync trigger wiring on top of `FinishInteraction`.
+- [ ] Debounce + coalesce successive commits into a single upload of the latest local head; at most one in-flight sync per album.
+- [ ] Retry on network return (collapse older queued attempts).
+- [ ] Manual `Sync now` action — same path as automatic.
+- [ ] Conflict-detection logic over revision lineage (local-ahead / remote-ahead / divergence); no timestamp inputs.
+- [ ] Conflict resolution: preserve local branch as a separate conflict-copy album (`<name> — local conflict copy`), restore primary from remote head. No auto-merge, no overwrite.
+
+### 26.4 Open-flow gating (UI)
+- [ ] Open synced album → View mode immediately; remote head-revision check in background.
+- [ ] Edit mode disabled until the check resolves; banner explains the gate.
+- [ ] Offline-open path: `Edit offline anyway` action with explicit warning that this may later produce a conflict copy.
+- [ ] Hook into existing Edit/View split (§12) — additive, not a replacement.
+
+### 26.5 Google Drive provider (first concrete `RemoteBinding`)
+- [ ] OAuth / account flow + token storage (out of scope of model decisions in [cloud-sync.md](architecture/cloud-sync.md)).
+- [ ] `RemoteBinding.GoogleDrive(folderId, accountId, lastSyncedRevisionId)` variant + repository impl.
+- [ ] Per-album = per-Drive-folder mapping (implementation detail of this variant).
+- [ ] Atomic head-pointer update on the remote (compare-and-swap semantics).
+- [ ] Album-settings UI: connect / disconnect / `Sync now` / surface last-sync revision.
+
+### 26.6 Encryption-readiness check (no key UX in this slice)
+- [ ] Verify the sync engine treats album payloads as opaque blobs — no provider-side merge, no provider-side thumbnailing, no plaintext indexing.
+- [ ] Document the server-side capability ceiling (store/fetch blob, list revisions, atomic CAS on head) so future zero-knowledge encryption can land additively.
+- [ ] Actual key management UX and encryption-at-rest of remote blobs are explicitly out of scope here.
+
+### 26.7 Explicit non-goals (do not pull into any slice above)
+- [ ] No real-time collaboration / live presence / live cursors.
+- [ ] No automatic three-way merge over the scene graph.
+- [ ] No CRDT-backed scene graph (tracked separately in §18 Future).
+- [ ] No cross-album linking through the cloud.
+- [ ] No web viewer / share-via-link / server-rendered thumbnails (incompatible with the encryption-readiness constraint).
+
+---
+
 ## 18. Future (Post-MVP)
 
 See [future-ideas.md](product/future-ideas.md) for the full list.
@@ -1326,4 +1379,4 @@ See [future-ideas.md](product/future-ideas.md) for the full list.
 - [ ] Present mode (read-only viewing for shared albums)
 - [ ] Audio / Live Photos support
 - [ ] Crop — media masking via bounding box editing
-- [ ] Cloud sync — CRDT or Protobuf for real-time collaboration
+- [ ] Cloud sync — CRDT or Protobuf for real-time collaboration (separate from § 26's local-first snapshot sync)

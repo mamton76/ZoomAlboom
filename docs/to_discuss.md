@@ -4,46 +4,12 @@
 
 ---
 
-## 5 Album Storage & Cloud Sync — Discussion Notes / Future Direction
-
-### Context of the discussion
-
-This note comes from a product/architecture discussion about future album storage options.
-
-The current project already has local album persistence: albums are edited and saved locally. While discussing the album settings/properties UI, we noticed that storage location and sync behavior probably belong there too.
-
-The key product question was:
-
-> Should an album be only local, or should the user be able to connect it to Google Drive later?
-
-The conclusion was not “implement Google Drive sync now”. The conclusion was:
-
-> Keep local editing as the default and source of immediate interaction, but design the album model/settings so optional cloud sync can be added safely later.
-
-We also discussed that cloud sync should not mean “the album lives only in the cloud”. A safer mental model is:
-
-> The app edits a local working copy. Google Drive is an optional backup/sync target.
-
-This led to several related design questions:
-
-- where the user chooses storage mode;
-- whether each album should correspond to a separate Google Drive folder;
-- how sync should happen: manually, on open/close, or automatically;
-- how to detect conflicts if local and cloud versions both changed;
-- whether timestamps are enough, given device clocks may be wrong;
-- whether we need revision IDs, device IDs, or a change journal;
-- how to avoid silent data loss during overwrite;
-- whether automatic merge is needed now or can be deferred.
-
-The current decision is intentionally conservative:
-
-> For the first version, do not implement complex automatic merge or real-time sync. Prefer explicit, safe sync with conflict detection, user choice, and backups before overwriting anything.
-
----
+> No open topics. All previously listed discussions have graduated to `docs/architecture/` — see the trailer below.
 
 ---
 
 > Recently graduated out of this file:
+> - **§ 5 Album storage & cloud sync** **fully decided 2026-06-03** → `docs/architecture/cloud-sync.md` (new source of truth). Resolution: **local-first automatic snapshot sync with conflict-safe editing** — not manual-only backup, not real-time collaboration. Specific resolutions: (Open flow) cloud-connected albums open the local copy immediately in View mode but keep Edit mode disabled until the remote head-revision check completes; offline editing requires an explicit `Edit offline anyway` confirmation. (Conflict policy) divergence preserves the local branch as a separate conflict-copy album (`"Italy Trip" / "Italy Trip — local conflict copy"`) and restores the primary album from the remote head — never overwrite, never auto-merge. (Sync triggers) open-time revision check + post-commit automatic sync at the `FinishInteraction` boundary + retry on network return + manual `Sync now`; debounced/coalesced, background lifecycle is best-effort only. (Model direction) **rejected `storageMode = Local | GoogleDrive`** on `Album`; cloud connection is a separate optional `RemoteBinding` (sealed, per-provider) keyed by stable `AlbumId`. Conflict detection uses **revision lineage**, not timestamps — `(headRevisionId, parentRevisionId)` on each stable commit, with the local `FinishInteraction` boundary as the commit boundary. Per-album = per-Drive-folder. (Future encryption) architecture must remain compatible with end-to-end / zero-knowledge encryption: remote stores opaque blobs only; sync MUST NOT depend on the provider inspecting or merging plaintext — which is exactly why conflict-copy preservation is chosen over auto-merge. Deferred to the implementation slice (not blocking this decision): OAuth flow, concrete `RemoteBinding` field set, debounce window, conflict-copy naming beyond the suffix example, quota/chunking, multi-device advisory hints, encryption key management UX. Documentation-only change; no Google Drive code lands in the current `EditorState` / `ActiveTool` / `Eraser` work. Implementation slices listed (deferred) in `todo.md § 26`.
 > - **§ 9 Tool-based UI layout** **fully decided 2026-06-03** → `docs/architecture/editor-surfaces.md` (new source of truth). Replaces the fixed-zone framing (`left toolbar = tools / topbar = settings / right panel = properties`) with **five logical editor surfaces** that have responsibilities, not placements: `GlobalChromeSurface`, `ToolControlSurface`, `SelectionActionSurface`, `ConceptEditorSurface`, `AddContentSurface`. One baseline layout for both phone and tablet — no separate tablet editor architecture. Future wide-screen / configurable workspaces are alternative *placements* of the same logical contributions, not a second editor. Specific resolutions: (Q1) merges with `todo.md § 5d` — § 5d demoted from "tablet MVP architecture" to "deferred future placement for `ConceptEditorSurface`." (Q2) phone uses a horizontal `ToolControlBar` (active-tool selector + primary controls on one line) instead of a floating switcher; bar is lazy — doesn't render until a second functional tool or real `Selection` settings exist; expected trigger is Object-mode `Eraser`. (Q3) `EditorTool` stays flat — brush variants / shape primitives / eraser modes are settings, not separate tools; `VectorEdit` and `MaskEdit` are context-gated, exact discoverability UX deferred. Three contribution categories deliberately separated: `EditorActionCatalog` (discrete actions, already shipped) ≠ `ToolControl` (retained editable values, future surface-agnostic model — boundary recorded, abstraction deferred until Eraser ships) ≠ concept-editor content composables (reusable across surfaces). Documentation-only change; no code in this slice. Implementation gates: `ToolControlBar` deferred to second-tool slice.
 > - **§ 8 `MaskNode` editing UX + `MaskEdit` gesture map** **fully decided 2026-06-03** → `docs/architecture/editor-tools.md § 4.7` (full gesture map) + `docs/architecture/appearance.md § 12.10` (locked constraints). Resolutions: (1) **Own UX**: dedicated `MaskEdit` tool that owns *both* creation and editing — selection-aware entry (empty → creation mode rubber-band; one `MaskNode` → edit mode; other → disabled slot). Geometry picker mirrors `Shape`: `Rect` / `Ellipse` / `Path` (anchored bezier) / `Free` (raw freehand, simplified on lift). Primitives edit via corner / edge handles; path masks edit per-anchor / per-handle like `VectorEdit`. (2) **Binding**: implicit — every sibling within the same frame/group below the `MaskNode` in z-order is masked; no per-sibling selection UI; placement + z-order *is* the binding. (3) **Z-order tiebreaker**: a `MaskNode` at z=N clips siblings at z<N only (locked over the "all in group" alternative). (4) **Multi-mask composition**: union — a sibling pixel is visible wherever any above-it `MaskNode` reveals it; no subtractive masks in MVP. (5) **Preview policy**: commit-only — masked siblings re-clip on gesture lift, not continuously during drag (the `MaskNode`'s own outline does update live). Stay-in-tool persistence; long-press always opens the global popup; two-finger always navigates. Topbar = primitive picker + aspect-ratio toggle (primitives only); feather + future mask-source options (image / gradient / procedural per § 12.2) live on the popup. Implementation depends on `MaskNode` data-model landing per `appearance.md § 12.8`.
 > - **§ 11 `EditorState` container** **decided 2026-06-02; extraction shipped same day** → `docs/architecture/editor-tools.md § 7.1`. The earlier flat grab-bag proposal (`activeTool` + `selectedObjects` + `activeAppearanceEditor` + per-tool transient states + snapping + transform handles, all siblings) is **superseded**. The decision split editor concerns three ways:

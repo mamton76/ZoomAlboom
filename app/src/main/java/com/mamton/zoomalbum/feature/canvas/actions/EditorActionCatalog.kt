@@ -5,24 +5,119 @@ import com.mamton.zoomalbum.feature.ide_ui.ui.FrameMembershipIntent
 
 // ── Edit ─────────────────────────────────────────────────────────────────────
 
-data object EditMediaAppearanceAction : EditorAction {
-    override val id = "edit.media.appearance"
-    override val icon = "✦"
+// ── Per-concept appearance editors (appearance.md § 14.1) ────────────────────
+// Universal concepts (opacity / corner radius / border / shadow / overlays) are
+// fields on `NodeAppearance` base, so they show whenever the selection is
+// homogeneous (all-frame or all-media). Mixed-type selections hide the universal
+// concepts in MVP — per `to_discuss.md` the cross-type dispatch (two snapshot
+// commands in one user action) would need Compound undo, which we deliberately
+// deferred. Frame-only / media-only concepts gate on `isAllFrames` /
+// `isAllMedia` per § 14.3.
+
+private fun labelWithCount(base: String, n: Int): String =
+    if (n >= 2) "$base ($n)" else base
+
+private val SelectionContext.homogeneousCount: Int
+    get() = selectedFramesInOrder.size.coerceAtLeast(selectedMediaInOrder.size)
+
+data object EditOpacityAction : EditorAction {
+    override val id = "edit.opacity"
+    override val icon = "◐"
     override val category = ActionCategory.Edit
-    override fun label(ctx: SelectionContext) = "Edit appearance"
-    override fun isVisible(ctx: SelectionContext) = ctx.singleSelectedMedia != null
-    override fun effect(ctx: SelectionContext): EditorActionEffect =
-        EditorActionEffect.OpenMediaAppearance
+    override fun label(ctx: SelectionContext) =
+        labelWithCount("Edit opacity", ctx.homogeneousCount)
+    override fun isVisible(ctx: SelectionContext) = ctx.isAllFrames || ctx.isAllMedia
+    override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenOpacityEditor
 }
 
-data object EditFrameAppearanceAction : EditorAction {
-    override val id = "edit.frame.appearance"
-    override val icon = "▣"
+data object EditCornerRadiusAction : EditorAction {
+    override val id = "edit.cornerRadius"
+    override val icon = "▢"
     override val category = ActionCategory.Edit
-    override fun label(ctx: SelectionContext) = "Edit frame appearance"
-    override fun isVisible(ctx: SelectionContext) = ctx.singleSelectedFrame != null
-    override fun effect(ctx: SelectionContext): EditorActionEffect =
-        EditorActionEffect.OpenFrameBackground
+    override fun label(ctx: SelectionContext) =
+        labelWithCount("Edit corner radius", ctx.homogeneousCount)
+    override fun isVisible(ctx: SelectionContext) = ctx.isAllFrames || ctx.isAllMedia
+    override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenCornerRadiusEditor
+}
+
+data object EditBorderAction : EditorAction {
+    override val id = "edit.border"
+    override val icon = "▭"
+    override val category = ActionCategory.Edit
+    override fun label(ctx: SelectionContext) =
+        labelWithCount("Edit border", ctx.homogeneousCount)
+    override fun isVisible(ctx: SelectionContext) = ctx.isAllFrames || ctx.isAllMedia
+    override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenBorderEditor
+}
+
+data object EditShadowAction : EditorAction {
+    override val id = "edit.shadow"
+    override val icon = "◯"
+    override val category = ActionCategory.Edit
+    override fun label(ctx: SelectionContext) =
+        labelWithCount("Edit shadow", ctx.homogeneousCount)
+    override fun isVisible(ctx: SelectionContext) = ctx.isAllFrames || ctx.isAllMedia
+    override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenShadowEditor
+}
+
+data object EditOverlaysAction : EditorAction {
+    override val id = "edit.overlays"
+    override val icon = "▦"
+    override val category = ActionCategory.Edit
+    override fun label(ctx: SelectionContext) =
+        labelWithCount("Edit overlays", ctx.homogeneousCount)
+    override fun isVisible(ctx: SelectionContext) = ctx.isAllFrames || ctx.isAllMedia
+    override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenOverlaysEditor
+}
+
+data object EditBackgroundAction : EditorAction {
+    override val id = "edit.background"
+    override val icon = "█"
+    override val category = ActionCategory.Edit
+    override fun label(ctx: SelectionContext) =
+        labelWithCount("Edit background", ctx.selectedFramesInOrder.size)
+    override fun isVisible(ctx: SelectionContext) = ctx.isAllFrames
+    override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenBackgroundEditor
+}
+
+data object EditCropAction : EditorAction {
+    override val id = "edit.crop"
+    override val icon = "✂"
+    override val category = ActionCategory.Edit
+    override fun label(ctx: SelectionContext) =
+        labelWithCount("Edit crop", ctx.selectedMediaInOrder.size)
+    override fun isVisible(ctx: SelectionContext) = ctx.isAllMedia
+    override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenCropEditor
+}
+
+data object EditColorAdjustmentsAction : EditorAction {
+    override val id = "edit.colorAdjustments"
+    override val icon = "✺"
+    override val category = ActionCategory.Edit
+    override fun label(ctx: SelectionContext) =
+        labelWithCount("Edit color adjustments", ctx.selectedMediaInOrder.size)
+    override fun isVisible(ctx: SelectionContext) = ctx.isAllMedia
+    override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenColorAdjustmentsEditor
+}
+
+data object EditFrameDecorationAction : EditorAction {
+    override val id = "edit.frameDecoration"
+    override val icon = "❖"
+    override val category = ActionCategory.Edit
+    override fun label(ctx: SelectionContext) =
+        labelWithCount("Edit frame decoration", ctx.selectedMediaInOrder.size)
+    override fun isVisible(ctx: SelectionContext) = ctx.isAllMedia
+    override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenFrameDecorationEditor
+}
+
+data object EditCaptionAction : EditorAction {
+    override val id = "edit.caption"
+    override val icon = "T"
+    override val category = ActionCategory.Edit
+    override fun label(ctx: SelectionContext) =
+        labelWithCount("Edit caption", ctx.selectedMediaInOrder.size)
+    override fun isVisible(ctx: SelectionContext) = ctx.isAllMedia
+    override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenCaptionEditor
 }
 
 // ── Navigation ───────────────────────────────────────────────────────────────
@@ -171,8 +266,16 @@ object EditorActionCatalog {
 
     /** Catalog-declaration order. Consumers may filter or re-group. */
     val all: List<EditorAction> = listOf(
-        EditMediaAppearanceAction,
-        EditFrameAppearanceAction,
+        EditOpacityAction,
+        EditCornerRadiusAction,
+        EditBorderAction,
+        EditShadowAction,
+        EditOverlaysAction,
+        EditBackgroundAction,
+        EditCropAction,
+        EditColorAdjustmentsAction,
+        EditFrameDecorationAction,
+        EditCaptionAction,
         NavigateToFrameAction,
         BringToFrontAction,
         BringForwardAction,

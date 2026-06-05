@@ -11,10 +11,8 @@ enum class CommandKind {
     /**
      * Frame appearance mutation — covers the entire `FrameAppearance` (background,
      * overlays, border, shadow, titleStyle, opacity, cornerRadius).
-     * Wire name kept as `SET_FRAME_BACKGROUND` so existing on-disk history files
-     * keep deserializing; semantics broadened with the appearance system.
      */
-    SET_FRAME_BACKGROUND,
+    SET_FRAME_APPEARANCE,
     /** Media appearance mutation — the entire `MediaAppearance`. */
     SET_MEDIA_APPEARANCE,
     SET_FRAME_OVERRIDES, // Pin / Detach — mutates Frame.overrides only (no transform change).
@@ -37,7 +35,7 @@ data class AlbumBackgroundChange(
  * - `before != null && after == null` → pure delete (REMOVE, DELETE).
  *   `beforeIndices` is populated to restore deleted nodes at their original positions.
  * - `before != null && after != null` → node mutation such as MOVE, RESIZE, ROTATE,
- *   SET_FRAME_BACKGROUND, SET_MEDIA_APPEARANCE, SET_FRAME_OVERRIDES, REORDER.
+ *   SET_FRAME_APPEARANCE, SET_MEDIA_APPEARANCE, SET_FRAME_OVERRIDES, REORDER.
  *   Same length, same ids, paired positionally.
  * - `albumBackgroundChange != null` → album-level mutation (SET_ALBUM_BACKGROUND). May
  *   coexist with node sides being null.

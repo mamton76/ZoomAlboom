@@ -24,13 +24,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mamton.zoomalbum.domain.model.BackgroundData
+import com.mamton.zoomalbum.domain.model.BorderStyle
 import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
+import com.mamton.zoomalbum.domain.model.CaptionStyle
+import com.mamton.zoomalbum.domain.model.CropSettings
+import com.mamton.zoomalbum.domain.model.FrameAppearance
+import com.mamton.zoomalbum.domain.model.MediaAppearance
+import com.mamton.zoomalbum.domain.model.MediaColorAdjustments
+import com.mamton.zoomalbum.domain.model.MediaFrameDecoration
+import com.mamton.zoomalbum.domain.model.OverlayStyle
 import com.mamton.zoomalbum.domain.model.RenderDetail
+import com.mamton.zoomalbum.domain.model.ShadowStyle
 import com.mamton.zoomalbum.feature.canvas.actions.EditorAction
 import com.mamton.zoomalbum.feature.canvas.actions.EditorActionEffect
 import com.mamton.zoomalbum.feature.canvas.actions.SelectionContext
+import com.mamton.zoomalbum.feature.canvas.editor.AppearanceTarget
 import com.mamton.zoomalbum.feature.canvas.view.CanvasScreen
 import com.mamton.zoomalbum.feature.canvas.view.ContextMenuPopup
 import com.mamton.zoomalbum.feature.canvas.view.ContextMenuRequest
@@ -38,10 +49,19 @@ import com.mamton.zoomalbum.feature.canvas.view.SelectionDebugPanel
 import com.mamton.zoomalbum.feature.canvas.view.buildEditContextMenuItems
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
+import com.mamton.zoomalbum.feature.ide_ui.ui.content.BackgroundEditor
+import com.mamton.zoomalbum.feature.ide_ui.ui.content.BorderStyleEditor
+import com.mamton.zoomalbum.feature.ide_ui.ui.content.CaptionStyleEditor
+import com.mamton.zoomalbum.feature.ide_ui.ui.content.ColorAdjustmentsEditor
+import com.mamton.zoomalbum.feature.ide_ui.ui.content.CropEditor
+import com.mamton.zoomalbum.feature.ide_ui.ui.content.MediaFrameDecorationEditor
+import com.mamton.zoomalbum.feature.ide_ui.ui.content.MixedAwareCornerRadiusSlider
+import com.mamton.zoomalbum.feature.ide_ui.ui.content.MixedAwareOpacitySlider
+import com.mamton.zoomalbum.feature.ide_ui.ui.content.OverlayListEditor
+import com.mamton.zoomalbum.feature.ide_ui.ui.content.ShadowStyleEditor
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.AddContentBottomSheet
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.AlbumSettingsBottomSheet
-import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.FrameAppearanceBottomSheet
-import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.MediaAppearanceBottomSheet
+import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.ConceptEditorSheet
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.FrameListBottomSheet
 import com.mamton.zoomalbum.feature.ide_ui.viewmodel.IdeViewModel
 
@@ -70,8 +90,21 @@ fun CanvasScaffold(
     var showFrameList by remember { mutableStateOf(false) }
     var showPanelConfig by remember { mutableStateOf(false) }
     var showAlbumSettings by remember { mutableStateOf(false) }
-    var frameBgEditing by remember { mutableStateOf<CanvasNode.Frame?>(null) }
-    var mediaApprEditing by remember { mutableStateOf<CanvasNode.Media?>(null) }
+    // Per-concept editor state (`appearance.md § 14.1`). Universal concepts
+    // (opacity / cornerRadius / border / shadow / overlays) populate an
+    // `AppearanceTarget` discriminator since they apply to either all-frames or
+    // all-media selections. Type-specific concepts hold a typed node list
+    // directly.
+    var opacityEditing by remember { mutableStateOf<AppearanceTarget>(AppearanceTarget.None) }
+    var cornerRadiusEditing by remember { mutableStateOf<AppearanceTarget>(AppearanceTarget.None) }
+    var borderEditing by remember { mutableStateOf<AppearanceTarget>(AppearanceTarget.None) }
+    var shadowEditing by remember { mutableStateOf<AppearanceTarget>(AppearanceTarget.None) }
+    var overlaysEditing by remember { mutableStateOf<AppearanceTarget>(AppearanceTarget.None) }
+    var backgroundEditing by remember { mutableStateOf<List<CanvasNode.Frame>>(emptyList()) }
+    var cropEditing by remember { mutableStateOf<List<CanvasNode.Media>>(emptyList()) }
+    var colorAdjustmentsEditing by remember { mutableStateOf<List<CanvasNode.Media>>(emptyList()) }
+    var frameDecorationEditing by remember { mutableStateOf<List<CanvasNode.Media>>(emptyList()) }
+    var captionEditing by remember { mutableStateOf<List<CanvasNode.Media>>(emptyList()) }
     var contextMenuRequest by remember { mutableStateOf<ContextMenuRequest?>(null) }
 
     // Top-level chrome controls (top bar, FAB) treat their tap as an outside-tap
@@ -132,6 +165,15 @@ fun CanvasScaffold(
         val byId = canvasState.visibleNodes.associate { it.node.id to it.node }
         selectedNodeIds.toList().mapNotNull { byId[it] as? CanvasNode.Frame }
     }
+    // Media in selection, in selection (insertion) order. Feeds the appearance
+    // editor's multi-node target list and `SelectionContext.isAllMedia` for
+    // future § 14.3 gating.
+    val selectedMediaInOrder: List<CanvasNode.Media> = remember(
+        selectedNodeIds, canvasState.visibleNodes,
+    ) {
+        val byId = canvasState.visibleNodes.associate { it.node.id to it.node }
+        selectedNodeIds.toList().mapNotNull { byId[it] as? CanvasNode.Media }
+    }
     // Pin / Detach are available when the selection contains at least one frame and
     // at least one other node (member candidate). The target frame is either the
     // single selected frame (direct dispatch) or chosen via FrameTargetPickerDialog.
@@ -176,9 +218,20 @@ fun CanvasScaffold(
         singleSelectedFrame = singleSelectedFrame,
         singleSelectedMedia = singleSelectedMedia,
         selectedFramesInOrder = selectedFramesInOrder,
+        selectedMediaInOrder = selectedMediaInOrder,
         pinDetachEnabled = pinDetachEnabled,
         anyOverrideExists = anyOverrideExists,
     )
+
+    // Helper: turn the current selection into an [AppearanceTarget] for a
+    // universal-concept editor. Returns `None` if the selection is not
+    // homogeneous (universal-concept visibility predicates would have hidden
+    // the action; this is just defence-in-depth at dispatch time).
+    fun universalTargetForSelection(): AppearanceTarget = when {
+        selectionContext.isAllFrames -> AppearanceTarget.Frames(selectedFramesInOrder)
+        selectionContext.isAllMedia -> AppearanceTarget.Media(selectedMediaInOrder)
+        else -> AppearanceTarget.None
+    }
 
     // Central effect dispatcher: every `EditorAction` tap (bar or popup) routes
     // here. New effect kinds become a single `when` branch addition.
@@ -186,10 +239,57 @@ fun CanvasScaffold(
         when (effect) {
             is EditorActionEffect.Dispatch -> canvasViewModel.onAction(effect.action)
             is EditorActionEffect.FrameMembership -> dispatchFrameMembership(effect.intent)
-            EditorActionEffect.OpenMediaAppearance -> singleSelectedMedia?.let { mediaApprEditing = it }
-            EditorActionEffect.OpenFrameBackground -> singleSelectedFrame?.let { frameBgEditing = it }
             EditorActionEffect.OpenAddSheet -> showAddSheet = true
+
+            // Per-concept editors (`appearance.md § 14.1`).
+            EditorActionEffect.OpenOpacityEditor -> opacityEditing = universalTargetForSelection()
+            EditorActionEffect.OpenCornerRadiusEditor -> cornerRadiusEditing = universalTargetForSelection()
+            EditorActionEffect.OpenBorderEditor -> borderEditing = universalTargetForSelection()
+            EditorActionEffect.OpenShadowEditor -> shadowEditing = universalTargetForSelection()
+            EditorActionEffect.OpenOverlaysEditor -> overlaysEditing = universalTargetForSelection()
+            EditorActionEffect.OpenBackgroundEditor -> {
+                if (selectionContext.isAllFrames) backgroundEditing = selectedFramesInOrder
+            }
+            EditorActionEffect.OpenCropEditor -> {
+                if (selectionContext.isAllMedia) cropEditing = selectedMediaInOrder
+            }
+            EditorActionEffect.OpenColorAdjustmentsEditor -> {
+                if (selectionContext.isAllMedia) colorAdjustmentsEditing = selectedMediaInOrder
+            }
+            EditorActionEffect.OpenFrameDecorationEditor -> {
+                if (selectionContext.isAllMedia) frameDecorationEditing = selectedMediaInOrder
+            }
+            EditorActionEffect.OpenCaptionEditor -> {
+                if (selectionContext.isAllMedia) captionEditing = selectedMediaInOrder
+            }
         }
+    }
+
+    // Per-concept dispatch helpers. Each merges a per-id concept value into
+    // the existing per-node appearance and fires the typed multi-id action.
+    // The VM's existing collapse-defaults-to-null rule applies post-dispatch.
+    fun <T> dispatchFrameConcept(
+        nodes: List<CanvasNode.Frame>,
+        perId: Map<String, T>,
+        merge: (existing: FrameAppearance?, value: T) -> FrameAppearance,
+    ) {
+        val byId = nodes.associateBy { it.id }
+        val appearancesById: Map<String, FrameAppearance?> = perId.mapValues { (id, value) ->
+            merge(byId[id]?.appearance, value)
+        }
+        canvasViewModel.onAction(CanvasAction.SetFrameAppearance(appearancesById = appearancesById))
+    }
+
+    fun <T> dispatchMediaConcept(
+        nodes: List<CanvasNode.Media>,
+        perId: Map<String, T>,
+        merge: (existing: MediaAppearance?, value: T) -> MediaAppearance,
+    ) {
+        val byId = nodes.associateBy { it.id }
+        val appearancesById: Map<String, MediaAppearance?> = perId.mapValues { (id, value) ->
+            merge(byId[id]?.appearance, value)
+        }
+        canvasViewModel.onAction(CanvasAction.SetMediaAppearance(appearancesById = appearancesById))
     }
 
     Scaffold(
@@ -368,36 +468,250 @@ fun CanvasScaffold(
         )
     }
 
-    frameBgEditing?.let { frame ->
-        FrameAppearanceBottomSheet(
-            initial = frame.appearance,
-            onApply = { nextAppearance ->
-                canvasViewModel.onAction(
-                    CanvasAction.SetFrameAppearance(
-                        nodeId = frame.id,
-                        appearance = nextAppearance,
-                    ),
-                )
-                frameBgEditing = null
+    // ── Per-concept appearance editors (appearance.md § 14.1) ────────────────
+    // Universal concepts (opacity, cornerRadius, border, shadow, overlays)
+    // branch on AppearanceTarget; the popup body is identical between frame and
+    // media variants — only the dispatch helper differs. Type-specific concepts
+    // (background = frame-only; crop / color adjustments / frame decoration /
+    // caption = media-only) use their typed editing list directly.
+
+    when (val t = opacityEditing) {
+        is AppearanceTarget.Frames -> ConceptEditorSheet(
+            title = "Opacity",
+            initialById = t.nodes.associate { it.id to (it.appearance?.opacity ?: 1f) },
+            onApply = { perId ->
+                dispatchFrameConcept(t.nodes, perId) { existing, v ->
+                    (existing ?: FrameAppearance()).copy(opacity = v)
+                }
+                opacityEditing = AppearanceTarget.None
             },
-            onDismiss = { frameBgEditing = null },
-        )
+            onDismiss = { opacityEditing = AppearanceTarget.None },
+        ) { mixed, _, onChange -> MixedAwareOpacitySlider(mixed, onChange) }
+        is AppearanceTarget.Media -> ConceptEditorSheet(
+            title = "Opacity",
+            initialById = t.nodes.associate { it.id to (it.appearance?.opacity ?: 1f) },
+            onApply = { perId ->
+                dispatchMediaConcept(t.nodes, perId) { existing, v ->
+                    (existing ?: MediaAppearance()).copy(opacity = v)
+                }
+                opacityEditing = AppearanceTarget.None
+            },
+            onDismiss = { opacityEditing = AppearanceTarget.None },
+        ) { mixed, _, onChange -> MixedAwareOpacitySlider(mixed, onChange) }
+        AppearanceTarget.None -> Unit
     }
 
-    mediaApprEditing?.let { media ->
-        MediaAppearanceBottomSheet(
-            initial = media.appearance,
-            onApply = { nextAppearance ->
-                canvasViewModel.onAction(
-                    CanvasAction.SetMediaAppearance(
-                        nodeId = media.id,
-                        appearance = nextAppearance,
-                    ),
-                )
-                mediaApprEditing = null
+    when (val t = cornerRadiusEditing) {
+        is AppearanceTarget.Frames -> ConceptEditorSheet(
+            title = "Corner radius",
+            initialById = t.nodes.associate { it.id to (it.appearance?.cornerRadius ?: 0f) },
+            onApply = { perId ->
+                dispatchFrameConcept(t.nodes, perId) { existing, v ->
+                    (existing ?: FrameAppearance()).copy(cornerRadius = v)
+                }
+                cornerRadiusEditing = AppearanceTarget.None
             },
-            onDismiss = { mediaApprEditing = null },
-        )
+            onDismiss = { cornerRadiusEditing = AppearanceTarget.None },
+        ) { mixed, _, onChange -> MixedAwareCornerRadiusSlider(mixed, onChange) }
+        is AppearanceTarget.Media -> ConceptEditorSheet(
+            title = "Corner radius",
+            initialById = t.nodes.associate { it.id to (it.appearance?.cornerRadius ?: 0f) },
+            onApply = { perId ->
+                dispatchMediaConcept(t.nodes, perId) { existing, v ->
+                    (existing ?: MediaAppearance()).copy(cornerRadius = v)
+                }
+                cornerRadiusEditing = AppearanceTarget.None
+            },
+            onDismiss = { cornerRadiusEditing = AppearanceTarget.None },
+        ) { mixed, _, onChange -> MixedAwareCornerRadiusSlider(mixed, onChange) }
+        AppearanceTarget.None -> Unit
+    }
+
+    when (val t = borderEditing) {
+        is AppearanceTarget.Frames -> ConceptEditorSheet<BorderStyle?>(
+            title = "Border",
+            initialById = t.nodes.associate { it.id to it.appearance?.border },
+            onApply = { perId ->
+                dispatchFrameConcept(t.nodes, perId) { existing, v ->
+                    (existing ?: FrameAppearance()).copy(border = v)
+                }
+                borderEditing = AppearanceTarget.None
+            },
+            onDismiss = { borderEditing = AppearanceTarget.None },
+        ) { _, firstDraft, onChange ->
+            BorderStyleEditor(initial = firstDraft, onChange = onChange)
+        }
+        is AppearanceTarget.Media -> ConceptEditorSheet<BorderStyle?>(
+            title = "Border",
+            initialById = t.nodes.associate { it.id to it.appearance?.border },
+            onApply = { perId ->
+                dispatchMediaConcept(t.nodes, perId) { existing, v ->
+                    (existing ?: MediaAppearance()).copy(border = v)
+                }
+                borderEditing = AppearanceTarget.None
+            },
+            onDismiss = { borderEditing = AppearanceTarget.None },
+        ) { _, firstDraft, onChange ->
+            BorderStyleEditor(initial = firstDraft, onChange = onChange)
+        }
+        AppearanceTarget.None -> Unit
+    }
+
+    when (val t = shadowEditing) {
+        is AppearanceTarget.Frames -> ConceptEditorSheet<ShadowStyle?>(
+            title = "Shadow",
+            initialById = t.nodes.associate { it.id to it.appearance?.shadow },
+            onApply = { perId ->
+                dispatchFrameConcept(t.nodes, perId) { existing, v ->
+                    (existing ?: FrameAppearance()).copy(shadow = v)
+                }
+                shadowEditing = AppearanceTarget.None
+            },
+            onDismiss = { shadowEditing = AppearanceTarget.None },
+        ) { _, firstDraft, onChange ->
+            ShadowStyleEditor(initial = firstDraft, onChange = onChange)
+        }
+        is AppearanceTarget.Media -> ConceptEditorSheet<ShadowStyle?>(
+            title = "Shadow",
+            initialById = t.nodes.associate { it.id to it.appearance?.shadow },
+            onApply = { perId ->
+                dispatchMediaConcept(t.nodes, perId) { existing, v ->
+                    (existing ?: MediaAppearance()).copy(shadow = v)
+                }
+                shadowEditing = AppearanceTarget.None
+            },
+            onDismiss = { shadowEditing = AppearanceTarget.None },
+        ) { _, firstDraft, onChange ->
+            ShadowStyleEditor(initial = firstDraft, onChange = onChange)
+        }
+        AppearanceTarget.None -> Unit
+    }
+
+    when (val t = overlaysEditing) {
+        is AppearanceTarget.Frames -> ConceptEditorSheet<List<OverlayStyle>>(
+            title = "Overlays",
+            initialById = t.nodes.associate { it.id to (it.appearance?.overlays ?: emptyList()) },
+            onApply = { perId ->
+                dispatchFrameConcept(t.nodes, perId) { existing, v ->
+                    (existing ?: FrameAppearance()).copy(overlays = v)
+                }
+                overlaysEditing = AppearanceTarget.None
+            },
+            onDismiss = { overlaysEditing = AppearanceTarget.None },
+        ) { _, firstDraft, onChange ->
+            OverlayListEditor(
+                overlays = firstDraft,
+                onChange = onChange,
+                tileSizeUnitLabel = "world units",
+            )
+        }
+        is AppearanceTarget.Media -> ConceptEditorSheet<List<OverlayStyle>>(
+            title = "Overlays",
+            initialById = t.nodes.associate { it.id to (it.appearance?.overlays ?: emptyList()) },
+            onApply = { perId ->
+                dispatchMediaConcept(t.nodes, perId) { existing, v ->
+                    (existing ?: MediaAppearance()).copy(overlays = v)
+                }
+                overlaysEditing = AppearanceTarget.None
+            },
+            onDismiss = { overlaysEditing = AppearanceTarget.None },
+        ) { _, firstDraft, onChange ->
+            OverlayListEditor(
+                overlays = firstDraft,
+                onChange = onChange,
+                tileSizeUnitLabel = "world units",
+            )
+        }
+        AppearanceTarget.None -> Unit
+    }
+
+    if (backgroundEditing.isNotEmpty()) {
+        val nodes = backgroundEditing
+        ConceptEditorSheet<BackgroundData?>(
+            title = "Background",
+            initialById = nodes.associate { it.id to it.appearance?.background },
+            onApply = { perId ->
+                dispatchFrameConcept(nodes, perId) { existing, v ->
+                    (existing ?: FrameAppearance()).copy(background = v)
+                }
+                backgroundEditing = emptyList()
+            },
+            onDismiss = { backgroundEditing = emptyList() },
+        ) { _, firstDraft, onChange ->
+            BackgroundEditor(
+                initial = firstDraft,
+                onValueChange = onChange,
+                tileSizeUnitLabel = "world units",
+            )
+        }
+    }
+
+    if (cropEditing.isNotEmpty()) {
+        val nodes = cropEditing
+        ConceptEditorSheet<CropSettings>(
+            title = "Crop",
+            initialById = nodes.associate { it.id to (it.appearance?.crop ?: CropSettings()) },
+            onApply = { perId ->
+                dispatchMediaConcept(nodes, perId) { existing, v ->
+                    (existing ?: MediaAppearance()).copy(crop = v)
+                }
+                cropEditing = emptyList()
+            },
+            onDismiss = { cropEditing = emptyList() },
+        ) { _, firstDraft, onChange ->
+            CropEditor(initial = firstDraft, onChange = onChange)
+        }
+    }
+
+    if (colorAdjustmentsEditing.isNotEmpty()) {
+        val nodes = colorAdjustmentsEditing
+        ConceptEditorSheet<MediaColorAdjustments?>(
+            title = "Color adjustments",
+            initialById = nodes.associate { it.id to it.appearance?.colorAdjustments },
+            onApply = { perId ->
+                dispatchMediaConcept(nodes, perId) { existing, v ->
+                    (existing ?: MediaAppearance()).copy(colorAdjustments = v)
+                }
+                colorAdjustmentsEditing = emptyList()
+            },
+            onDismiss = { colorAdjustmentsEditing = emptyList() },
+        ) { _, firstDraft, onChange ->
+            ColorAdjustmentsEditor(initial = firstDraft, onChange = onChange)
+        }
+    }
+
+    if (frameDecorationEditing.isNotEmpty()) {
+        val nodes = frameDecorationEditing
+        ConceptEditorSheet<MediaFrameDecoration?>(
+            title = "Frame decoration",
+            initialById = nodes.associate { it.id to it.appearance?.frameDecoration },
+            onApply = { perId ->
+                dispatchMediaConcept(nodes, perId) { existing, v ->
+                    (existing ?: MediaAppearance()).copy(frameDecoration = v)
+                }
+                frameDecorationEditing = emptyList()
+            },
+            onDismiss = { frameDecorationEditing = emptyList() },
+        ) { _, firstDraft, onChange ->
+            MediaFrameDecorationEditor(initial = firstDraft, onChange = onChange)
+        }
+    }
+
+    if (captionEditing.isNotEmpty()) {
+        val nodes = captionEditing
+        ConceptEditorSheet<CaptionStyle?>(
+            title = "Caption",
+            initialById = nodes.associate { it.id to it.appearance?.caption },
+            onApply = { perId ->
+                dispatchMediaConcept(nodes, perId) { existing, v ->
+                    (existing ?: MediaAppearance()).copy(caption = v)
+                }
+                captionEditing = emptyList()
+            },
+            onDismiss = { captionEditing = emptyList() },
+        ) { _, firstDraft, onChange ->
+            CaptionStyleEditor(initial = firstDraft, onChange = onChange)
+        }
     }
 
     // Panel config dialog

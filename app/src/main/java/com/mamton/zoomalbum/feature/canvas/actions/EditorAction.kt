@@ -57,9 +57,22 @@ enum class ActionCategory {
 sealed interface EditorActionEffect {
     data class Dispatch(val action: CanvasAction) : EditorActionEffect
     data class FrameMembership(val intent: FrameMembershipIntent) : EditorActionEffect
-    data object OpenMediaAppearance : EditorActionEffect
-    data object OpenFrameBackground : EditorActionEffect
     data object OpenAddSheet : EditorActionEffect
+
+    // Per-concept appearance editors (`docs/architecture/appearance.md § 14.1`).
+    // Each opens a single-concept bottom sheet that edits one field of
+    // FrameAppearance/MediaAppearance across the entire selection — the rest
+    // of each node's appearance is preserved per-node.
+    data object OpenOpacityEditor : EditorActionEffect
+    data object OpenCornerRadiusEditor : EditorActionEffect
+    data object OpenBorderEditor : EditorActionEffect
+    data object OpenShadowEditor : EditorActionEffect
+    data object OpenOverlaysEditor : EditorActionEffect
+    data object OpenBackgroundEditor : EditorActionEffect
+    data object OpenCropEditor : EditorActionEffect
+    data object OpenColorAdjustmentsEditor : EditorActionEffect
+    data object OpenFrameDecorationEditor : EditorActionEffect
+    data object OpenCaptionEditor : EditorActionEffect
 }
 
 /**
@@ -74,6 +87,25 @@ data class SelectionContext(
     val singleSelectedFrame: CanvasNode.Frame? = null,
     val singleSelectedMedia: CanvasNode.Media? = null,
     val selectedFramesInOrder: List<CanvasNode.Frame> = emptyList(),
+    val selectedMediaInOrder: List<CanvasNode.Media> = emptyList(),
     val pinDetachEnabled: Boolean = false,
     val anyOverrideExists: Boolean = false,
-)
+) {
+    /**
+     * `true` when the selection is non-empty and every selected node is a Frame.
+     * Gates type-applicable popups per `docs/architecture/appearance.md § 14.3`
+     * (Background / Title style / Content effect).
+     */
+    val isAllFrames: Boolean
+        get() = selectedNodeIds.isNotEmpty() &&
+            selectedFramesInOrder.size == selectedNodeIds.size
+
+    /**
+     * `true` when the selection is non-empty and every selected node is a Media.
+     * Gates type-applicable popups per `docs/architecture/appearance.md § 14.3`
+     * (Crop / Color adjustments / Frame decoration / Caption).
+     */
+    val isAllMedia: Boolean
+        get() = selectedNodeIds.isNotEmpty() &&
+            selectedMediaInOrder.size == selectedNodeIds.size
+}

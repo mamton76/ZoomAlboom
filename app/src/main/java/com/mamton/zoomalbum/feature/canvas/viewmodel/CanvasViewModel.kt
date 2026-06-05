@@ -199,22 +199,28 @@ sealed interface CanvasAction : Intent {
     // Backgrounds (§19)
     data class SetAlbumBackground(val background: AlbumBackground?) : CanvasAction
 
-    // Appearance (§20). Replaces a frame's entire FrameAppearance — covers
-    // background, overlays, border, shadow, etc.
-    // `null` resets the frame to default rendering.
+    // Appearance (§20). Replaces the entire FrameAppearance on each node in
+    // [appearancesById] — keys identify target frames, values are the new
+    // appearance (`null` resets to default rendering). The map shape carries
+    // per-node values so a multi-edit session can fan out different appearances
+    // in one snapshot command; today's single-node callers pass a single-entry
+    // map. Ids that don't resolve to a Frame are silently skipped; a session
+    // where no target actually changes pushes no history.
     data class SetFrameAppearance(
-        val nodeId: String,
-        val appearance: FrameAppearance?,
+        val appearancesById: Map<String, FrameAppearance?>,
     ) : CanvasAction
 
     /**
-     * Replaces a media node's entire `MediaAppearance` — overlays, border, shadow,
-     * crop, color adjustments, decoration, caption, opacity, cornerRadius.
-     * `null` resets the media to default rendering.
+     * Replaces the entire `MediaAppearance` on each node in [appearancesById] —
+     * keys identify target media nodes, values are the new appearance (`null`
+     * resets to default rendering). Per-node payload supports multi-edit
+     * sessions where touched fields go uniform but untouched fields keep
+     * per-node variation (`docs/architecture/appearance.md § 14.2`). Ids that
+     * don't resolve to a Media node are silently skipped; a session where no
+     * target actually changes pushes no history.
      */
     data class SetMediaAppearance(
-        val nodeId: String,
-        val appearance: MediaAppearance?,
+        val appearancesById: Map<String, MediaAppearance?>,
     ) : CanvasAction
 
     // Frame membership — explicit pin / detach / clear overrides. See frame-membership.md.
@@ -763,64 +769,34 @@ class CanvasViewModel @Inject constructor(
             }
 
             is CanvasAction.SetFrameAppearance -> {
-                val current = _allNodes.value
-                val idx = current.indexOfFirst { it.id == action.nodeId }
-                if (idx < 0) return
-                val node = current[idx]
-                if (node !is CanvasNode.Frame) return
-                // Collapse an all-default appearance back to `null` so the JSON
-                // stays tidy when the user clears every field.
-                val nextAppearance = action.appearance?.takeUnless { it == FrameAppearance() }
-                if (node.appearance == nextAppearance) return
-                val updated = node.copy(appearance = nextAppearance)
-                _allNodes.update { nodes ->
-                    nodes.map { if (it.id == action.nodeId) updated else it }
+                // Collapse all-default appearances back to `null` per node so
+                // the JSON stays tidy when the user clears every field — applied
+                // independently per id so per-node Mixed state survives.
+                val normalized = action.appearancesById.mapValues { (_, appr) ->
+                    appr?.takeUnless { it == FrameAppearance() }
                 }
-                // Patch visibleNodes in place so the frame repaints without a full cull.
-                _state.update { s ->
-                    s.copy(
-                        visibleNodes = s.visibleNodes.map { vn ->
-                            if (vn.node.id == action.nodeId) vn.copy(node = updated) else vn
-                        },
-                    )
-                }
-                commit(
-                    CanvasCommand(
-                        before = listOf(node),
-                        after = listOf(updated),
-                        kind = CommandKind.SET_FRAME_BACKGROUND,
-                        timestampMs = System.currentTimeMillis(),
-                    ),
-                )
+                val result = computeAppearanceUpdate<CanvasNode.Frame>(
+                    currentNodes = _allNodes.value,
+                    ids = normalized.keys,
+                    kind = CommandKind.SET_FRAME_APPEARANCE,
+                    timestampMs = System.currentTimeMillis(),
+                ) { frame -> frame.copy(appearance = normalized[frame.id]) }
+                val command = result.command ?: return
+                applyAppearanceResult(result, command)
             }
 
             is CanvasAction.SetMediaAppearance -> {
-                val current = _allNodes.value
-                val idx = current.indexOfFirst { it.id == action.nodeId }
-                if (idx < 0) return
-                val node = current[idx]
-                if (node !is CanvasNode.Media) return
-                val nextAppearance = action.appearance?.takeUnless { it == MediaAppearance() }
-                if (node.appearance == nextAppearance) return
-                val updated = node.copy(appearance = nextAppearance)
-                _allNodes.update { nodes ->
-                    nodes.map { if (it.id == action.nodeId) updated else it }
+                val normalized = action.appearancesById.mapValues { (_, appr) ->
+                    appr?.takeUnless { it == MediaAppearance() }
                 }
-                _state.update { s ->
-                    s.copy(
-                        visibleNodes = s.visibleNodes.map { vn ->
-                            if (vn.node.id == action.nodeId) vn.copy(node = updated) else vn
-                        },
-                    )
-                }
-                commit(
-                    CanvasCommand(
-                        before = listOf(node),
-                        after = listOf(updated),
-                        kind = CommandKind.SET_MEDIA_APPEARANCE,
-                        timestampMs = System.currentTimeMillis(),
-                    ),
-                )
+                val result = computeAppearanceUpdate<CanvasNode.Media>(
+                    currentNodes = _allNodes.value,
+                    ids = normalized.keys,
+                    kind = CommandKind.SET_MEDIA_APPEARANCE,
+                    timestampMs = System.currentTimeMillis(),
+                ) { media -> media.copy(appearance = normalized[media.id]) }
+                val command = result.command ?: return
+                applyAppearanceResult(result, command)
             }
 
             is CanvasAction.PinToFrame -> applyFrameOverride(
@@ -1315,6 +1291,24 @@ class CanvasViewModel @Inject constructor(
     private fun commit(command: CanvasCommand) {
         history.push(command)
         refreshHistoryFlags()
+    }
+
+    /**
+     * Apply a non-empty appearance fan-out result: swap `_allNodes`, patch the
+     * affected entries in `visibleNodes` (avoids a full re-cull), commit the
+     * snapshot. Callers must have already null-checked `result.command`.
+     */
+    private fun applyAppearanceResult(result: AppearanceUpdateResult, command: CanvasCommand) {
+        val updatedById = (command.after ?: emptyList()).associateBy { it.id }
+        _allNodes.value = result.updatedNodes
+        _state.update { s ->
+            s.copy(
+                visibleNodes = s.visibleNodes.map { vn ->
+                    updatedById[vn.node.id]?.let { vn.copy(node = it) } ?: vn
+                },
+            )
+        }
+        commit(command)
     }
 
     private fun refreshHistoryFlags() {

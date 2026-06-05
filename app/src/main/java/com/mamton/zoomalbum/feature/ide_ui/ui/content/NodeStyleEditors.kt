@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.core.graphics.toColorInt
 import com.mamton.zoomalbum.domain.model.BorderStyle
 import com.mamton.zoomalbum.domain.model.ShadowStyle
+import com.mamton.zoomalbum.feature.canvas.editor.MixedValue
 import com.mamton.zoomalbum.feature.ide_ui.ui.color.ColorPicker
 import com.mamton.zoomalbum.feature.ide_ui.ui.color.toHex
 
@@ -56,6 +57,47 @@ fun CornerRadiusSlider(
         onValueChange = onChange,
         valueRange = 0f..maxValue,
     )
+}
+
+/**
+ * Mixed-aware wrapper around [OpacitySlider]. When [mixed] is
+ * [MixedValue.Same], renders the standard slider with that value. When
+ * [MixedValue.Mixed], labels the field "Opacity: Mixed" and seeds the slider
+ * at a neutral midpoint — the first user interaction commits a uniform value
+ * to every node in the editing set (destructive unify per `appearance.md §
+ * 14.2`).
+ */
+@Composable
+fun MixedAwareOpacitySlider(mixed: MixedValue<Float>, onChange: (Float) -> Unit) {
+    when (mixed) {
+        is MixedValue.Same -> OpacitySlider(value = mixed.value, onChange = onChange)
+        MixedValue.Mixed -> {
+            SectionLabel("Opacity: Mixed")
+            Slider(value = 0.5f, onValueChange = onChange, valueRange = 0f..1f)
+        }
+    }
+}
+
+/** Mixed-aware wrapper around [CornerRadiusSlider]. See [MixedAwareOpacitySlider]. */
+@Composable
+fun MixedAwareCornerRadiusSlider(
+    mixed: MixedValue<Float>,
+    onChange: (Float) -> Unit,
+    maxValue: Float = 200f,
+) {
+    when (mixed) {
+        is MixedValue.Same -> CornerRadiusSlider(
+            value = mixed.value, onChange = onChange, maxValue = maxValue,
+        )
+        MixedValue.Mixed -> {
+            SectionLabel("Corner radius: Mixed")
+            Slider(
+                value = 0f,
+                onValueChange = onChange,
+                valueRange = 0f..maxValue,
+            )
+        }
+    }
 }
 
 @Composable

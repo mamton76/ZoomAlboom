@@ -51,6 +51,7 @@ class EditContextMenuItemsTest {
             singleSelectedFrame = singleNode as? CanvasNode.Frame,
             singleSelectedMedia = singleNode as? CanvasNode.Media,
             selectedFramesInOrder = selection.mapNotNull { byId[it] as? CanvasNode.Frame },
+            selectedMediaInOrder = selection.mapNotNull { byId[it] as? CanvasNode.Media },
             pinDetachEnabled = pinDetachEnabled,
             anyOverrideExists = anyOverrideExists,
         )
@@ -65,10 +66,6 @@ class EditContextMenuItemsTest {
             get() = effects.filterIsInstance<EditorActionEffect.Dispatch>().map { it.action }
         val addSheetOpened: Int
             get() = effects.count { it == EditorActionEffect.OpenAddSheet }
-        val mediaAppearanceOpened: Int
-            get() = effects.count { it == EditorActionEffect.OpenMediaAppearance }
-        val frameAppearanceOpened: Int
-            get() = effects.count { it == EditorActionEffect.OpenFrameBackground }
     }
 
     private fun build(
@@ -110,12 +107,26 @@ class EditContextMenuItemsTest {
     }
 
     @Test
-    fun `single media selection — header, z-order row, Delete at bottom`() {
+    fun `single media selection — per-concept editors, z-order row, Delete at bottom`() {
         val m = media("m1")
         val (items, sink) = build(req(selection = setOf("m1")), nodes = listOf(m))
 
+        // 5 universal concepts (opacity / corner radius / border / shadow / overlays)
+        // + 4 media-only (crop / color adj / decoration / caption) + Duplicate + Delete.
         assertEquals(
-            listOf("Edit appearance", "Duplicate", "Delete"),
+            listOf(
+                "Edit opacity",
+                "Edit corner radius",
+                "Edit border",
+                "Edit shadow",
+                "Edit overlays",
+                "Edit crop",
+                "Edit color adjustments",
+                "Edit frame decoration",
+                "Edit caption",
+                "Duplicate",
+                "Delete",
+            ),
             textLabels(items),
         )
         // Exactly one inline row — the z-order four-button row.
@@ -126,9 +137,11 @@ class EditContextMenuItemsTest {
             rows.single().map { it.label },
         )
 
-        // Effects route correctly.
-        items.single { it.label == "Edit appearance" }.onClick()
-        assertEquals(1, sink.mediaAppearanceOpened)
+        // Per-concept editors route to their own effects.
+        items.single { it.label == "Edit opacity" }.onClick()
+        assertTrue(sink.effects.contains(EditorActionEffect.OpenOpacityEditor))
+        items.single { it.label == "Edit crop" }.onClick()
+        assertTrue(sink.effects.contains(EditorActionEffect.OpenCropEditor))
         items.single { it.label == "Duplicate" }.onClick()
         assertTrue(sink.dispatchedActions.contains(CanvasAction.DuplicateSelection))
         items.single { it.label == "Delete" }.onClick()
@@ -138,18 +151,29 @@ class EditContextMenuItemsTest {
     }
 
     @Test
-    fun `single frame selection — header includes Navigate + Duplicate, z-order row, Delete`() {
+    fun `single frame selection — per-concept editors + Navigate + Duplicate, z-order row, Delete`() {
         val f = frame("f1")
         val (items, sink) = build(req(selection = setOf("f1")), nodes = listOf(f))
 
+        // 5 universal concepts + Background (frame-only) + Navigate + Duplicate + Delete.
         assertEquals(
-            listOf("Edit frame appearance", "Navigate to frame", "Duplicate", "Delete"),
+            listOf(
+                "Edit opacity",
+                "Edit corner radius",
+                "Edit border",
+                "Edit shadow",
+                "Edit overlays",
+                "Edit background",
+                "Navigate to frame",
+                "Duplicate",
+                "Delete",
+            ),
             textLabels(items),
         )
         assertEquals(1, inlineRows(items).size) // z-order row
 
-        items.single { it.label == "Edit frame appearance" }.onClick()
-        assertEquals(1, sink.frameAppearanceOpened)
+        items.single { it.label == "Edit background" }.onClick()
+        assertTrue(sink.effects.contains(EditorActionEffect.OpenBackgroundEditor))
         items.single { it.label == "Navigate to frame" }.onClick()
         assertTrue(sink.dispatchedActions.any { it is CanvasAction.FocusNode && it.nodeId == "f1" })
     }
@@ -204,7 +228,7 @@ class EditContextMenuItemsTest {
     }
 
     @Test
-    fun `group selection without anchor — Duplicate selection, Delete selection, Clear selection`() {
+    fun `group selection without anchor — per-concept editors + Duplicate selection, Delete selection, Clear selection`() {
         val m1 = media("m1")
         val m2 = media("m2")
         val (items, _) = build(
@@ -212,8 +236,23 @@ class EditContextMenuItemsTest {
             nodes = listOf(m1, m2),
         )
 
+        // Homogeneous-all-media selection: per-concept editors visible per
+        // `appearance.md § 14.3`, with "(N)" suffix in their label.
         assertEquals(
-            listOf("Duplicate selection", "Delete selection", "Clear selection"),
+            listOf(
+                "Edit opacity (2)",
+                "Edit corner radius (2)",
+                "Edit border (2)",
+                "Edit shadow (2)",
+                "Edit overlays (2)",
+                "Edit crop (2)",
+                "Edit color adjustments (2)",
+                "Edit frame decoration (2)",
+                "Edit caption (2)",
+                "Duplicate selection",
+                "Delete selection",
+                "Clear selection",
+            ),
             textLabels(items),
         )
         // No inline rows (z-order multi-select is blocked until §13.5).
@@ -233,7 +272,20 @@ class EditContextMenuItemsTest {
         )
 
         assertEquals(
-            listOf("Duplicate selection", "Delete selection", "Clear selection"),
+            listOf(
+                "Edit opacity (2)",
+                "Edit corner radius (2)",
+                "Edit border (2)",
+                "Edit shadow (2)",
+                "Edit overlays (2)",
+                "Edit crop (2)",
+                "Edit color adjustments (2)",
+                "Edit frame decoration (2)",
+                "Edit caption (2)",
+                "Duplicate selection",
+                "Delete selection",
+                "Clear selection",
+            ),
             textLabels(items),
         )
     }
@@ -249,6 +301,15 @@ class EditContextMenuItemsTest {
 
         assertEquals(
             listOf(
+                "Edit opacity (2)",
+                "Edit corner radius (2)",
+                "Edit border (2)",
+                "Edit shadow (2)",
+                "Edit overlays (2)",
+                "Edit crop (2)",
+                "Edit color adjustments (2)",
+                "Edit frame decoration (2)",
+                "Edit caption (2)",
                 "Duplicate selection",
                 "Delete selection",
                 "Edit this only",
@@ -315,14 +376,16 @@ class EditContextMenuItemsTest {
     @Test
     fun `dividers separate sections in the single-media menu`() {
         val (items, _) = build(req(selection = setOf("m")), nodes = listOf(media("m")))
-        // Edit appearance, Duplicate, divider, [z-order row], divider, Delete
-        assertEquals(6, items.size)
-        assertEquals("Edit appearance", items[0].label)
-        assertEquals("Duplicate", items[1].label)
-        assertTrue(items[2].isDivider)
-        assertNotNull(items[3].inlineRow)
-        assertTrue(items[4].isDivider)
-        assertEquals("Delete", items[5].label)
+        // 9 per-concept edits (5 universal + 4 media-only) + Duplicate, divider,
+        // [z-order row], divider, Delete.
+        assertEquals(14, items.size)
+        assertEquals("Edit opacity", items[0].label)
+        assertEquals("Edit caption", items[8].label)
+        assertEquals("Duplicate", items[9].label)
+        assertTrue(items[10].isDivider)
+        assertNotNull(items[11].inlineRow)
+        assertTrue(items[12].isDivider)
+        assertEquals("Delete", items[13].label)
     }
 
     @Test

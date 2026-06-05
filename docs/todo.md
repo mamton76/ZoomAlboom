@@ -659,7 +659,7 @@ See [data-model.md § Backgrounds](architecture/data-model.md#backgrounds-backgr
 ### 19.4 MVP scope
 - [x] Album: solid color + texture/image + procedural pattern; camera-locked + world-locked; all tile modes. Stretch fills the rect ignoring aspect, Cover fills both axes preserving aspect (overflows / crops the other), Contain fits inside preserving aspect (letterboxes the other). None currently still aliases Stretch — proper "native pixel size at tileOrigin" semantics tracked separately.
 - [x] Frame: full `BackgroundData?` (solid / texture / procedural) + opacity. Came for free with the §19.6½ refactor.
-- [x] Undo for background changes — `CommandKind.SET_ALBUM_BACKGROUND` + `SET_FRAME_BACKGROUND`; `CanvasCommand.albumBackgroundChange` for album-level snapshots
+- [x] Undo for background changes — `CommandKind.SET_ALBUM_BACKGROUND` + `SET_FRAME_APPEARANCE`; `CanvasCommand.albumBackgroundChange` for album-level snapshots
 
 ### 19.6 UI
 - [x] Shared `BackgroundEditor` composable in `feature/ide_ui/ui/content/BackgroundEditorContent.kt` — source radio (None / Solid / Texture / Procedural), per-source controls, opacity slider. Used by both album and frame sheets.

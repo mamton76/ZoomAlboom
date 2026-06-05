@@ -2,7 +2,7 @@
 
 > Related: [overview](overview.md) | [coordinates](coordinates.md) | [rendering](rendering.md) | [context-menu](context-menu.md) *(proposal — will replace § 2's long-press row when it lands)* | [editor-tools](editor-tools.md) *(decided 2026-05-24 — future-state authority on gesture allocation)*
 
-**Future-model note (2026-05-24, partially implemented as of 2026-06-04).** [`editor-tools.md`](editor-tools.md) locks the next-generation gesture model: (a) drag-on-empty initiates rect-select directly without long-press — **shipped 2026-06-04** in `selectionMarqueeGestures`; (b) two-finger gestures become the only navigation path in Edit mode (no single-finger pan) — **pending**, View-mode single-finger pan hasn't shipped; (c) tap dispatch becomes tool-aware via `GestureRouter` — **shipped 2026-06-04**; (d) long-press becomes the universal popup invoker across all tools — **shipped via `GestureRouter` 2026-06-04**, with contents derived per `editor-tools.md § 5`. This doc reflects (a), (c), and (d) below; (b) is still future. Migration sequencing in `editor-tools.md § 7.3` / `§ 10`.
+**Future-model note (2026-05-24, fully implemented for the gesture layer as of 2026-06-05).** [`editor-tools.md`](editor-tools.md) locks the next-generation gesture model: (a) drag-on-empty initiates rect-select directly without long-press — **shipped 2026-06-04** in `selectionMarqueeGestures`; (b) two-finger gestures become the only navigation path in Edit mode and View gets single-finger pan — **shipped 2026-06-05** in `viewModePanGestures` (Edit's single-finger axis is owned by the active tool, View's by the camera); (c) tap dispatch becomes tool-aware via `GestureRouter` — **shipped 2026-06-04**; (d) long-press becomes the universal popup invoker across all tools — **shipped via `GestureRouter` 2026-06-04**, with contents derived per `editor-tools.md § 5`. Migration sequencing in `editor-tools.md § 7.3` / `§ 10`.
 
 Selection is the canvas's interaction focus — the set of nodes that group operations (move, resize, rotate, delete, duplicate) apply to. This doc covers what's selected (state), how the user changes it (gestures and actions), and the gesture-stack rules that make it work consistently across viewport changes.
 
@@ -89,8 +89,10 @@ Four modifiers stacked on the outermost canvas `Box`. Order is significant — t
 
 ```
 ┌─ Box (CanvasScreen)
-│  .nodeInteractionGestures(...)        Layer 1: Initial pass
-│  .selectionMarqueeGestures(...)       Layer 2a: Main pass
+│  .nodeInteractionGestures(...)        Layer 1:  Initial pass
+│  .selectionMarqueeGestures(...)       Layer 2a: Main pass  (Edit + Selection)
+│  .eraserScrubGestures(...)            Layer 2c: Main pass  (Edit + Eraser)
+│  .viewModePanGestures(...)            Layer 2d: Main pass  (View)
 │  .tapAndLongPressGestures(...)        Layer 2b: Main pass
 │  .infiniteCanvasGestures { ... }      Layer 3:  Main pass
 ```
@@ -107,6 +109,10 @@ Priority order on DOWN:
 4. **No hit** → fall through (no consumption).
 
 The deferred-consume rule is what enables tap-on-selected (collapse multi-select) and long-press-on-selected (re-anchor the context menu on that node). It also matters for handles specifically: the handle touch radius (48 px) often extends over a node's body, so an immediate-consume on a handle hit would silently swallow taps that the user intends as "select this one node from the group."
+
+### Layer 2d — `viewModePanGestures` (Main pass)
+
+Single-finger drag pan for View mode. Gated by `GestureRouter.routeViewPanStart`'s `enabled` projection. In View, single-finger has no active tool claiming it; the camera takes the channel. On slop, the detector calls `onPanStart` (caller dismisses popup if open per `ViewPanRoute.DismissContextMenuAndProceed`) and then emits per-event `onPan(dx, dy)` until lift or second finger. In Edit / Presentation the detector is dormant — Edit reserves single-finger for the active tool (`editor-tools.md § 2`), Presentation has its own gestures.
 
 ### Layer 2a — `selectionMarqueeGestures` (Main pass)
 
@@ -144,7 +150,9 @@ The gesture stack is **selection-aware**, not directly mode-aware. `CanvasAction
 | Layer | Edit + Selection | Edit + Eraser | View / Presentation |
 |-------|------------------|---------------|---------------------|
 | 1 — `nodeInteractionGestures` | Active on non-empty selection | Dormant — `transformableSelectionIds(state)` returns `emptySet()`, so the detector early-returns even with persisting selection | Dormant — same gating; persisting selection cannot be dragged |
-| 2a — `selectionMarqueeGestures` | Active — drag-on-empty past slop → marquee | Dormant — `isMarqueeEnabled(state)` returns `false`; events flow to (future) View pan / other layers | Dormant — same |
+| 2a — `selectionMarqueeGestures` | Active — drag-on-empty past slop → marquee | Dormant — `isMarqueeEnabled(state)` returns `false` | Dormant — same |
+| 2c — `eraserScrubGestures` | Dormant | Active — drag past slop → per-cross `DeleteNodes(setOf(id))` | Dormant |
+| 2d — `viewModePanGestures` | Dormant — Edit reserves single-finger for active tool | Dormant — same | Active in View; dormant in Presentation (separate gesture vocabulary) |
 | 2b — `tapAndLongPressGestures` | Tap → `SelectNode` / `DeselectAll`; long-press on node → `AddNodeToSelection` + open context-menu popup (inline overlap picker for stacked nodes); long-press on empty → no-op; double-tap → no-op | Tap on node → `DeleteNodes(setOf(id))`; tap on empty → no-op; long-press on node → popup (no `AddNodeToSelection` — non-destructive bailout); long-press on empty → no-op; double-tap → no-op | Tap → `FocusNode(hit.id)` if there's a hit, no-op otherwise; long-press is swallowed — no overlap picker; double-tap → camera reset |
 | 3 — `infiniteCanvasGestures` | Unchanged | Unchanged | Unchanged — pan / pinch / rotate always work, and they cancel any in-flight focus animation |
 

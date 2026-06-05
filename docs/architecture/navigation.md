@@ -59,11 +59,11 @@ MainActivity
 
 `CanvasState.mode: CanvasInteractionMode` gates which contextual interactions are reachable:
 
-| Mode | Tap on a node | Long-press / rect-select | Pan / pinch / rotate | Selection chrome |
-|------|---------------|--------------------------|----------------------|------------------|
-| `Edit` (default) | Replace selection (`SelectNode`) | Add-to-selection + open context menu (with inline overlap picker for stacked nodes); long-press-then-drag → rect-select | Active | Visible |
-| `View` | Animated focus on the node (`FocusNode`) | Swallowed (no-op) | Active | Hidden (selection always empty) |
-| `Presentation` | Same as `View`. Reserved for read-only published-album surfaces (post-MVP — no dedicated UI yet) | Swallowed | Active | Hidden |
+| Mode | Tap on a node | Long-press on a node | Drag on empty | Pan / pinch / rotate | Selection chrome |
+|------|---------------|----------------------|---------------|----------------------|------------------|
+| `Edit` (default) | Replace selection (`SelectNode`) | Add-to-selection + open context menu (with inline overlap picker for stacked nodes). Long-press on empty is a no-op. | `Selection`: marquee rect-select (screen-space, axis-aligned). `Eraser`: scrub-delete. | Active | Visible |
+| `View` | Animated focus on the node (`FocusNode`) | Swallowed (no-op) | Single-finger pan (`viewModePanGestures`) | Active | Hidden (selection always empty) |
+| `Presentation` | Same as `View`. Reserved for read-only published-album surfaces (post-MVP — no dedicated UI yet) | Swallowed | Reserved for Presentation-specific gestures | Active | Hidden |
 
 Entering any non-Edit mode clears `selectedNodeIds`, `groupSelectionTransform`, and `selectionRect`. Selection-keyed chrome (`SelectionOverlay`, handles) auto-hides as a result — no per-mode branching needed in those composables. The long-press popup is independently suppressed in non-Edit modes via `state.editor.mode != Edit` in `CanvasScreen`.
 

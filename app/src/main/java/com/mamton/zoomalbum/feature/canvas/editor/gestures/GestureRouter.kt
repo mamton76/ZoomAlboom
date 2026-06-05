@@ -144,11 +144,13 @@ sealed interface SelectedNodeTransformRoute {
 /**
  * Result of routing an Object-mode Eraser scrub start, recognized by
  * `eraserScrubGestures` after a single-finger drag past touch slop. The
- * scrub then accumulates every node crossed by the pointer and commits one
- * batched delete on lift — see `editor-tools.md § 4.6` Object mode.
+ * scrub fires `CanvasAction.DeleteNodes(setOf(id))` **per newly crossed
+ * node** — one undo entry per node, symmetric with tap-on-node Eraser. The
+ * detector dedupes within the gesture so re-crossing a node is a no-op.
+ * See `editor-tools.md § 4.6` Object mode.
  */
 sealed interface EraserScrubStartRoute {
-    /** Start the scrub — caller hit-tests each event and accumulates ids. */
+    /** Start the scrub — caller hit-tests each event and dispatches per cross. */
     data object Start : EraserScrubStartRoute
 
     /**
@@ -160,6 +162,29 @@ sealed interface EraserScrubStartRoute {
 
     /** Current tool / mode does not own scrub. Detector is gated off. */
     data object Suppress : EraserScrubStartRoute
+}
+
+/**
+ * Result of routing a View-mode single-finger pan, recognized by
+ * `viewModePanGestures` after a single-finger drag past touch slop. View
+ * relaxes the strict "two-finger nav only" rule that holds in Edit
+ * (`editor-tools.md § 2`) — there's no active tool claiming single-finger
+ * input, so one finger drives the camera directly.
+ */
+sealed interface ViewPanRoute {
+    /** Pan the camera; popup wasn't open. */
+    data object Allow : ViewPanRoute
+
+    /**
+     * Popup is open. Dismiss it AND proceed with panning — same
+     * dismissal-on-proceed rule used by the multi-finger camera path
+     * (`CameraTransformRoute.DismissContextMenuAndProceed`). Camera input
+     * shouldn't be lost just because the menu was open.
+     */
+    data object DismissContextMenuAndProceed : ViewPanRoute
+
+    /** Current mode does not own single-finger pan. Detector is gated off. */
+    data object Suppress : ViewPanRoute
 }
 
 /**
@@ -307,6 +332,15 @@ object GestureRouter {
     fun routeCameraTransformStart(ctx: GestureRoutingContext): CameraTransformRoute =
         if (ctx.isContextMenuOpen) CameraTransformRoute.DismissContextMenuAndProceed
         else CameraTransformRoute.Allow
+
+    fun routeViewPanStart(ctx: GestureRoutingContext): ViewPanRoute {
+        // Only View claims single-finger pan. Edit reserves single-finger
+        // for the active tool (`editor-tools.md § 2`); Presentation has its
+        // own gestures (`presentation-profile.md`) and isn't routed here.
+        if (ctx.mode != CanvasInteractionMode.View) return ViewPanRoute.Suppress
+        if (ctx.isContextMenuOpen) return ViewPanRoute.DismissContextMenuAndProceed
+        return ViewPanRoute.Allow
+    }
 
     fun routeEraserScrubStart(ctx: GestureRoutingContext): EraserScrubStartRoute {
         if (ctx.mode != CanvasInteractionMode.Edit) return EraserScrubStartRoute.Suppress

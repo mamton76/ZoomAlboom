@@ -310,8 +310,8 @@ class CanvasViewModel @Inject constructor(
     fun onGesture(centroid: Offset, pan: Offset, zoom: Float, rotationDelta: Float) {
         // Any direct gesture cancels an in-flight focus animation.
         cancelCameraAnimation()
+        val oldCam = _state.value.camera
         _state.update { s ->
-            val oldCam = s.camera
             val newScale = (oldCam.scale * zoom).coerceIn(Camera.MIN_SCALE, Camera.MAX_SCALE)
             val newRotation = oldCam.rotation + rotationDelta
 

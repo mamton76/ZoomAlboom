@@ -12,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
@@ -35,10 +36,12 @@ import com.mamton.zoomalbum.feature.canvas.editor.gestures.LongPressRoute
 import com.mamton.zoomalbum.feature.canvas.editor.gestures.MarqueeStartRoute
 import com.mamton.zoomalbum.feature.canvas.editor.gestures.SelectedNodeTransformRoute
 import com.mamton.zoomalbum.feature.canvas.editor.gestures.TapRoute
+import com.mamton.zoomalbum.feature.canvas.editor.gestures.ViewPanRoute
 import com.mamton.zoomalbum.feature.canvas.gestures.eraserScrubGestures
 import com.mamton.zoomalbum.feature.canvas.gestures.infiniteCanvasGestures
 import com.mamton.zoomalbum.feature.canvas.gestures.nodeInteractionGestures
 import com.mamton.zoomalbum.feature.canvas.gestures.selectionMarqueeGestures
+import com.mamton.zoomalbum.feature.canvas.gestures.viewModePanGestures
 import androidx.compose.runtime.rememberUpdatedState
 import com.mamton.zoomalbum.feature.canvas.gestures.tapAndLongPressGestures
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction
@@ -363,12 +366,39 @@ fun CanvasScreen(
                     viewModel.onAction(CanvasAction.DeleteNodes(setOf(nodeId)))
                 },
             )
+            // Layer 2d: View-mode single-finger pan — Main pass handler.
+            // In View mode there's no active tool claiming single-finger
+            // input, so one finger drives the camera. Gated off in Edit /
+            // Presentation by `routeViewPanStart`. Mutually exclusive with
+            // marquee + eraser scrub (those are Edit-only).
+            .viewModePanGestures(
+                enabled = isViewPanEnabled(state),
+                onPanStart = {
+                    val ctx = routingContext(state, isContextMenuOpenLatest)
+                    if (GestureRouter.routeViewPanStart(ctx) is
+                        ViewPanRoute.DismissContextMenuAndProceed) {
+                        onCanvasGesture()
+                    }
+                },
+                onPan = { dx, dy ->
+                    // Single-finger pan = pure translation; zoom and rotation
+                    // identity. Centroid is irrelevant for pan-only (cancels
+                    // out in the camera math) — pass Offset.Zero.
+                    viewModel.onGesture(
+                        centroid = Offset.Zero,
+                        pan = Offset(dx, dy),
+                        zoom = 1f,
+                        rotationDelta = 0f,
+                    )
+                },
+            )
             // Layer 2b: tap + double-tap + long-press — single Main pass handler.
             // All semantic decisions go through `GestureRouter`; the callback
             // bodies are pure dispatch translation. Mode/tool branching never
             // lives inline here. Drag-on-empty rect-select lives in
             // `selectionMarqueeGestures` (Layer 2a). Eraser scrub lives in
-            // `eraserScrubGestures` (Layer 2c).
+            // `eraserScrubGestures` (Layer 2c). View-mode single-finger pan
+            // lives in `viewModePanGestures` (Layer 2d).
             .tapAndLongPressGestures(
                 onTap = { offset ->
                     val hit = viewModel.hitTest(offset.x, offset.y)
@@ -667,4 +697,22 @@ private fun isEraserScrubEnabled(state: CanvasState): Boolean {
         isContextMenuOpen = false,
     )
     return GestureRouter.routeEraserScrubStart(ctxNoPopup) != EraserScrubStartRoute.Suppress
+}
+
+/**
+ * `enabled` input to [viewModePanGestures]. View pan is mode-only — it
+ * doesn't depend on tool, selection, or popup state for the enable
+ * decision (popup-open just adds a dismiss-then-pan step at
+ * gesture-start time). Same popup-state stability rationale as
+ * [isMarqueeEnabled] — `pointerInput` keying must not churn on every
+ * popup open/close.
+ */
+private fun isViewPanEnabled(state: CanvasState): Boolean {
+    val ctxNoPopup = GestureRoutingContext(
+        mode = state.editor.mode,
+        activeTool = state.editor.activeTool,
+        hasSelection = state.editor.selectedNodeIds.isNotEmpty(),
+        isContextMenuOpen = false,
+    )
+    return GestureRouter.routeViewPanStart(ctxNoPopup) != ViewPanRoute.Suppress
 }

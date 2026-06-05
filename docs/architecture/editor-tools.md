@@ -461,25 +461,17 @@ The router is the single place mode / tool / popup-open / selection rules are en
 
 Per-tool drag (FreeDraw stroke, Shape rubber-band, Eraser scrub, etc.) is dispatched separately — each tool's input handler owns its drag detection and reaches the router only at gesture-start to confirm ownership. Selection's drag-on-empty (marquee) and drag-on-node (move) live inside `nodeInteractionGestures` plus the SelectionTool drag handler that lands with § 7.3.
 
-### 7.3 Drag-on-empty migration
+### 7.3 Drag-on-empty migration — shipped 2026-06-04
 
-Today's marquee path: long-press-on-empty + drag inside `tapAndLongPressGestures`. The locked model: drag-on-empty inside `SelectionTool`'s input handler, no long-press required.
+Marquee selection moved off `tapAndLongPressGestures` (long-press-then-drag) onto a dedicated `selectionMarqueeGestures` modifier that recognises drag-on-empty directly. `LongPressRoute.FallThroughToRectSelectDrag` was retired; long-press-on-empty is now `Suppress` in every Edit tool. Marquee state is stored in **screen coordinates** so the rectangle stays axis-aligned to the screen under camera rotation — intersection uses `TransformUtils.toScreenBoundingBox` per node. [selection.md § 2](selection.md#2-gesture-mapping) and § 5 reflect the gesture-stack changes. Empty-canvas context menus remain future work (§ 8).
 
-Migration:
+### 7.4 View-mode single-finger pan — shipped 2026-06-05
 
-- Remove the long-press-then-drag path in `tapAndLongPressGestures` (or gate it on `activeTool != Selection` as a transitional step).
-- Add a single-finger-drag-on-empty detector inside `SelectionTool`'s gesture handler.
-- Long-press-on-empty becomes a no-op for MVP (an empty-canvas context menu can come later — see § 8).
-- Update [selection.md § 2](selection.md#2-gesture-mapping) gesture table.
+Resolved with a dedicated `viewModePanGestures` modifier (Layer 2d in the gesture stack) rather than extending Layer 3, matching the per-mode/per-tool detector pattern already used by `selectionMarqueeGestures` (Layer 2a) and `eraserScrubGestures` (Layer 2c). Each detector is single-purpose and gated via `enabled = (router.route...(ctx) != Suppress)`; `infiniteCanvasGestures` (Layer 3) stays multi-finger-only and mode-agnostic.
 
-### 7.4 View-mode single-finger pan
+Router: `routeViewPanStart(ctx) → Allow | DismissContextMenuAndProceed | Suppress`. `Allow` in View + popup closed; `DismissContextMenuAndProceed` in View + popup open (same continuous-gesture dismissal rule used by Layer 3 camera nav); `Suppress` in Edit (single-finger reserved for active tool per § 2) and Presentation (separate gesture vocabulary).
 
-A new handler distinct from Layer 3. Options:
-
-- Extend Layer 3 to accept one finger when `editorMode == View`.
-- Add a dedicated `viewModePanGestures` modifier active only in View.
-
-The first is one branch; the second is one composable. Pick at implementation time. Either way the behavior is identical to Edit mode's two-finger pan, just with a one-finger trigger.
+The pan behaves identically to Edit's two-finger pan — pure translation, no zoom, no rotation — just with a one-finger trigger. Camera dispatches `viewModel.onGesture(centroid = Offset.Zero, pan, zoom = 1, rotation = 0)` per movement event.
 
 ### 7.5 `EditorMode` toggle
 

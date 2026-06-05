@@ -32,8 +32,9 @@ import androidx.compose.ui.input.pointer.pointerInput
  * Policy lives in `GestureRouter.routeMarqueeStart` — [enabled] is the
  * router-derived gate. When `false`, the detector's `pointerInput` block
  * short-circuits at composition and the modifier becomes effectively
- * absent, so other modes / tools (notably View-mode single-finger pan
- * when it lands) can claim the same drag-on-empty pattern.
+ * absent, so other modes / tools (View-mode single-finger pan via
+ * `viewModePanGestures`, Eraser scrub via `eraserScrubGestures`) can
+ * claim the same drag-on-empty pattern.
  *
  * Context-menu-open suppression is decided at [onMarqueeStart] time by the
  * caller — the detector still runs in that case (and consumes the gesture

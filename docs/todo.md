@@ -15,17 +15,19 @@ Gap between current implementation and target architecture.
 
 Work from foundation toward features. Do not jump to widgets, export, or appearance editor before the scene graph and media foundation are stable.
 
-1. **Scene graph root wrapper** (§1.3) — `albumId`, `camera`, `nodes`, `profile` (§22), `albumBackground` (§19), editor metadata (§13/§14).
-2. **Save/restore camera position** (§1.3) — on album open/close.
-3. **Minimal media library** (§1.4–1.5) — `media_library` table: id, album_id, sourceUri, mediaType, status, intrinsic dimensions.
-4. **Media validation + missing placeholder** (§4.4) — check `sourceUri` on album open, show placeholder for `MISSING`.
-5. **Frame membership** (§4.3) — computed from geometry + `Frame.overrides`; recompute on `Dispatchers.Default`. See [frame-membership.md](architecture/frame-membership.md).
-6. **Edit / View mode split** (§12) — gates gesture routing; unblocks View-mode navigation.
-7. **Multi-photo import + auto grid placement** (§16).
-8. **Group align / distribute** (§17).
-9. **Guidelines** (§14.1–14.3) — without snapping first.
-10. **Snapping** (§14.4).
-11. **Basic widget infrastructure** (§21.1) — `CanvasNode.Widget`, then `Portal` and `FrameNavigator` (§21.2).
+Items 1–6 in the previous ordering are shipped: scene-graph root wrapper, save/restore camera, frame membership, and the Edit / View mode split with tool-aware gesture routing (`§ 12`, `editor-tools.md`, `selection.md`). What's actually next:
+
+1. **Minimal media library** (§1.4–1.5) — `media_library` table: id, album_id, sourceUri, mediaType, status, intrinsic dimensions.
+2. **Media validation + missing placeholder** (§4.4) — check `sourceUri` on album open, show placeholder for `MISSING`.
+3. **Multi-photo import + auto grid placement** (§16).
+4. **Group align / distribute** (§17).
+5. **Guidelines** (§14.1–14.3) — without snapping first.
+6. **Snapping** (§14.4).
+7. **Other media types** (§4.7) — video / text / sticker / vector shape: pickers, schema, render.
+8. **Panel / workspace persistence** — save panel layout + last-open album state across restarts.
+9. **Basic widget infrastructure** (§21.1) — `CanvasNode.Widget`, then `Portal` and `FrameNavigator` (§21.2).
+
+View-mode single-finger pan shipped 2026-06-05 (§24.5) — see `editor-tools.md § 7.4` and `selection.md § 5`.
 
 ---
 
@@ -132,7 +134,7 @@ Snapshot-based: each command captures `before`/`after` node state (not a sealed 
 - [x] Node drag/move (update `Transform` via `CanvasAction.MoveSelection`)
 - [x] Node resize (corner handle drag, proportional)
 - [x] Node rotation (rotation handle drag)
-- [x] Multi-select (rectangle selection via long-press+drag, group move/resize/rotate)
+- [x] Multi-select — rectangle selection via direct drag-on-empty in `Edit + Selection` (screen-space marquee, axis-aligned under camera rotation); group move/resize/rotate
 - [x] Overlap picker (long-press on overlapping nodes shows selection dialog)
 - [x] Contextual action bar (Delete, Duplicate wired; Edit stub)
 - [x] Selection debug panel (shows node transform details)
@@ -1207,12 +1209,15 @@ Final migration — no transitional long-press path retained.
 - [x] Detector gated by `isMarqueeEnabled(state)` — stable across popup state so an in-progress marquee survives the popup closing.
 - [x] Long-press on node / stacked nodes unchanged (still global popup policy through `GestureRouter.routeLongPress`).
 - [x] Router tests cover the marquee matrix (Edit+Selection closed/open, Eraser, View, Presentation, hasSelection orthogonality) and the universal empty-long-press `Suppress`.
-- [x] `selection.md § 2` / § 5 / § 7 updated: marquee row added, long-press-on-empty marked no-op, future-model note partially graduated (item (a) shipped; (b) View pan still pending §24.5).
+- [x] `selection.md § 2` / § 5 / § 7 updated: marquee row added, long-press-on-empty marked no-op, future-model note partially graduated (item (a) shipped here; (b) View pan shipped in § 24.5).
 
-### 24.5 View-mode single-finger pan (per `editor-tools.md § 7.4`)
-- [ ] Add a handler that accepts single-finger drag for camera pan when `editorMode == View`. Two implementation options (pick at impl time):
-  - Extend Layer 3 (`infiniteCanvasGestures`) to accept one finger when in View
-  - Add a dedicated `viewModePanGestures` modifier active only in View
+### 24.5 View-mode single-finger pan (per `editor-tools.md § 7.4`) — **shipped 2026-06-05**
+
+- [x] Dedicated `viewModePanGestures` modifier (Layer 2d in the gesture stack) — chosen over extending Layer 3 to match the per-mode/per-tool detector pattern already used by `selectionMarqueeGestures` + `eraserScrubGestures`. `infiniteCanvasGestures` (Layer 3) stays multi-finger-only and mode-agnostic.
+- [x] Router: `ViewPanRoute` + `routeViewPanStart(ctx)`. `Allow` in View + popup closed; `DismissContextMenuAndProceed` in View + popup open (continuous-gesture dismissal rule); `Suppress` in Edit (single-finger reserved for active tool) and Presentation (separate gesture vocabulary).
+- [x] Detector callback shape: `onPanStart` (fires once on slop-crossed; caller consults router for popup-open dismissal) + `onPan(dx, dy)` (per-event movement deltas). Camera dispatches `viewModel.onGesture(centroid = Offset.Zero, pan, zoom = 1, rotationDelta = 0)` — pure translation.
+- [x] Router tests cover the View / Edit / Presentation matrix plus popup-open + stored-non-Selection-tool-in-View edge cases.
+- [x] `selection.md § 5` (gesture stack: Layer 2d added) + `§ 7` (mode interaction table extended for Edit/Selection, Edit/Eraser, View/Presentation columns including Layer 2c + 2d). `editor-tools.md § 7.4` marked shipped. Future-model note in `selection.md` top callout updated — item (b) now shipped.
 
 ### 24.6 `ToolControlBar` — renders `ToolControlSurface`
 

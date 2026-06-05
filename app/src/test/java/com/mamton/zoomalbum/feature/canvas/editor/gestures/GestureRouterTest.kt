@@ -512,6 +512,67 @@ class GestureRouterTest {
         )
     }
 
+    // ── routeViewPanStart ─────────────────────────────────────────────────
+
+    @Test
+    fun `View + popup closed allows single-finger pan`() {
+        assertEquals(
+            ViewPanRoute.Allow,
+            GestureRouter.routeViewPanStart(viewCtx()),
+        )
+    }
+
+    @Test
+    fun `View + popup open dismisses popup and proceeds with pan`() {
+        // Continuous gesture — camera intent isn't lost when the menu was
+        // open. Same rule as multi-finger camera nav
+        // (`CameraTransformRoute.DismissContextMenuAndProceed`).
+        assertEquals(
+            ViewPanRoute.DismissContextMenuAndProceed,
+            GestureRouter.routeViewPanStart(viewCtx(isContextMenuOpen = true)),
+        )
+    }
+
+    @Test
+    fun `Edit suppresses single-finger pan regardless of tool`() {
+        // Single-finger in Edit is reserved for the active tool
+        // (`editor-tools.md § 2`). Pan must use two fingers.
+        assertEquals(
+            ViewPanRoute.Suppress,
+            GestureRouter.routeViewPanStart(editCtx()),
+        )
+        assertEquals(
+            ViewPanRoute.Suppress,
+            GestureRouter.routeViewPanStart(editCtx(tool = EditorTool.Eraser)),
+        )
+    }
+
+    @Test
+    fun `Presentation suppresses single-finger pan`() {
+        // Presentation has its own gesture vocabulary; not routed through
+        // the View pan path.
+        assertEquals(
+            ViewPanRoute.Suppress,
+            GestureRouter.routeViewPanStart(presentCtx()),
+        )
+    }
+
+    @Test
+    fun `View pan ignores activeTool — tool axis is meaningless outside Edit`() {
+        // viewCtx() defaults activeTool to Selection (the stored "nil tool"
+        // value in non-Edit modes). The route should be identical with any
+        // stored tool, since the tool axis is gated to Edit per
+        // editor-tools.md § 1.2.
+        assertEquals(EditorTool.Selection, viewCtx().activeTool) // sanity
+        assertEquals(ViewPanRoute.Allow, GestureRouter.routeViewPanStart(viewCtx()))
+        // If we hypothetically had a stored Eraser in View, route still allows:
+        val viewWithEraserStored = viewCtx().copy(activeTool = EditorTool.Eraser)
+        assertEquals(
+            ViewPanRoute.Allow,
+            GestureRouter.routeViewPanStart(viewWithEraserStored),
+        )
+    }
+
     // ── exhaustiveness guard ──────────────────────────────────────────────
 
     @Test

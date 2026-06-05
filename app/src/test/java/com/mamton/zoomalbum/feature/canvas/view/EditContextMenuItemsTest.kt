@@ -120,6 +120,7 @@ class EditContextMenuItemsTest {
                 "Edit border",
                 "Edit shadow",
                 "Edit overlays",
+                "Edit alpha mask",
                 "Edit crop",
                 "Edit color adjustments",
                 "Edit frame decoration",
@@ -163,6 +164,7 @@ class EditContextMenuItemsTest {
                 "Edit border",
                 "Edit shadow",
                 "Edit overlays",
+                "Edit alpha mask",
                 "Edit background",
                 "Navigate to frame",
                 "Duplicate",
@@ -245,6 +247,7 @@ class EditContextMenuItemsTest {
                 "Edit border (2)",
                 "Edit shadow (2)",
                 "Edit overlays (2)",
+                "Edit alpha mask (2)",
                 "Edit crop (2)",
                 "Edit color adjustments (2)",
                 "Edit frame decoration (2)",
@@ -278,6 +281,7 @@ class EditContextMenuItemsTest {
                 "Edit border (2)",
                 "Edit shadow (2)",
                 "Edit overlays (2)",
+                "Edit alpha mask (2)",
                 "Edit crop (2)",
                 "Edit color adjustments (2)",
                 "Edit frame decoration (2)",
@@ -306,6 +310,7 @@ class EditContextMenuItemsTest {
                 "Edit border (2)",
                 "Edit shadow (2)",
                 "Edit overlays (2)",
+                "Edit alpha mask (2)",
                 "Edit crop (2)",
                 "Edit color adjustments (2)",
                 "Edit frame decoration (2)",
@@ -376,16 +381,16 @@ class EditContextMenuItemsTest {
     @Test
     fun `dividers separate sections in the single-media menu`() {
         val (items, _) = build(req(selection = setOf("m")), nodes = listOf(media("m")))
-        // 9 per-concept edits (5 universal + 4 media-only) + Duplicate, divider,
-        // [z-order row], divider, Delete.
-        assertEquals(14, items.size)
+        // 10 per-concept edits (6 universal incl. alpha mask + 4 media-only) +
+        // Duplicate, divider, [z-order row], divider, Delete.
+        assertEquals(15, items.size)
         assertEquals("Edit opacity", items[0].label)
-        assertEquals("Edit caption", items[8].label)
-        assertEquals("Duplicate", items[9].label)
-        assertTrue(items[10].isDivider)
-        assertNotNull(items[11].inlineRow)
-        assertTrue(items[12].isDivider)
-        assertEquals("Delete", items[13].label)
+        assertEquals("Edit caption", items[9].label)
+        assertEquals("Duplicate", items[10].label)
+        assertTrue(items[11].isDivider)
+        assertNotNull(items[12].inlineRow)
+        assertTrue(items[13].isDivider)
+        assertEquals("Delete", items[14].label)
     }
 
     @Test

@@ -70,6 +70,16 @@ data object EditOverlaysAction : EditorAction {
     override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenOverlaysEditor
 }
 
+data object EditAlphaMaskAction : EditorAction {
+    override val id = "edit.alphaMask"
+    override val icon = "◍"
+    override val category = ActionCategory.Edit
+    override fun label(ctx: SelectionContext) =
+        labelWithCount("Edit alpha mask", ctx.homogeneousCount)
+    override fun isVisible(ctx: SelectionContext) = ctx.isAllFrames || ctx.isAllMedia
+    override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenAlphaMaskEditor
+}
+
 data object EditBackgroundAction : EditorAction {
     override val id = "edit.background"
     override val icon = "█"
@@ -271,6 +281,7 @@ object EditorActionCatalog {
         EditBorderAction,
         EditShadowAction,
         EditOverlaysAction,
+        EditAlphaMaskAction,
         EditBackgroundAction,
         EditCropAction,
         EditColorAdjustmentsAction,

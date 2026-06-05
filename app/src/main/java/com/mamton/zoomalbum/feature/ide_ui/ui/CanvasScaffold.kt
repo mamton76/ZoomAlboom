@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mamton.zoomalbum.domain.model.AlphaMask
 import com.mamton.zoomalbum.domain.model.BackgroundData
 import com.mamton.zoomalbum.domain.model.BorderStyle
 import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
@@ -49,6 +50,7 @@ import com.mamton.zoomalbum.feature.canvas.view.SelectionDebugPanel
 import com.mamton.zoomalbum.feature.canvas.view.buildEditContextMenuItems
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
+import com.mamton.zoomalbum.feature.ide_ui.ui.content.AlphaMaskEditor
 import com.mamton.zoomalbum.feature.ide_ui.ui.content.BackgroundEditor
 import com.mamton.zoomalbum.feature.ide_ui.ui.content.BorderStyleEditor
 import com.mamton.zoomalbum.feature.ide_ui.ui.content.CaptionStyleEditor
@@ -100,6 +102,7 @@ fun CanvasScaffold(
     var borderEditing by remember { mutableStateOf<AppearanceTarget>(AppearanceTarget.None) }
     var shadowEditing by remember { mutableStateOf<AppearanceTarget>(AppearanceTarget.None) }
     var overlaysEditing by remember { mutableStateOf<AppearanceTarget>(AppearanceTarget.None) }
+    var alphaMaskEditing by remember { mutableStateOf<AppearanceTarget>(AppearanceTarget.None) }
     var backgroundEditing by remember { mutableStateOf<List<CanvasNode.Frame>>(emptyList()) }
     var cropEditing by remember { mutableStateOf<List<CanvasNode.Media>>(emptyList()) }
     var colorAdjustmentsEditing by remember { mutableStateOf<List<CanvasNode.Media>>(emptyList()) }
@@ -247,6 +250,7 @@ fun CanvasScaffold(
             EditorActionEffect.OpenBorderEditor -> borderEditing = universalTargetForSelection()
             EditorActionEffect.OpenShadowEditor -> shadowEditing = universalTargetForSelection()
             EditorActionEffect.OpenOverlaysEditor -> overlaysEditing = universalTargetForSelection()
+            EditorActionEffect.OpenAlphaMaskEditor -> alphaMaskEditing = universalTargetForSelection()
             EditorActionEffect.OpenBackgroundEditor -> {
                 if (selectionContext.isAllFrames) backgroundEditing = selectedFramesInOrder
             }
@@ -621,6 +625,36 @@ fun CanvasScaffold(
                 onChange = onChange,
                 tileSizeUnitLabel = "world units",
             )
+        }
+        AppearanceTarget.None -> Unit
+    }
+
+    when (val t = alphaMaskEditing) {
+        is AppearanceTarget.Frames -> ConceptEditorSheet<AlphaMask?>(
+            title = "Alpha mask",
+            initialById = t.nodes.associate { it.id to it.appearance?.alphaMask },
+            onApply = { perId ->
+                dispatchFrameConcept(t.nodes, perId) { existing, v ->
+                    (existing ?: FrameAppearance()).copy(alphaMask = v)
+                }
+                alphaMaskEditing = AppearanceTarget.None
+            },
+            onDismiss = { alphaMaskEditing = AppearanceTarget.None },
+        ) { _, firstDraft, onChange ->
+            AlphaMaskEditor(initial = firstDraft, onChange = onChange)
+        }
+        is AppearanceTarget.Media -> ConceptEditorSheet<AlphaMask?>(
+            title = "Alpha mask",
+            initialById = t.nodes.associate { it.id to it.appearance?.alphaMask },
+            onApply = { perId ->
+                dispatchMediaConcept(t.nodes, perId) { existing, v ->
+                    (existing ?: MediaAppearance()).copy(alphaMask = v)
+                }
+                alphaMaskEditing = AppearanceTarget.None
+            },
+            onDismiss = { alphaMaskEditing = AppearanceTarget.None },
+        ) { _, firstDraft, onChange ->
+            AlphaMaskEditor(initial = firstDraft, onChange = onChange)
         }
         AppearanceTarget.None -> Unit
     }

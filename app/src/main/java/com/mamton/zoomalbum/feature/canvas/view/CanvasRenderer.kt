@@ -8,6 +8,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -18,11 +19,15 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
 import androidx.core.graphics.toColorInt
 import coil3.compose.rememberAsyncImagePainter
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.geometry.Rect
+import com.mamton.zoomalbum.domain.model.AlphaMask
 import com.mamton.zoomalbum.domain.model.BackgroundData
 import com.mamton.zoomalbum.domain.model.BorderStyle
 import com.mamton.zoomalbum.domain.model.CanvasNode
@@ -174,18 +179,43 @@ private fun FullFrameRenderer(
     val textureBitmap = rememberBackgroundBitmap(background)
     val overlays = appearance?.overlays.orEmpty()
     val overlayTextureBitmaps = rememberOverlayTextureBitmaps(overlays)
+    val alphaMask = appearance?.alphaMask
+    val alphaMaskBitmap = rememberAlphaMaskBitmap(alphaMask)
 
-    Spacer(
-        modifier = Modifier
-            .graphicsLayer {
+    val nodeModifier = Modifier
+        .nodeLayoutModifier(renderW, renderH, alphaMask != null)
+        .graphicsLayer {
+            // When masked, the Spacer is sized to (renderW x renderH) pixels via
+            // `nodeLayoutModifier` and translated by `(cx - w/2, cy - h/2)` so its
+            // top-left lands at the node's world top-left and rotation pivots
+            // around its centre. The drawBehind body is wrapped in a translate
+            // that re-centres the drawing back onto local (0,0), so the existing
+            // `(-w/2..w/2, -h/2..h/2)` draw offsets keep working unchanged.
+            //
+            // Without a mask we keep the legacy 0x0 Spacer path: translate to
+            // (cx, cy) with transformOrigin (0,0), draw outside the (zero) bounds
+            // via `clip = false`. That branch is what makes arbitrarily large
+            // world dimensions work without going through Compose Constraints.
+            if (alphaMask != null) {
+                translationX = cx - renderW / 2f
+                translationY = cy - renderH / 2f
+                transformOrigin = TransformOrigin(0.5f, 0.5f)
+                compositingStrategy = CompositingStrategy.Offscreen
+            } else {
                 translationX = cx
                 translationY = cy
-                rotationZ = rotation
                 transformOrigin = TransformOrigin(0f, 0f)
-                clip = false
-                alpha = surfaceAlpha
             }
-            .drawBehind {
+            rotationZ = rotation
+            clip = false
+            alpha = surfaceAlpha
+        }
+        .drawBehind {
+            // Draw offsets centred on local (0,0): for the unmasked path this is
+            // the graphicsLayer's translation point; for the masked path the
+            // outer translate inside `withOptionalMaskOriginShift` shifts the
+            // local origin to the centre of the sized Spacer.
+            withOptionalMaskOriginShift(alphaMask != null, renderW, renderH) {
                 val left = -renderW / 2f
                 val top = -renderH / 2f
                 val right = renderW / 2f
@@ -193,24 +223,36 @@ private fun FullFrameRenderer(
                 val topLeft = Offset(left, top)
                 val nodeSize = Size(renderW, renderH)
                 val radius = CornerRadius(cornerRadiusValue, cornerRadiusValue)
+                val rect = Rect(left, top, right, bottom)
 
+                // Shadow first — outside any mask layer per § 12.5 (shadow uses
+                // the clip rect, not the mask silhouette). For the masked path
+                // the offscreen buffer's bounds clip the shadow to the node
+                // rect; documented MVP limitation.
                 if (phase != FramePaintPhase.Overlay) {
                     appearance?.shadow?.let { drawNodeShadow(it, topLeft, nodeSize, radius) }
-
-                    if (background == null) {
-                        drawRoundRect(
-                            color = Color.White.copy(alpha = 0.2f),
-                            topLeft = topLeft,
-                            size = nodeSize,
-                            cornerRadius = radius,
-                        )
-                    } else {
-                        drawFrameBackground(background, renderW, renderH, textureBitmap)
-                    }
                 }
 
-                if (phase != FramePaintPhase.Surface) {
-                    if (overlays.isNotEmpty()) {
+                // Maskable content: background (Surface phase) + overlays
+                // (Overlay phase). Wrapping both phases lets a single-pass
+                // frame (`phase = Both`) mask its full chrome in one offscreen
+                // layer. For phased frames the mask is applied separately to
+                // each phase — members drawn between phases are unmasked
+                // (documented MVP behavior; § 12.4).
+                val drawMaskable: DrawScope.() -> Unit = drawMaskable@{
+                    if (phase != FramePaintPhase.Overlay) {
+                        if (background == null) {
+                            drawRoundRect(
+                                color = Color.White.copy(alpha = 0.2f),
+                                topLeft = topLeft,
+                                size = nodeSize,
+                                cornerRadius = radius,
+                            )
+                        } else {
+                            drawFrameBackground(background, renderW, renderH, textureBitmap)
+                        }
+                    }
+                    if (phase != FramePaintPhase.Surface && overlays.isNotEmpty()) {
                         withRoundedClip(left, top, right, bottom, cornerRadiusValue) {
                             drawOverlayStack(
                                 overlays = overlays,
@@ -219,6 +261,15 @@ private fun FullFrameRenderer(
                             )
                         }
                     }
+                }
+                if (alphaMask == null) {
+                    drawMaskable()
+                } else {
+                    drawWithAlphaMask(rect, alphaMask, alphaMaskBitmap) { drawMaskable() }
+                }
+
+                // Border last — outside the mask, on the clip edge per § 12.5.
+                if (phase != FramePaintPhase.Surface) {
                     drawNodeBorder(
                         border = appearance?.border,
                         fallbackColorHex = colorHex,
@@ -229,8 +280,9 @@ private fun FullFrameRenderer(
                         cornerRadius = radius,
                     )
                 }
-            },
-    )
+            }
+        }
+    Spacer(modifier = nodeModifier)
 }
 
 /** Simplified: thin border (+ optional background) on the Surface pass; no overlays at this LOD. */
@@ -353,6 +405,54 @@ private const val DEFAULT_FULL_BORDER_WIDTH_PX = 10f
 private const val DEFAULT_SIMPLIFIED_BORDER_ALPHA = 0.4f
 private const val DEFAULT_SIMPLIFIED_BORDER_WIDTH_PX = 1f
 
+/**
+ * For nodes with an alpha mask we force the Spacer's measured size to
+ * (renderW × renderH) pixels. The graphicsLayer downstream then uses these
+ * bounds for its `CompositingStrategy.Offscreen` buffer, which is what DstIn
+ * needs as a real alpha-channel destination. The reported layout size stays
+ * 0×0 so the parent's layout pass is unaffected — same `bypassing Compose
+ * layout Constraints` property as the no-mask path keeps holding.
+ *
+ * For nodes without a mask we return [Modifier] unchanged: the Spacer measures
+ * to 0×0 (no inner constraints used), and drawing happens outside its bounds
+ * via `clip = false`. This preserves the existing arbitrarily-large-node
+ * tolerance — Constraints.fixed with huge values can crash Compose layout, so
+ * we only opt in when the alpha mask actually needs it.
+ */
+private fun Modifier.nodeLayoutModifier(
+    renderW: Float,
+    renderH: Float,
+    masked: Boolean,
+): Modifier = if (!masked) this else this.layout { measurable, _ ->
+    val pW = renderW.toInt().coerceAtLeast(1)
+    val pH = renderH.toInt().coerceAtLeast(1)
+    val placeable = measurable.measure(Constraints.fixed(pW, pH))
+    layout(0, 0) { placeable.place(0, 0) }
+}
+
+/**
+ * Inside a masked `drawBehind`, the Spacer's local origin is its TOP-LEFT (since
+ * the layer has a real size). The existing draw helpers were written against
+ * the legacy 0×0 Spacer convention where local `(0, 0)` was the visual *centre*
+ * and offsets ranged `(-w/2..w/2, -h/2..h/2)`. Translating by `(w/2, h/2)` here
+ * shifts the local origin back to the centre so the rest of the drawing code
+ * keeps working unchanged.
+ *
+ * The unmasked path passes through with no translate — same coords as before.
+ */
+private inline fun DrawScope.withOptionalMaskOriginShift(
+    masked: Boolean,
+    renderW: Float,
+    renderH: Float,
+    block: DrawScope.() -> Unit,
+) {
+    if (masked) {
+        translate(left = renderW / 2f, top = renderH / 2f) { block() }
+    } else {
+        block()
+    }
+}
+
 /** Stub: small colored rect — minimal draw for zoomed-out overview. */
 @Composable
 private fun StubRenderer(
@@ -412,18 +512,29 @@ private fun FullMediaRenderer(
     val overlayTextureBitmaps = rememberOverlayTextureBitmaps(overlays)
     val surfaceAlpha = appearance?.opacity ?: 1f
     val cornerRadiusValue = appearance?.cornerRadius ?: 0f
+    val alphaMask = appearance?.alphaMask
+    val alphaMaskBitmap = rememberAlphaMaskBitmap(alphaMask)
 
-    Spacer(
-        modifier = Modifier
-            .graphicsLayer {
+    val nodeModifier = Modifier
+        .nodeLayoutModifier(renderW, renderH, alphaMask != null)
+        .graphicsLayer {
+            // See FullFrameRenderer for the masked / unmasked split rationale.
+            if (alphaMask != null) {
+                translationX = cx - renderW / 2f
+                translationY = cy - renderH / 2f
+                transformOrigin = TransformOrigin(0.5f, 0.5f)
+                compositingStrategy = CompositingStrategy.Offscreen
+            } else {
                 translationX = cx
                 translationY = cy
-                rotationZ = rotation
                 transformOrigin = TransformOrigin(0f, 0f)
-                clip = false
-                alpha = surfaceAlpha
             }
-            .drawBehind {
+            rotationZ = rotation
+            clip = false
+            alpha = surfaceAlpha
+        }
+        .drawBehind {
+            withOptionalMaskOriginShift(alphaMask != null, renderW, renderH) {
                 val left = -renderW / 2f
                 val top = -renderH / 2f
                 val right = renderW / 2f
@@ -431,20 +542,31 @@ private fun FullMediaRenderer(
                 val topLeft = Offset(left, top)
                 val nodeSize = Size(renderW, renderH)
                 val radius = CornerRadius(cornerRadiusValue, cornerRadiusValue)
+                val rect = Rect(left, top, right, bottom)
 
+                // Shadow outside the mask layer (§ 12.5 — shadow on clip rect).
                 appearance?.shadow?.let { drawNodeShadow(it, topLeft, nodeSize, radius) }
 
-                withRoundedClip(left, top, right, bottom, cornerRadiusValue) {
-                    translate(left = left, top = top) {
-                        with(painter) { draw(Size(renderW, renderH)) }
+                // Bitmap + overlays inside the mask layer.
+                val drawMaskable: DrawScope.() -> Unit = drawMaskable@{
+                    withRoundedClip(left, top, right, bottom, cornerRadiusValue) {
+                        translate(left = left, top = top) {
+                            with(painter) { draw(Size(renderW, renderH)) }
+                        }
+                        drawOverlayStack(
+                            overlays = overlays,
+                            left = left, top = top, right = right, bottom = bottom,
+                            textureBitmaps = overlayTextureBitmaps,
+                        )
                     }
-                    drawOverlayStack(
-                        overlays = overlays,
-                        left = left, top = top, right = right, bottom = bottom,
-                        textureBitmaps = overlayTextureBitmaps,
-                    )
+                }
+                if (alphaMask == null) {
+                    drawMaskable()
+                } else {
+                    drawWithAlphaMask(rect, alphaMask, alphaMaskBitmap) { drawMaskable() }
                 }
 
+                // Border outside the mask layer (§ 12.5 — border on clip outline).
                 drawNodeBorder(
                     border = appearance?.border,
                     fallbackColorHex = null,
@@ -454,8 +576,9 @@ private fun FullMediaRenderer(
                     size = nodeSize,
                     cornerRadius = radius,
                 )
-            },
-    )
+            }
+        }
+    Spacer(modifier = nodeModifier)
 }
 
 /**

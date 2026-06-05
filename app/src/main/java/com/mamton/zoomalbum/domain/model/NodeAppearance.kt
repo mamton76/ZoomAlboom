@@ -24,4 +24,14 @@ sealed class NodeAppearance {
     abstract val overlays: List<OverlayStyle>
     abstract val border: BorderStyle?
     abstract val shadow: ShadowStyle?
+
+    /**
+     * Soft per-pixel alpha mask applied inside the node's clip shape — the
+     * renderer wraps the node draw in an offscreen layer and composites the
+     * mask via `BlendMode.DstIn` (`docs/architecture/appearance.md § 12.4`).
+     * `null` = no mask, fast path with no offscreen layer.
+     *
+     * Border and shadow follow the clip rect, not the mask silhouette (§ 12.5).
+     */
+    abstract val alphaMask: AlphaMask?
 }

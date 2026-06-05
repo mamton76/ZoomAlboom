@@ -138,6 +138,7 @@ data class MediaAppearance(
     override val overlays: List<OverlayStyle> = emptyList(),
     override val border: BorderStyle? = null,
     override val shadow: ShadowStyle? = null,
+    override val alphaMask: AlphaMask? = null,
     val crop: CropSettings = CropSettings(),
     val colorAdjustments: MediaColorAdjustments? = null,
     /** Decorative picture-frame around this single media. NOT a [CanvasNode.Frame]. */

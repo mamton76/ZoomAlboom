@@ -68,6 +68,7 @@ sealed interface EditorActionEffect {
     data object OpenBorderEditor : EditorActionEffect
     data object OpenShadowEditor : EditorActionEffect
     data object OpenOverlaysEditor : EditorActionEffect
+    data object OpenAlphaMaskEditor : EditorActionEffect
     data object OpenBackgroundEditor : EditorActionEffect
     data object OpenCropEditor : EditorActionEffect
     data object OpenColorAdjustmentsEditor : EditorActionEffect

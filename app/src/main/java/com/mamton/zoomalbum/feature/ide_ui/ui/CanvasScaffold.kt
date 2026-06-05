@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.FloatingActionButton
@@ -194,7 +195,13 @@ fun CanvasScaffold(
     Scaffold(
         topBar = {
             val lodCounts = canvasState.visibleNodes.groupingBy { it.detail }.eachCount()
-            CanvasTopBar(
+            // `topBar` is a Column so the `ToolControlBar` slots immediately
+            // below the global chrome — the baseline layout in
+            // `editor-surfaces.md § 4` (horizontal bar below GlobalChromeSurface).
+            // Visibility is Edit-only so View / Presentation reclaim the
+            // pixels.
+            Column {
+                CanvasTopBar(
                 albumName = albumName,
                 visibleNodeCount = canvasState.visibleNodes.size,
                 totalNodeCount = canvasState.totalNodeCount,
@@ -239,7 +246,16 @@ fun CanvasScaffold(
                 onFrameEditOptionsChange = {
                     canvasViewModel.onAction(CanvasAction.SetFrameEditOptions(it))
                 },
-            )
+                )
+                if (editorState.mode == CanvasInteractionMode.Edit) {
+                    ToolControlBar(
+                        activeTool = editorState.activeTool,
+                        onToolSelected = { tool ->
+                            canvasViewModel.onAction(CanvasAction.SetActiveTool(tool))
+                        },
+                    )
+                }
+            }
         },
         floatingActionButton = {
             FloatingActionButton(

@@ -25,11 +25,24 @@ import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.MembershipState
 import com.mamton.zoomalbum.domain.usecase.FrameMembershipUseCase
+import com.mamton.zoomalbum.feature.canvas.editor.gestures.CameraTransformRoute
+import com.mamton.zoomalbum.feature.canvas.editor.gestures.DoubleTapRoute
+import com.mamton.zoomalbum.feature.canvas.editor.gestures.EraserScrubStartRoute
+import com.mamton.zoomalbum.feature.canvas.editor.gestures.GestureRouter
+import com.mamton.zoomalbum.feature.canvas.editor.gestures.GestureRoutingContext
+import com.mamton.zoomalbum.feature.canvas.editor.gestures.LongPressLiftRoute
+import com.mamton.zoomalbum.feature.canvas.editor.gestures.LongPressRoute
+import com.mamton.zoomalbum.feature.canvas.editor.gestures.MarqueeStartRoute
+import com.mamton.zoomalbum.feature.canvas.editor.gestures.SelectedNodeTransformRoute
+import com.mamton.zoomalbum.feature.canvas.editor.gestures.TapRoute
+import com.mamton.zoomalbum.feature.canvas.gestures.eraserScrubGestures
 import com.mamton.zoomalbum.feature.canvas.gestures.infiniteCanvasGestures
 import com.mamton.zoomalbum.feature.canvas.gestures.nodeInteractionGestures
+import com.mamton.zoomalbum.feature.canvas.gestures.selectionMarqueeGestures
 import androidx.compose.runtime.rememberUpdatedState
 import com.mamton.zoomalbum.feature.canvas.gestures.tapAndLongPressGestures
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction
+import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasState
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
 import kotlin.math.atan2
 
@@ -78,21 +91,45 @@ fun CanvasScreen(
     // [0] = previous angle, [1] = initialized flag (0 = no, 1 = yes)
     val rotAngleRef = remember { floatArrayOf(0f, 0f) }
 
-    // Mutable ref for rectangle selection start point (world coords).
-    val rectStartWorld = remember { floatArrayOf(0f, 0f) }
+    // Marquee start point in SCREEN coords ([0] = sx, [1] = sy). Stored
+    // directly without world conversion — the marquee is screen-axis-aligned
+    // and the per-node intersection check happens in screen space via
+    // `TransformUtils.toScreenBoundingBox`. See `selection.md § 2`.
+    val marqueeStartScreen = remember { floatArrayOf(0f, 0f) }
 
-    // Long-press → context-menu handoff. `onLongPress` sets the anchor (or
-    // null for empty-space) and optionally a list of overlapping nodes for
-    // the picker; `onLongPressLift` reads both on lift-without-drag to open
-    // the menu. `skipMenu` is true when long-press fired in a non-Edit mode.
-    // Mutable state is captured by reference via this remembered holder so
-    // it's stable across recompositions (the gesture lambdas need to read
-    // values set in a sibling lambda).
-    val menuCtx = remember {
+    // Long-press → context-menu handoff. `onLongPress` resolves the press-time
+    // route from `GestureRouter`; `onLongPressLift` derives the lift route
+    // from it. The router returns only `hasPicker` (it doesn't depend on the
+    // domain `CanvasNode` type), so the raw picker hit list is stashed
+    // separately for the popup wiring. Mutable state is captured by reference
+    // via this remembered holder so it's stable across recompositions (the
+    // gesture lambdas need to read values set in a sibling lambda).
+    val longPressCtx = remember {
         object {
-            var anchor: String? = null
+            var pressRoute: LongPressRoute = LongPressRoute.Suppress
             var pickerNodes: List<CanvasNode>? = null
-            var skipMenu: Boolean = false
+        }
+    }
+
+    // Marquee gesture state. `active = true` only when `routeMarqueeStart`
+    // returned `Start`; the DismissContextMenuOnly route sets `active = false`
+    // so subsequent update / end callbacks short-circuit and do NOT create a
+    // selection rectangle on the dismiss gesture.
+    val marqueeCtx = remember {
+        object {
+            var active: Boolean = false
+        }
+    }
+
+    // Eraser scrub gesture state. `allowed = true` only when
+    // `routeEraserScrubStart` returned `Start` at scrub-start time; subsequent
+    // per-cross callbacks short-circuit otherwise so a dismiss gesture
+    // (popup-open + drag) doesn't also delete nodes. Each crossing is its
+    // own `DeleteNodes(setOf(id))` dispatch — no Begin/Finish protocol,
+    // no orphan-recovery needed.
+    val eraserCtx = remember {
+        object {
+            var allowed: Boolean = false
         }
     }
 
@@ -118,10 +155,19 @@ fun CanvasScreen(
                 viewModel.onScreenSizeChanged(size.width.toFloat(), size.height.toFloat())
             }
             // Layer 1 (outermost): node drag/resize/rotate — Initial pass
-            // Only active when something is selected. Consumes events on
-            // handles and selected node body; passes through otherwise.
+            // Only active when something is selected AND the routing policy
+            // allows selected-node transform under the current mode + tool.
+            // Selection persists across tool switches by design, so we can't
+            // gate purely on `selectedNodeIds`: an Eraser-active user with a
+            // leftover selection must not be able to drag/resize/rotate that
+            // node. Same applies to View / Presentation. See
+            // `GestureRouter.routeSelectedNodeTransformStart`.
+            //
+            // Passing `emptySet()` short-circuits the detector at its
+            // `pointerInput(selectedNodeIds)` keying — events flow through
+            // to the tap and canvas layers untouched.
             .nodeInteractionGestures(
-                selectedNodeIds = state.editor.selectedNodeIds,
+                selectedNodeIds = transformableSelectionIds(state),
                 hitTestBody = { x, y -> viewModel.isOnSelectedNode(x, y) },
                 hitTestHandle = { x, y -> viewModel.hitTestHandle(x, y) },
                 hitTestRotationHandle = { x, y -> viewModel.hitTestRotationHandle(x, y) },
@@ -209,150 +255,210 @@ fun CanvasScreen(
                     viewModel.onAction(CanvasAction.FinishInteraction)
                 },
             )
-            // Layer 2: tap + double-tap + long-press+drag — single Main pass handler
-            .tapAndLongPressGestures(
-                onTap = { offset ->
-                    if (isContextMenuOpenLatest) {
-                        // Popup is open — single tap dismisses it without
-                        // running the normal Select/Deselect, so users can
-                        // close the menu without losing their selection.
-                        onCanvasGesture()
-                        return@tapAndLongPressGestures
-                    }
-                    val hit = viewModel.hitTest(offset.x, offset.y)
-                    when (state.editor.mode) {
-                        CanvasInteractionMode.Edit -> {
-                            // Tap = replace-style selection. Hit → {node}; miss → clear.
-                            // To add/remove individual nodes, use long-press (toggle).
-                            if (hit != null) {
-                                viewModel.onAction(CanvasAction.SelectNode(hit.id))
-                            } else {
-                                viewModel.onAction(CanvasAction.DeselectAll)
-                            }
+            // Layer 2a: Selection drag-on-empty marquee — Main pass handler.
+            // Recognizes single-finger drag-on-empty past touch slop and
+            // dispatches `UpdateSelectionRect` (or dismisses an open popup
+            // and suppresses the marquee, per the router's
+            // `routeMarqueeStart`). Gated off when the policy returns
+            // `Suppress` so a future View-mode single-finger pan and the
+            // Eraser scrub detector can claim drag-on-empty without
+            // competing here.
+            .selectionMarqueeGestures(
+                enabled = isMarqueeEnabled(state),
+                // Marquee may only start where no Layer-1 interactive surface
+                // sits. Handles + rotation handle aren't returned by
+                // `hitTest`, so checking only nodes would let a marquee fire
+                // alongside a resize / rotate drag — visible as a stray
+                // rectangle drawn during the transform gesture.
+                canStartHere = { x, y ->
+                    viewModel.hitTest(x, y) == null &&
+                        viewModel.hitTestHandle(x, y) == null &&
+                        !viewModel.hitTestRotationHandle(x, y)
+                },
+                onMarqueeStart = { sx, sy ->
+                    val ctx = routingContext(state, isContextMenuOpenLatest)
+                    when (GestureRouter.routeMarqueeStart(ctx)) {
+                        MarqueeStartRoute.Start -> {
+                            marqueeCtx.active = true
+                            // Screen coords — `selectionRect` is screen-space
+                            // so the marquee stays axis-aligned to the screen
+                            // under camera rotation.
+                            marqueeStartScreen[0] = sx
+                            marqueeStartScreen[1] = sy
+                            viewModel.onAction(
+                                CanvasAction.UpdateSelectionRect(
+                                    com.mamton.zoomalbum.core.math.BoundingBox(sx, sy, sx, sy),
+                                ),
+                            )
                         }
-                        CanvasInteractionMode.View,
-                        CanvasInteractionMode.Presentation -> {
-                            // View / Presentation: tap a node to focus it. Miss = no-op.
-                            if (hit != null) viewModel.onAction(CanvasAction.FocusNode(hit.id))
+                        MarqueeStartRoute.DismissContextMenuOnly -> {
+                            marqueeCtx.active = false
+                            onCanvasGesture()
+                        }
+                        MarqueeStartRoute.Suppress -> {
+                            // Defensive — `enabled` should already gate this off.
+                            marqueeCtx.active = false
                         }
                     }
                 },
-                onDoubleTap = {
-                    if (isContextMenuOpenLatest) {
-                        // Popup is open — dismiss it instead of resetting the camera.
-                        onCanvasGesture()
-                        return@tapAndLongPressGestures
-                    }
-                    viewModel.reset()
-                },
-                onLongPress = { screenX, screenY ->
-                    // Reset the menu-handoff state for this gesture.
-                    menuCtx.anchor = null
-                    menuCtx.pickerNodes = null
-                    menuCtx.skipMenu = false
-
-                    // View / Presentation: swallow long-press — no selection
-                    // resolution, no rect-select drag, no context menu.
-                    if (state.editor.mode != CanvasInteractionMode.Edit) {
-                        menuCtx.skipMenu = true
-                        return@tapAndLongPressGestures true
-                    }
-
-                    // Edit long-press routing:
-                    //   >1 hits → add the topmost to selection (it becomes the
-                    //             initial anchor) and remember the full stack
-                    //             so the popup renders a checkbox picker above
-                    //             the menu items.
-                    //   1 hit   → add that node to selection. Anchor = it.
-                    //   0 hits  → fall through; if user drags → rect-select, if
-                    //             user lifts → empty-space context menu.
-                    val hits = viewModel.hitTestAll(screenX, screenY)
-                    when {
-                        hits.isNotEmpty() -> {
-                            // `hitTestAll` sorts by z descending, so hits[0] is the topmost.
-                            val topmost = hits[0]
-                            viewModel.onAction(CanvasAction.AddNodeToSelection(topmost.id))
-                            menuCtx.anchor = topmost.id
-                            menuCtx.pickerNodes = if (hits.size > 1) hits else null
-                            true
-                        }
-
-                        else -> false
-                    }
-                },
-                onLongPressLift = { screenX, screenY ->
-                    // Fires on UP after a long-press that didn't drag. Selection-
-                    // resolution actions already fired in `onLongPress`; we just open
-                    // the menu scoped to the post-resolution selection + anchor.
-                    if (menuCtx.skipMenu) return@tapAndLongPressGestures
-                    if (state.editor.mode != CanvasInteractionMode.Edit) return@tapAndLongPressGestures
-                    onShowContextMenu(
-                        ContextMenuRequest(
-                            selection = viewModel.state.value.editor.selectedNodeIds,
-                            anchorNodeId = menuCtx.anchor,
-                            anchorScreenX = screenX,
-                            anchorScreenY = screenY,
-                            pickerNodes = menuCtx.pickerNodes,
-                        ),
-                    )
-                },
-                onDragStart = { screenX, screenY ->
-                    if (isContextMenuOpenLatest) {
-                        // Popup is open — drag dismisses the popup but does NOT
-                        // start a rect-select. User releases and drags again on
-                        // a fresh gesture for rect-select.
-                        onCanvasGesture()
-                        return@tapAndLongPressGestures
-                    }
-                    val (wx, wy) = TransformUtils.screenToWorld(screenX, screenY, state.camera)
-                    rectStartWorld[0] = wx
-                    rectStartWorld[1] = wy
-                    viewModel.onAction(
-                        CanvasAction.UpdateSelectionRect(
-                            com.mamton.zoomalbum.core.math.BoundingBox(wx, wy, wx, wy),
-                        ),
-                    )
-                },
-                onDragUpdate = { screenX, screenY ->
-                    val (wx, wy) = TransformUtils.screenToWorld(screenX, screenY, state.camera)
-                    val startX = rectStartWorld[0]
-                    val startY = rectStartWorld[1]
+                onMarqueeUpdate = { sx, sy ->
+                    if (!marqueeCtx.active) return@selectionMarqueeGestures
+                    val startX = marqueeStartScreen[0]
+                    val startY = marqueeStartScreen[1]
                     viewModel.onAction(
                         CanvasAction.UpdateSelectionRect(
                             com.mamton.zoomalbum.core.math.BoundingBox(
-                                left = kotlin.math.min(startX, wx),
-                                top = kotlin.math.min(startY, wy),
-                                right = kotlin.math.max(startX, wx),
-                                bottom = kotlin.math.max(startY, wy),
+                                left = kotlin.math.min(startX, sx),
+                                top = kotlin.math.min(startY, sy),
+                                right = kotlin.math.max(startX, sx),
+                                bottom = kotlin.math.max(startY, sy),
                             ),
                         ),
                     )
                 },
-                onDragEnd = {
+                onMarqueeEnd = {
+                    if (!marqueeCtx.active) return@selectionMarqueeGestures
+                    marqueeCtx.active = false
                     val rect = state.editor.selectionRect
                     if (rect != null) {
-                        // Additive iff selection was non-empty when the rect started.
-                        // Rect-select doesn't mutate selectedNodeIds during drag,
-                        // so reading it at onDragEnd reflects the pre-drag state.
+                        // Additive iff selection was non-empty when the rect
+                        // started. Marquee doesn't mutate selectedNodeIds
+                        // during drag, so reading it at onMarqueeEnd reflects
+                        // the pre-drag state.
                         val additive = state.editor.selectedNodeIds.isNotEmpty()
                         viewModel.onAction(
-                            CanvasAction.SelectNodesInRect(
-                                rect,
-                                additive = additive
-                            )
+                            CanvasAction.SelectNodesInRect(rect, additive = additive),
                         )
                     }
                 },
             )
-            // Layer 3: canvas pan/zoom/rotate — Main pass handler
+            // Layer 2c: Object-mode Eraser scrub — Main pass handler.
+            // Single-finger drag past slop in `Edit + Eraser` deletes each
+            // crossed node live as its own `DeleteNodes(setOf(id))` —
+            // immediate visual feedback, one undo entry per node (symmetric
+            // with tap-on-node Eraser). Gated off in any other mode/tool.
+            // Mutually exclusive with `selectionMarqueeGestures` by router
+            // policy.
+            .eraserScrubGestures(
+                enabled = isEraserScrubEnabled(state),
+                hitTestNode = { x, y -> viewModel.hitTest(x, y)?.id },
+                onScrubStart = {
+                    val ctx = routingContext(state, isContextMenuOpenLatest)
+                    when (GestureRouter.routeEraserScrubStart(ctx)) {
+                        EraserScrubStartRoute.Start -> eraserCtx.allowed = true
+                        EraserScrubStartRoute.DismissContextMenuOnly -> {
+                            // Drag-with-popup-open: dismiss the popup, do
+                            // NOT delete on this gesture. Re-grip to scrub.
+                            eraserCtx.allowed = false
+                            onCanvasGesture()
+                        }
+                        // Defensive — `enabled` should already gate this off.
+                        EraserScrubStartRoute.Suppress -> eraserCtx.allowed = false
+                    }
+                },
+                onCrossNode = { nodeId ->
+                    if (!eraserCtx.allowed) return@eraserScrubGestures
+                    // Per-crossing atomic delete — each becomes its own
+                    // undo entry, symmetric with tap-on-node Eraser.
+                    viewModel.onAction(CanvasAction.DeleteNodes(setOf(nodeId)))
+                },
+            )
+            // Layer 2b: tap + double-tap + long-press — single Main pass handler.
+            // All semantic decisions go through `GestureRouter`; the callback
+            // bodies are pure dispatch translation. Mode/tool branching never
+            // lives inline here. Drag-on-empty rect-select lives in
+            // `selectionMarqueeGestures` (Layer 2a). Eraser scrub lives in
+            // `eraserScrubGestures` (Layer 2c).
+            .tapAndLongPressGestures(
+                onTap = { offset ->
+                    val hit = viewModel.hitTest(offset.x, offset.y)
+                    val ctx = routingContext(state, isContextMenuOpenLatest)
+                    when (val route = GestureRouter.routeTap(ctx, hit?.id)) {
+                        TapRoute.DismissContextMenuOnly -> onCanvasGesture()
+                        is TapRoute.EditSelect ->
+                            viewModel.onAction(CanvasAction.SelectNode(route.nodeId))
+                        TapRoute.EditDeselectAll ->
+                            viewModel.onAction(CanvasAction.DeselectAll)
+                        is TapRoute.EraserDeleteNode ->
+                            viewModel.onAction(CanvasAction.DeleteNodes(setOf(route.nodeId)))
+                        is TapRoute.ViewFocus ->
+                            viewModel.onAction(CanvasAction.FocusNode(route.nodeId))
+                        TapRoute.Ignore -> Unit
+                    }
+                },
+                onDoubleTap = {
+                    val ctx = routingContext(state, isContextMenuOpenLatest)
+                    when (GestureRouter.routeDoubleTap(ctx)) {
+                        DoubleTapRoute.DismissContextMenuOnly -> onCanvasGesture()
+                        DoubleTapRoute.ResetCamera -> viewModel.reset()
+                        DoubleTapRoute.Ignore -> Unit
+                    }
+                },
+                onLongPress = { screenX, screenY ->
+                    // Reset the press-route handoff for this gesture.
+                    longPressCtx.pressRoute = LongPressRoute.Suppress
+                    longPressCtx.pickerNodes = null
+
+                    // Hit-test only in Edit; View / Presentation swallow long-press
+                    // unconditionally per the router. Skipping the hit test here
+                    // saves work; the router's contract handles either input the
+                    // same in non-Edit modes.
+                    val hits = if (state.editor.mode == CanvasInteractionMode.Edit) {
+                        viewModel.hitTestAll(screenX, screenY)
+                    } else {
+                        emptyList()
+                    }
+                    val ctx = routingContext(state, isContextMenuOpenLatest)
+                    val route = GestureRouter.routeLongPress(ctx, hits.map { it.id })
+                    longPressCtx.pressRoute = route
+                    when (route) {
+                        // Suppressed (View / Presentation / any Edit tool on
+                        // empty canvas). Detector consumes events until
+                        // pointer-up — no selection or popup state changes.
+                        LongPressRoute.Suppress -> Unit
+                        is LongPressRoute.ResolveAnchor -> {
+                            if (route.extendsSelection) {
+                                viewModel.onAction(
+                                    CanvasAction.AddNodeToSelection(route.anchorNodeId),
+                                )
+                            }
+                            if (route.hasPicker) longPressCtx.pickerNodes = hits
+                        }
+                    }
+                },
+                onLongPressLift = { screenX, screenY ->
+                    val ctx = routingContext(state, isContextMenuOpenLatest)
+                    when (GestureRouter.routeLongPressLift(ctx, longPressCtx.pressRoute)) {
+                        LongPressLiftRoute.Suppress -> Unit
+                        LongPressLiftRoute.OpenMenu -> {
+                            val anchor = (longPressCtx.pressRoute as? LongPressRoute.ResolveAnchor)
+                                ?.anchorNodeId
+                            onShowContextMenu(
+                                ContextMenuRequest(
+                                    selection = viewModel.state.value.editor.selectedNodeIds,
+                                    anchorNodeId = anchor,
+                                    anchorScreenX = screenX,
+                                    anchorScreenY = screenY,
+                                    pickerNodes = longPressCtx.pickerNodes,
+                                ),
+                            )
+                        }
+                    }
+                },
+            )
+            // Layer 3: canvas pan/zoom/rotate — Main pass handler.
+            // Camera gestures stream many updates per second. The router
+            // emits `DismissContextMenuAndProceed` for every event while the
+            // popup is open; `onCanvasGesture` is idempotent so repeated
+            // calls just leave the popup closed. (Differs from tap /
+            // drag-start, where the gesture is discrete and "dismiss only"
+            // is the route.)
             .infiniteCanvasGestures { centroid, pan, zoom, rotation ->
-                // Camera gestures stream many updates per second. We dismiss
-                // the popup on the first call and let the rest of the gesture
-                // pan / zoom / rotate the canvas normally — closing the menu
-                // shouldn't also throw away the user's pinch / pan intent.
-                // (Differs from tap / drag-start, where the gesture is
-                // discrete and "dismiss only" is the right rule.)
-                if (isContextMenuOpenLatest) onCanvasGesture()
+                val ctx = routingContext(state, isContextMenuOpenLatest)
+                when (GestureRouter.routeCameraTransformStart(ctx)) {
+                    CameraTransformRoute.DismissContextMenuAndProceed -> onCanvasGesture()
+                    CameraTransformRoute.Allow -> Unit
+                }
                 viewModel.onGesture(centroid, pan, zoom, rotation)
             },
     ) {
@@ -421,7 +527,6 @@ fun CanvasScreen(
                     anchorNodeId = state.editor.contextAnchorNodeId,
                 )
             }
-            state.editor.selectionRect?.let { rect -> SelectionRectOverlay(rect) }
 
             // Membership visualisation: for EVERY frame in the selection, draw thin
             // borders around its effective members so the membership relation is visible.
@@ -462,6 +567,11 @@ fun CanvasScreen(
             }
         }
 
+        // Marquee rectangle — drawn OUTSIDE the camera-transformed inner Box
+        // so it stays axis-aligned to the screen even when the camera is
+        // rotated. `selectionRect` is stored in screen coords.
+        state.editor.selectionRect?.let { rect -> SelectionRectOverlay(rect) }
+
         if (state.isLoading) {
             CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
         }
@@ -481,3 +591,80 @@ private data class MembershipClassification(
     val allMembers: Set<String>,
     val manualMembers: Set<String>,
 )
+
+/**
+ * Builds the [GestureRoutingContext] read by [GestureRouter] from the
+ * current [CanvasState] + popup-open flag. The router is pure / testable
+ * and knows nothing about Compose, so the call site is responsible for
+ * snapshotting the relevant editor fields. Kept here (not on `EditorState`)
+ * because the popup-open flag lives in `CanvasScaffold`, not the editor
+ * model — see `editor-tools.md § 7.1` (UI-surface state stays out of
+ * `EditorState`).
+ */
+private fun routingContext(
+    state: CanvasState,
+    isContextMenuOpen: Boolean,
+): GestureRoutingContext = GestureRoutingContext(
+    mode = state.editor.mode,
+    activeTool = state.editor.activeTool,
+    hasSelection = state.editor.selectedNodeIds.isNotEmpty(),
+    isContextMenuOpen = isContextMenuOpen,
+)
+
+/**
+ * Returns the selection ids that should be treated as interactive by
+ * [nodeInteractionGestures]. Empty when the router blocks selected-node
+ * transform — selection persists in the model, but body / handle drags must
+ * not respond. See [GestureRouter.routeSelectedNodeTransformStart].
+ *
+ * The popup-open flag is intentionally not threaded in: popup state
+ * dismissal on transform start happens inside `onDragBegin` and does not
+ * itself block the transform, so the routing context here pretends the
+ * popup is closed. This keeps `pointerInput` keying stable across popup
+ * open/close cycles.
+ */
+private fun transformableSelectionIds(state: CanvasState): Set<String> {
+    val ctx = GestureRoutingContext(
+        mode = state.editor.mode,
+        activeTool = state.editor.activeTool,
+        hasSelection = state.editor.selectedNodeIds.isNotEmpty(),
+        isContextMenuOpen = false,
+    )
+    return when (GestureRouter.routeSelectedNodeTransformStart(ctx)) {
+        SelectedNodeTransformRoute.Allow -> state.editor.selectedNodeIds
+        SelectedNodeTransformRoute.Block -> emptySet()
+    }
+}
+
+/**
+ * `enabled` input to [selectionMarqueeGestures]. Stable across popup state
+ * by construction — the popup-open branch produces
+ * [MarqueeStartRoute.DismissContextMenuOnly], which the detector still
+ * needs to run for (so it consumes the gesture and the caller can dismiss
+ * the popup). Keying the detector off `isContextMenuOpen` would also
+ * restart its `pointerInput` mid-gesture if the popup closes during a
+ * drag, which would drop the in-progress marquee.
+ */
+private fun isMarqueeEnabled(state: CanvasState): Boolean {
+    val ctxNoPopup = GestureRoutingContext(
+        mode = state.editor.mode,
+        activeTool = state.editor.activeTool,
+        hasSelection = state.editor.selectedNodeIds.isNotEmpty(),
+        isContextMenuOpen = false,
+    )
+    return GestureRouter.routeMarqueeStart(ctxNoPopup) != MarqueeStartRoute.Suppress
+}
+
+/**
+ * `enabled` input to [eraserScrubGestures]. Same popup-state stability
+ * rationale as [isMarqueeEnabled].
+ */
+private fun isEraserScrubEnabled(state: CanvasState): Boolean {
+    val ctxNoPopup = GestureRoutingContext(
+        mode = state.editor.mode,
+        activeTool = state.editor.activeTool,
+        hasSelection = state.editor.selectedNodeIds.isNotEmpty(),
+        isContextMenuOpen = false,
+    )
+    return GestureRouter.routeEraserScrubStart(ctxNoPopup) != EraserScrubStartRoute.Suppress
+}

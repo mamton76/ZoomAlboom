@@ -35,6 +35,32 @@ object TransformUtils {
         )
     }
 
+    /**
+     * Axis-aligned bounding rectangle of [transform] in **screen** coordinates,
+     * accounting for both the node's own rotation and the camera's rotation /
+     * scale / pan. Used by marquee selection (`SelectNodesInRect`) so the
+     * intersection test happens entirely in screen space — the marquee is
+     * stored as a screen-axis-aligned rect. See `selection.md § 2` for the
+     * gesture map and `selection.md § 5` for the gesture-stack layering.
+     */
+    fun toScreenBoundingBox(transform: Transform, camera: Camera): BoundingBox {
+        val halfW = transform.renderW / 2f
+        val halfH = transform.renderH / 2f
+        val (c0x, c0y) = rotateVector(-halfW, -halfH, transform.rotation)
+        val (c1x, c1y) = rotateVector(halfW, -halfH, transform.rotation)
+        val (c2x, c2y) = rotateVector(halfW, halfH, transform.rotation)
+        val (c3x, c3y) = rotateVector(-halfW, halfH, transform.rotation)
+        val (s0x, s0y) = worldToScreen(transform.cx + c0x, transform.cy + c0y, camera)
+        val (s1x, s1y) = worldToScreen(transform.cx + c1x, transform.cy + c1y, camera)
+        val (s2x, s2y) = worldToScreen(transform.cx + c2x, transform.cy + c2y, camera)
+        val (s3x, s3y) = worldToScreen(transform.cx + c3x, transform.cy + c3y, camera)
+        val minX = minOf(s0x, s1x, s2x, s3x)
+        val minY = minOf(s0y, s1y, s2y, s3y)
+        val maxX = maxOf(s0x, s1x, s2x, s3x)
+        val maxY = maxOf(s0y, s1y, s2y, s3y)
+        return BoundingBox(left = minX, top = minY, right = maxX, bottom = maxY)
+    }
+
     // ── Screen ↔ World conversion ────────────────────────────────────
 
     /**

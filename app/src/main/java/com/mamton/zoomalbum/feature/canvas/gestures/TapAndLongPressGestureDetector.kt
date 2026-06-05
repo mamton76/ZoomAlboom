@@ -8,32 +8,29 @@ import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 
 /**
- * Single gesture handler that detects tap, double-tap, and long-press+drag.
+ * Single gesture handler that detects tap, double-tap, and long-press.
  *
  * Combining these in one `pointerInput` avoids event conflicts between
  * separate `detectTapGestures` and `longPressDragGestures` modifiers.
  *
  * Gesture priority:
  * 1. **Long-press** (hold > [LONG_PRESS_MS] without moving) →
- *    [onLongPress] fires. If it returns `false`, enters drag loop
- *    ([onDragStart] → [onDragUpdate] → [onDragEnd]). If the user lifts
- *    without dragging beyond touch-slop, [onLongPressLift] fires instead.
+ *    [onLongPress] fires; events are then consumed until pointer-up.
+ *    [onLongPressLift] fires on UP.
  * 2. **Double-tap** (two taps within [DOUBLE_TAP_MS]) → [onDoubleTap]
  * 3. **Single tap** (no second tap within [DOUBLE_TAP_MS]) → [onTap]
  *
- * [onLongPressLift] fires after long-press in *both* paths (consumed and
- * fall-through), giving callers a single hook for "context menu opens on
- * lift, drag pre-empts." Selection-resolution actions belong in
- * [onLongPress]; menu opening belongs in [onLongPressLift].
+ * Drag-on-empty for rectangle selection is **not** detected here — see
+ * [selectionMarqueeGestures]. This detector reports tap / double-tap /
+ * long-press only; if the user starts dragging without a prior long-press,
+ * this detector's tap candidate is invalidated (its `waitForUp()` returns
+ * null when another layer consumes), and the marquee detector takes over.
  */
 fun Modifier.tapAndLongPressGestures(
     onTap: (Offset) -> Unit,
     onDoubleTap: (Offset) -> Unit,
-    onLongPress: (screenX: Float, screenY: Float) -> Boolean,
+    onLongPress: (screenX: Float, screenY: Float) -> Unit,
     onLongPressLift: (screenX: Float, screenY: Float) -> Unit = { _, _ -> },
-    onDragStart: (screenX: Float, screenY: Float) -> Unit,
-    onDragUpdate: (screenX: Float, screenY: Float) -> Unit,
-    onDragEnd: () -> Unit,
 ): Modifier = this.pointerInput(Unit) {
     val touchSlop = viewConfiguration.touchSlop
     val slopSq = touchSlop * touchSlop
@@ -49,7 +46,16 @@ fun Modifier.tapAndLongPressGestures(
         // to remember we already saw the UP — Phase 2's waitForUp() awaits
         // the NEXT pointer event and would otherwise hang until the user
         // taps again, delivering the prior tap one gesture late.
+        //
+        // We also flag `slopCrossedInPhase1` separately: a gesture that
+        // moved past slop is a drag, not a tap. Without this flag, Phase 2's
+        // `waitForUp` could race with a sibling drag detector for the UP
+        // event — if `waitForUp` wins, Phase 3 fires `onTap` after the
+        // double-tap window, which (for tap on empty) dispatches
+        // `DeselectAll` and silently undoes a freshly-completed marquee
+        // selection.
         var sawUp = false
+        var slopCrossedInPhase1 = false
         val longPressReached = withTimeoutOrNull(LONG_PRESS_MS) {
             while (true) {
                 val event = awaitPointerEvent()
@@ -62,6 +68,7 @@ fun Modifier.tapAndLongPressGestures(
                 if (change.isConsumed) return@withTimeoutOrNull false
                 val delta = change.position - startPos
                 if (delta.x * delta.x + delta.y * delta.y > slopSq) {
+                    slopCrossedInPhase1 = true
                     return@withTimeoutOrNull false
                 }
             }
@@ -70,51 +77,31 @@ fun Modifier.tapAndLongPressGestures(
         } == null // timeout = long-press
 
         if (longPressReached) {
-            // ── Long-press path ──────────────────────────────
-            val handled = onLongPress(startPos.x, startPos.y)
-            if (handled) {
-                // Caller consumed selection-resolution. We still wait for UP
-                // so the menu can open on lift, since onLongPressLift is the
-                // single hook for "lift after long-press, no drag." No drag
-                // is possible in the consumed branch.
-                consumeUntilAllUp()
-                onLongPressLift(startPos.x, startPos.y)
-            } else {
-                // Fall-through: user may drag (e.g. rect-select) or just lift.
-                // Defer onDragStart until movement crosses touch-slop so a
-                // pure lift fires onLongPressLift, not a zero-area drag.
-                var movedPastSlop = false
-                while (true) {
-                    val event = awaitPointerEvent()
-                    val change = event.changes.firstOrNull() ?: break
-                    if (change.changedToUp()) {
-                        change.consume()
-                        if (movedPastSlop) {
-                            onDragEnd()
-                        } else {
-                            onLongPressLift(startPos.x, startPos.y)
-                        }
-                        break
-                    }
-                    if (!movedPastSlop) {
-                        val delta = change.position - startPos
-                        if (delta.x * delta.x + delta.y * delta.y > slopSq) {
-                            movedPastSlop = true
-                            onDragStart(startPos.x, startPos.y)
-                            onDragUpdate(change.position.x, change.position.y)
-                        }
-                    } else {
-                        onDragUpdate(change.position.x, change.position.y)
-                    }
-                    change.consume()
-                }
-            }
+            // Long-press fired. Caller dispatches selection-resolution side
+            // effects in [onLongPress]; the detector then consumes the rest
+            // of the gesture so a stray tap / drag doesn't fire afterwards.
+            // [onLongPressLift] fires on UP — the caller decides whether to
+            // open the context menu by consulting `GestureRouter`.
+            onLongPress(startPos.x, startPos.y)
+            consumeUntilAllUp()
+            onLongPressLift(startPos.x, startPos.y)
             return@awaitEachGesture
         }
 
-        // Phase 2: not a long-press. If Phase 1 already observed UP, we're
-        // good to go. Otherwise the pointer is either still down or the
-        // gesture was cancelled by another layer consuming events.
+        if (slopCrossedInPhase1) {
+            // Drag, not a tap. The sibling drag detector
+            // (`selectionMarqueeGestures` / `eraserScrubGestures`) owns this
+            // gesture from here. Returning before Phase 2 is essential —
+            // otherwise `waitForUp` can race the drag detector for the UP
+            // event and fire a stray `onTap` (which translates to
+            // `DeselectAll` on empty space, clobbering the marquee result).
+            return@awaitEachGesture
+        }
+
+        // Phase 2: not a long-press, no slop crossed. If Phase 1 already
+        // observed UP, we're good to go. Otherwise the pointer is either
+        // still down or the gesture was cancelled by another layer
+        // consuming events.
         if (!sawUp) {
             waitForUp() ?: return@awaitEachGesture
         }

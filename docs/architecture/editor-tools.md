@@ -222,7 +222,7 @@ Edits individual anchors and bezier handles within a single vector node. Active 
 
 One tool with internal mode toggle. MVP supports object erase and vector partial erase; raster partial erase is post-MVP.
 
-**Object mode.** Delete whole canvas nodes.
+**Object mode — shipped 2026-06-04.** Delete whole canvas nodes.
 
 | Gesture | Result |
 |---|---|
@@ -247,7 +247,7 @@ Example: a horizontal line crossed by a vertical eraser becomes two separate pat
 
 **Topbar (post-MVP, when raster partial lands).** Partial target (Auto / Vector / Raster), hardness, opacity, pressure-affects-size toggle. Raster partial would write into `MediaAppearance.alphaMask` per `appearance.md § 12` (non-destructive). Auto mode picks Vector or Raster based on what the pointer hits.
 
-**Undo granularity.** One continuous erase gesture = one Compound undo. Object scrub-delete N nodes → one entry. Vector partial erase stroke → one entry.
+**Undo granularity.** Per-deletion. Object mode commits one undo entry per crossed node — symmetric with tap-on-node Eraser (each tap = one entry), and consistent with how the rest of the editor treats discrete deletes. An N-node scrub produces N undo steps. (Earlier drafts of this section called for "one continuous gesture = one Compound undo"; that was relaxed when Object-mode shipped to avoid the begin / per-node-buffer / commit ceremony on the ViewModel. Vector partial erase will revisit when it ships — it's a single continuous-path edit, not N discrete deletes, so a Compound entry is the natural fit there.)
 
 **Two-finger during active erase.** Finalize current gesture (commit deletions / segment removals), switch to navigation. Consistent with FreeDraw.
 
@@ -428,20 +428,38 @@ Both types live under `feature/canvas/editor/` — editor interaction concepts, 
 
 **Earlier guidance superseded.** A previous version of this doc said "factor `EditorState` only once 3+ tools accumulate per-tool transient state." `EditorState` was extracted earlier — before any per-tool transient state existed — because the editor-session subset of `CanvasState` (mode + selection + frame-edit options + context anchor) was already coherent on its own, and the extraction stays cheaper to do now than after multiple tool slices couple to a flat shape.
 
-### 7.2 Gesture stack
+### 7.2 Gesture stack and the `GestureRouter`
 
-The existing three-layer stack in [selection.md § 5](selection.md#5-gesture-stack) carries the framework cleanly:
+Two layers, kept deliberately separate:
 
-- **Layer 1** (`nodeInteractionGestures`) — selected-node interactions. Tool-agnostic today; only `Selection` populates the selected set. Future tools that need selected-node manipulation plug in here.
-- **Layer 2** (`tapAndLongPressGestures`) — mixed dispatch by gesture type:
-  - **Tap** is tool-dispatched: `activeTool.onTap(...)` per the per-tool maps in § 4. Each tool has its own tap behavior.
-  - **Long-press** is **not** dispatched to the active tool. It is the universal popup invoker — any long-press resolves a target and opens the popup, with contents derived per § 5. The active tool influences popup *contents*, never whether long-press fires. View mode opens view-mode popups; Present mode suppresses long-press entirely. This keeps long-press predictable and avoids every tool inventing its own long-press behavior.
-  - **Double-tap** is tool-aware but only used by tools that explicitly define it (currently only `VectorEdit` for remove-anchor); others no-op.
+1. **Pointer-level detectors** — `nodeInteractionGestures`, `tapAndLongPressGestures`, `infiniteCanvasGestures`. They own touch slop, multi-finger arbitration, and event-pass consumption. They do **not** decide what a gesture *means*.
+2. **Semantic routing** — `GestureRouter` (in `feature/canvas/editor/gestures/`). All recognized gestures pass through it; it returns a typed route the caller translates into a `CanvasAction` dispatch / overlay update. Pure / testable, no Compose or ViewModel coupling.
 
-  Per-tool drag (FreeDraw stroke, Shape rubber-band, Eraser scrub, etc.) is dispatched separately — each tool's input handler owns its drag detection. Selection's drag-on-empty (marquee) and drag-on-node (move) live in Layer 1 plus the new SelectionTool drag handler (see § 7.3).
-- **Layer 3** (`infiniteCanvasGestures`) — two-or-more-finger camera control. Already mode-agnostic, already tool-agnostic. **No change needed in Edit mode.** For View mode, single-finger pan needs a new handler (Layer 3 today is two-or-more-finger only).
+```
+pointer detectors  →  recognized semantic gesture  →  GestureRouter  →  action/effect owner
+```
 
-Layer 3 is the win: the "global navigation" axis is already in code. The work is making Layer 2's tap and double-tap dispatch tool-aware (long-press stays centralized through § 5) and adding per-tool drag handlers where needed.
+The router is the single place mode / tool / popup-open / selection rules are encoded. Per-tool `when` branches never live in `CanvasScreen` or in detector callbacks — that lock-in would scale poorly as the tool vocabulary grows.
+
+#### Routing policy
+
+| Recognized gesture | Routed via | Notes |
+|---|---|---|
+| Tap | `GestureRouter.routeTap(ctx, hitNodeId)` | Tool-dispatched in Edit; mode-dispatched in View / Presentation. |
+| Double-tap | `GestureRouter.routeDoubleTap(ctx)` | Tool-aware in Edit; mode-level reset-camera affordance in View / Presentation. No MVP tool currently claims double-tap (`VectorEdit` will, when it lands). |
+| Long-press (press + lift) | `GestureRouter.routeLongPress(ctx, hitIds)` + `routeLongPressLift(ctx, pressRoute)` | **Owned by global popup policy.** Long-press is never delegated to the active tool: the universal popup invocation gesture in Edit (and, when the view-mode popup ships per § 5 + § 8 open question, in View as well). Active tool influences derived popup *contents*, never whether long-press fires. Suppressed in Presentation. Today's router also suppresses View as a behavior-preserving step; see § 8. |
+| Selected-node transform start (move / resize / rotate) | `GestureRouter.routeSelectedNodeTransformStart(ctx)` | Allowed only in `Edit + Selection`. Selection persists across tool switches, so a stored selection alone is not sufficient permission — Eraser-active and View / Presentation must block. |
+| Camera multi-finger transform | `GestureRouter.routeCameraTransformStart(ctx)` | Always allowed (global navigation, § 1.3). Returns `DismissContextMenuAndProceed` when the popup is open so the camera intent isn't lost on dismiss. |
+
+#### Per-detector mapping
+
+- **`nodeInteractionGestures`** — pointer-level detector for selected-node body / resize-handle / rotation-handle drag. Stays unchanged. Its `selectedNodeIds` input is fed by the routing layer: when `routeSelectedNodeTransformStart` returns `Block`, the call site passes `emptySet()` so the detector short-circuits at its `pointerInput(selectedNodeIds)` keying and events flow through to lower layers untouched. Selection state is unaffected — only the transform's interactivity is gated.
+- **`tapAndLongPressGestures`** — pointer-level detector for tap / double-tap / long-press (and the transitional long-press-drag rect-select path). Each callback consults the router and translates the typed route into a `CanvasAction`. The detector itself contains no mode or tool checks.
+- **`infiniteCanvasGestures`** — pointer-level detector for two-or-more-finger camera transform. Already mode-agnostic, already tool-agnostic in Edit. View-mode single-finger pan needs a new handler (Layer 3 today is two-or-more-finger only) — see § 7.4.
+
+#### Per-tool drag
+
+Per-tool drag (FreeDraw stroke, Shape rubber-band, Eraser scrub, etc.) is dispatched separately — each tool's input handler owns its drag detection and reaches the router only at gesture-start to confirm ownership. Selection's drag-on-empty (marquee) and drag-on-node (move) live inside `nodeInteractionGestures` plus the SelectionTool drag handler that lands with § 7.3.
 
 ### 7.3 Drag-on-empty migration
 
@@ -474,6 +492,7 @@ Today's `Edit ↔ View` TopBar toggle becomes the `EditorMode` selector. Present
 - ~~`MaskEdit` gesture map.~~ **Resolved 2026-06-03.** Locked in § 4.7. `MaskNode` constraints in [appearance.md § 12.10](appearance.md#1210-masknode-boundaries).
 - **Popup derivation: centralized vs distributed.** § 5. Defer until 3+ tools are implemented and one pattern's pain shows up.
 - **Long-press-on-empty intent.** No defined behavior in the locked Selection map (§ 4.1). Options: no-op (MVP), empty-canvas context menu (paste, add node, canvas settings), or "add content" picker. Defer.
+- **View-mode long-press popup is designed but unwired.** § 5 lists `(View, n/a, [Frame])` popup contents (Navigate to frame; no edit options). `GestureRouter` currently routes all View-mode long-presses to `Suppress` to preserve pre-router behavior — combining the routing extraction with a UX behavior change was explicitly avoided. The view-mode popup ships when the `(mode, tool, selection) → popupContent` derivation in § 5 lands; until then View users reach frames via tap-to-focus and the View top bar.
 - **`VectorEditTool` invalid-selection UX.** Tool requires exactly-one-vector-node selected (§ 4.5). With invalid selection: greyed-out toolbar slot (can't enter), enterable-but-disabled with hint, or auto-prompt? Defer to first-use UX feedback.
 - ~~`EditorState` refactor trigger.~~ **Resolved 2026-06-02.** `EditorState` was extracted before the first per-tool slice; see § 7.1 for the layered shape and the criterion for a later `SelectionState` extraction.
 
@@ -495,7 +514,9 @@ The framework is largely a paper architecture until additional tools ship. The M
 
 1. **Extract `EditorState`** (shipped 2026-06-02). Declare `EditorState` + `EditorTool` under `feature/canvas/editor/`; nest `mode`, `selectedNodeIds`, `selectionRect`, `groupSelectionTransform`, `frameEditOptions`, `contextAnchorNodeId`, and the new `activeTool` under `CanvasState.editor`. Behavior-preserving. See § 7.1 for the shape.
 2. **Grow `EditorTool` vocabulary as tools ship.** Starts with `Selection` and `Eraser`. Add `FreeDraw`, `Shape`, `Text`, `VectorEdit`, `MaskEdit` one variant at a time when each tool actually lands — do not predeclare disabled toolbar slots. `CanvasAction.SetActiveTool(tool)` + handler land alongside the extraction (no UI exposure until the second tool ships). Selection persists across tool switches by construction (no per-switch clear).
-3. **Make Layer 2 tool-aware.** `tapAndLongPressGestures` consults `activeTool` for tap / long-press dispatch. For MVP, only `Selection` has logic; other tools are no-ops.
+3. **Introduce `GestureRouter` and route all recognized gestures through it** (§ 7.2). One semantic routing layer for tap / double-tap / long-press (press + lift) / selected-node transform start / camera transform. Behavior-preserving for the currently shipped behavior; adds mode-aware blocking of selected-node transform under non-Selection tools and non-Edit modes (required correctness before Eraser ships). After this lands, `tapAndLongPressGestures` and `nodeInteractionGestures` callbacks consult only the router — no inline mode / tool branching. Long-press is owned by global popup policy and never delegated to the active tool; tools influence popup *contents* via § 5 only.
+
+   Then **apply the per-tool tap / double-tap semantics from § 4**. For MVP, `Selection` keeps current select / deselect; `Eraser` tap deletes the hit node (Object-mode); double-tap is no-op in Edit (per the locked per-tool maps) and stays as the reset-camera affordance in View / Presentation.
 4. **Migrate rect-select to drag-on-empty** (§ 7.3). Inside `SelectionTool`'s gesture handler, single-finger drag on empty (no long-press required) initiates `SelectNodesInRect`. Update [selection.md § 2](selection.md#2-gesture-mapping).
 5. **View-mode single-finger pan** (§ 7.4). Either extend Layer 3 or add a `viewModePanGestures` modifier active only in View.
 6. **Confirm `editorMode` plumbing.** Today's `CanvasInteractionMode` covers View / Edit / Presentation in the type but only View ↔ Edit in the UI toggle. Confirm wiring; rename to `EditorMode` only if it reduces confusion.
@@ -505,7 +526,7 @@ The framework is largely a paper architecture until additional tools ship. The M
    - `Shape` (§ 4.3) depends on `ShapeNode` data-model + rubber-band drag input.
    - `Text` (§ 4.4) depends on `TextNode` (verify exists) + overlay `BasicTextField` integration.
    - `VectorEdit` (§ 4.5) depends on vector-node existence (from `FreeDraw` / `Shape`) + `VectorEditState` per-tool state.
-   - `Eraser` (§ 4.6) — object mode is trivial after step 3; vector partial mode depends on `VectorEdit`'s path-splitting math.
+   - `Eraser` (§ 4.6) — object mode **shipped 2026-06-04**: `TapRoute.EraserDeleteNode` + `routeEraserScrubStart`, dedicated `eraserScrubGestures` detector (Layer 2c), `CanvasAction.DeleteNodes(ids)` with selection-pruning semantics, one `CanvasCommand` per gesture. Vector partial mode depends on `VectorEdit`'s path-splitting math.
    - `MaskEdit` (§ 4.7) depends on `MaskNode` data-model (per [appearance.md § 12.10](appearance.md#1210-masknode-boundaries)) — gesture map locked, ships once `MaskNode` lands per `appearance.md § 12.8`.
 
 Steps 4 and 5 are the only behavior-changing items in the framework batch. Steps 1-3 are additive type / field declarations that activate Selection-as-tool without removing anything.

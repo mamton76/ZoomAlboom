@@ -122,8 +122,14 @@ sealed interface CanvasAction : Intent {
      * @param additive if true, union with the current selection (keeps previously
      *        selected nodes). If false (default), replaces the selection.
      */
+    /**
+     * Replace or extend the selection with every node whose **screen-space**
+     * AABB intersects [screenRect]. Screen-space — not world — so the
+     * marquee stays axis-aligned to the screen regardless of camera
+     * rotation. See `selectionMarqueeGestures` + `TransformUtils.toScreenBoundingBox`.
+     */
     data class SelectNodesInRect(
-        val worldRect: BoundingBox,
+        val screenRect: BoundingBox,
         val additive: Boolean = false,
     ) : CanvasAction
     data object DeselectAll : CanvasAction
@@ -144,6 +150,17 @@ sealed interface CanvasAction : Intent {
 
     // Lifecycle
     data object DeleteSelection : CanvasAction
+    /**
+     * Delete an explicit set of nodes by id. One `CanvasCommand` entry —
+     * undo restores all of them at their original indices, preserving
+     * z-order. Used by Object-mode Eraser (`editor-tools.md § 4.6`) for
+     * both tap-on-node (single-id set) and each per-cross step of a scrub
+     * (also single-id set). Each crossing in a scrub becomes its own undo
+     * entry, symmetric with tap-delete. The ids are pruned from the active
+     * selection if present.
+     */
+    data class DeleteNodes(val ids: Set<String>) : CanvasAction
+
     data object DuplicateSelection : CanvasAction
     data class BeginInteraction(val kind: InteractionKind) : CanvasAction
     data object FinishInteraction : CanvasAction
@@ -153,7 +170,12 @@ sealed interface CanvasAction : Intent {
     data object Redo : CanvasAction
 
     // Rectangle selection preview
-    data class UpdateSelectionRect(val worldRect: BoundingBox?) : CanvasAction
+    /**
+     * Sets the live marquee rect (screen coords, axis-aligned to screen).
+     * `null` clears it. The rect is interpreted as screen-space everywhere
+     * — see [SelectNodesInRect] and `SelectionRectOverlay`.
+     */
+    data class UpdateSelectionRect(val screenRect: BoundingBox?) : CanvasAction
 
     // Mode + navigation
     data class SetMode(val mode: CanvasInteractionMode) : CanvasAction
@@ -421,8 +443,16 @@ class CanvasViewModel @Inject constructor(
             }
 
             is CanvasAction.SelectNodesInRect -> {
+                // Marquee rect is in SCREEN coordinates (axis-aligned to the
+                // screen, decoupled from camera rotation). Hit-test each
+                // node's projected screen AABB against it.
+                val cam = _state.value.camera
                 val rectHits = _allNodes.value
-                    .filter { TransformUtils.toBoundingBox(it.transform).intersects(action.worldRect) }
+                    .filter {
+                        TransformUtils
+                            .toScreenBoundingBox(it.transform, cam)
+                            .intersects(action.screenRect)
+                    }
                     .map { it.id }
                     .toSet()
                 val ids = if (action.additive) {
@@ -570,32 +600,10 @@ class CanvasViewModel @Inject constructor(
                 }
             }
 
-            is CanvasAction.DeleteSelection -> {
-                val ids = _state.value.editor.selectedNodeIds
-                if (ids.isEmpty()) return
-                val current = _allNodes.value
-                val removedWithIdx = current.withIndex()
-                    .filter { it.value.id in ids }
-                    .map { it.index to it.value }
-                if (removedWithIdx.isEmpty()) return
-                _allNodes.update { nodes -> nodes.filter { it.id !in ids } }
-                _state.update { s ->
-                    s.copy(
-                        totalNodeCount = _allNodes.value.size,
-                        editor = s.editor.copy(selectedNodeIds = emptySet()),
-                    )
-                }
-                commit(
-                    CanvasCommand(
-                        before = removedWithIdx.map { it.second },
-                        after = null,
-                        beforeIndices = removedWithIdx.map { it.first },
-                        kind = CommandKind.DELETE,
-                        timestampMs = System.currentTimeMillis(),
-                    ),
-                )
-                recalculateVisibleNodes()
-            }
+            is CanvasAction.DeleteSelection ->
+                deleteNodesById(_state.value.editor.selectedNodeIds)
+
+            is CanvasAction.DeleteNodes -> deleteNodesById(action.ids)
 
             is CanvasAction.DuplicateSelection -> {
                 val ids = _state.value.editor.selectedNodeIds
@@ -701,7 +709,7 @@ class CanvasViewModel @Inject constructor(
             }
 
             is CanvasAction.UpdateSelectionRect -> {
-                updateEditor { it.copy(selectionRect = action.worldRect) }
+                updateEditor { it.copy(selectionRect = action.screenRect) }
             }
 
             is CanvasAction.SetMode -> {
@@ -1312,6 +1320,48 @@ class CanvasViewModel @Inject constructor(
     private fun refreshHistoryFlags() {
         _canUndo.value = history.canUndo
         _canRedo.value = history.canRedo
+    }
+
+    /**
+     * Atomic bulk-delete of [ids] with one [CanvasCommand] entry. Used by
+     * both [CanvasAction.DeleteSelection] (passes the current selection) and
+     * [CanvasAction.DeleteNodes] (passes explicit ids — including each
+     * per-cross step of an Object-mode Eraser scrub). Removes the nodes
+     * from `_allNodes`, prunes them from `editor.selectedNodeIds` in place
+     * (so partial deletes preserve any remaining selection), and rebuilds
+     * `groupSelectionTransform` if the surviving selection is still a
+     * multi-selection.
+     */
+    private fun deleteNodesById(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        val current = _allNodes.value
+        val removedWithIdx = current.withIndex()
+            .filter { it.value.id in ids }
+            .map { it.index to it.value }
+        if (removedWithIdx.isEmpty()) return
+        _allNodes.update { nodes -> nodes.filter { it.id !in ids } }
+        _state.update { s ->
+            s.copy(
+                totalNodeCount = _allNodes.value.size,
+                editor = s.editor.copy(selectedNodeIds = s.editor.selectedNodeIds - ids),
+            )
+        }
+        val newSelection = _state.value.editor.selectedNodeIds
+        when {
+            newSelection.size >= 2 -> recomputeGroupTransform(newSelection)
+            newSelection.isEmpty() ->
+                updateEditor { it.copy(groupSelectionTransform = null) }
+        }
+        commit(
+            CanvasCommand(
+                before = removedWithIdx.map { it.second },
+                after = null,
+                beforeIndices = removedWithIdx.map { it.first },
+                kind = CommandKind.DELETE,
+                timestampMs = System.currentTimeMillis(),
+            ),
+        )
+        recalculateVisibleNodes()
     }
 
     /**

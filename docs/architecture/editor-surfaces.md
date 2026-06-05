@@ -81,14 +81,17 @@ Baseline rendering: a horizontal `ToolControlBar` sitting below the `GlobalChrom
 - a second functional tool ships (expected first case: Object-mode `Eraser`), or
 - `Selection` itself gains real user-facing settings (e.g., lasso mode toggle).
 
-At the first Eraser slice the bar may be minimal:
+**First slice — shipped 2026-06-04.** Lands alongside Object-mode `Eraser` (see [editor-tools.md § 4.6](editor-tools.md#46-eraser)). Bar visibility is gated on `editor.mode == Edit`; renders nothing in View / Present. Single `DropdownMenu` listing every available tool — the button shows the active tool's label and a `▾` indicator; picking a row dispatches `CanvasAction.SetActiveTool(...)` and closes. Today the menu contains `Select` and `Erase`. The "Object" mode chip the design listed for Eraser is intentionally omitted while there's only one mode; it returns when Vector-partial Eraser ships. `VectorEdit` / `MaskEdit` are context-gated per § 6 and don't appear as permanent rows in the dropdown.
 
 ```
-[ ↖ Selection ▾ ]
-[ 🧽 Eraser ▾ ]       Object
+[ Select ▾ ]              ← MVP today; dropdown lists Select / Erase
 ```
 
-Vector-partial Eraser later adds the mode selector and brush size.
+Vector-partial Eraser later adds the per-tool secondary controls to the right of the dropdown:
+
+```
+[ Erase ▾ ]       Object | Vector Partial    Size ━━━━━
+```
 
 ---
 

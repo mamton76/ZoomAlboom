@@ -249,30 +249,34 @@ private fun MembershipBorder(
 }
 
 /**
- * Semi-transparent rectangle drawn during drag-to-select.
+ * Semi-transparent rectangle drawn during drag-to-select. [screenRect] is
+ * in **screen** coordinates — this composable must be hosted OUTSIDE the
+ * camera-transformed Box so the rect stays axis-aligned to the screen
+ * regardless of camera rotation. See `EditorState.selectionRect` /
+ * `selectionMarqueeGestures`.
  */
 @Composable
-fun SelectionRectOverlay(rect: BoundingBox) {
+fun SelectionRectOverlay(screenRect: BoundingBox) {
     Spacer(
         modifier = Modifier
             .graphicsLayer {
-                translationX = rect.centerX
-                translationY = rect.centerY
+                translationX = screenRect.centerX
+                translationY = screenRect.centerY
                 transformOrigin = TransformOrigin(0f, 0f)
                 clip = false
             }
             .drawBehind {
-                val halfW = rect.width / 2f
-                val halfH = rect.height / 2f
+                val halfW = screenRect.width / 2f
+                val halfH = screenRect.height / 2f
                 drawRect(
                     color = AccentCyan.copy(alpha = 0.15f),
                     topLeft = Offset(-halfW, -halfH),
-                    size = Size(rect.width, rect.height),
+                    size = Size(screenRect.width, screenRect.height),
                 )
                 drawRect(
                     color = AccentCyan.copy(alpha = 0.6f),
                     topLeft = Offset(-halfW, -halfH),
-                    size = Size(rect.width, rect.height),
+                    size = Size(screenRect.width, screenRect.height),
                     style = Stroke(width = 1f),
                 )
             },

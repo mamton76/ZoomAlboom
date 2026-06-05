@@ -39,6 +39,11 @@ data class EditorState(
     val mode: CanvasInteractionMode = CanvasInteractionMode.Edit,
     val activeTool: EditorTool = EditorTool.Selection,
     val selectedNodeIds: Set<String> = emptySet(),
+    /**
+     * Live marquee rectangle while the user is drawing a rect-select. Stored
+     * in **screen** coordinates so it stays axis-aligned to the screen even
+     * when the camera has been rotated. `null` when no marquee is in flight.
+     */
     val selectionRect: BoundingBox? = null,
     /** Group selection bounding rect — computed on selection change, rotation accumulated. */
     val groupSelectionTransform: Transform? = null,

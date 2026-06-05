@@ -4,7 +4,20 @@
 
 ---
 
-> No open topics. All previously listed discussions have graduated to `docs/architecture/` — see the trailer below.
+## § 1 Eraser long-press popup contents
+
+**Status:** open. Surfaced 2026-06-05 during the Object-mode Eraser ship review.
+
+Long-press in Eraser mode currently opens the **same** context menu as Selection mode (Edit appearance / Duplicate / Delete / z-order / membership). Per [`editor-tools.md § 5`](architecture/editor-tools.md#5-popup-derivation) the popup is supposed to be a function of `(editorMode, activeTool, selection, objectTypes)` — Eraser-specific contents (size / mode / hardness — non-destructive bailout actions) aren't wired yet.
+
+**Mitigation already shipped:** `LongPressRoute.ResolveAnchor.extendsSelection` is `false` for non-Selection tools, so long-press in Eraser no longer silently grows the selection. The "non-destructive bailout" property of long-press ([`editor-tools.md § 4.6`](architecture/editor-tools.md#46-eraser)) is preserved at the gesture level; only the menu *contents* are still Selection-shaped.
+
+**Open questions:**
+1. **Popup-derivation strategy** — centralized `PopupActions.derive(...)` vs. per-tool `EditorTool.contributePopupActions(...)`. Per `editor-tools.md § 8` this is deferred until 3+ tools exist and the pain of one direction shows up. Today we have 2 tools — not yet enough signal.
+2. **Eraser-specific popup contents** — what actually goes in the menu when `(Edit, Eraser, selection)` fires? Mirror the topbar (mode chip, brush size) + a "Cancel" / "Delete this anchor" row? What about `(Edit, Eraser, empty selection)` — empty menu or "Add..."?
+3. **Anchor-not-in-selection UX** — current menu items operate on `selectedNodeIds`; the anchor is decoration. For tools that don't extend selection on long-press (everything except Selection), the anchor is effectively orphaned for menu purposes. Should anchor get its own action row, or should the menu derive its scope from `selectedNodeIds.ifEmpty { setOf(anchor) }`?
+
+**Tracking:** resolution unblocks the `editor-tools.md § 8` "popup derivation" open question. PR descriptions for tools that ship before this lands should call out the Selection-shaped popup as a known follow-up.
 
 ---
 

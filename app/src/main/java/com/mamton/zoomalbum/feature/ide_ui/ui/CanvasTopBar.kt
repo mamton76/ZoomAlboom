@@ -74,8 +74,6 @@ fun CanvasTopBar(
             IconButton(onClick = onNavigateBack) { Text("\u2190") }
         },
         actions = {
-            IconButton(onClick = onUndo ?: {}, enabled = onUndo != null) { Text("↶") } // undo
-            IconButton(onClick = onRedo ?: {}, enabled = onRedo != null) { Text("↷") } // redo
             if (frameEditOptions != null) {
                 // Selection-scoped frame-gesture modifiers. Visible only while a
                 // frame is selected. Same persistence semantics as before — the
@@ -101,6 +99,8 @@ fun CanvasTopBar(
                     },
                 )
             }
+            IconButton(onClick = onUndo ?: {}, enabled = onUndo != null) { Text("↶") } // undo
+            IconButton(onClick = onRedo ?: {}, enabled = onRedo != null) { Text("↷") } // redo
             IconButton(onClick = onToggleMode) {
                 Text(
                     text = when (mode) {

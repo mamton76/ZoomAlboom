@@ -23,4 +23,19 @@ sealed interface EditorTool {
      * implementation slice after the [EditorState] extraction.
      */
     data object Eraser : EditorTool
+
+    /**
+     * Pan / zoom the source pixels of one media node behind its world rect
+     * (the "viewport"), and resize the viewport via corner / edge handles.
+     * Context-gated: valid only when the selection is exactly one
+     * `CanvasNode.Media`. Auto-exits to [Selection] if that invariant breaks
+     * (deletion, multi-select, frame selected, etc.).
+     *
+     * Mutates `MediaAppearance.crop.{offsetX, offsetY, zoom}` and the media
+     * node's `Transform`. Entry snaps `crop.mode` to `Manual` if it isn't
+     * already; v1 keeps existing `offsetX / offsetY / zoom` values (`(0, 0, 1)`
+     * for never-edited nodes — renders as centered Fill). See
+     * `docs/architecture/editor-tools.md § 4.8`.
+     */
+    data object CropEdit : EditorTool
 }

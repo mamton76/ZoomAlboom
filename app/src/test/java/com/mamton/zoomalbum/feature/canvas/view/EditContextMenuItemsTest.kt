@@ -4,6 +4,7 @@ import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.Transform
 import com.mamton.zoomalbum.feature.canvas.actions.EditorActionEffect
 import com.mamton.zoomalbum.feature.canvas.actions.SelectionContext
+import com.mamton.zoomalbum.feature.canvas.editor.EditorTool
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -141,8 +142,14 @@ class EditContextMenuItemsTest {
         // Per-concept editors route to their own effects.
         items.single { it.label == "Edit opacity" }.onClick()
         assertTrue(sink.effects.contains(EditorActionEffect.OpenOpacityEditor))
+        // "Edit crop" now activates the in-canvas `CropEdit` tool instead of
+        // opening the sheet. See `editor-tools.md § 4.8`.
         items.single { it.label == "Edit crop" }.onClick()
-        assertTrue(sink.effects.contains(EditorActionEffect.OpenCropEditor))
+        assertTrue(
+            sink.dispatchedActions.any {
+                it is CanvasAction.SetActiveTool && it.tool === EditorTool.CropEdit
+            },
+        )
         items.single { it.label == "Duplicate" }.onClick()
         assertTrue(sink.dispatchedActions.contains(CanvasAction.DuplicateSelection))
         items.single { it.label == "Delete" }.onClick()
@@ -248,7 +255,8 @@ class EditContextMenuItemsTest {
                 "Edit shadow (2)",
                 "Edit overlays (2)",
                 "Edit alpha mask (2)",
-                "Edit crop (2)",
+                // "Edit crop" hidden for multi-media — `CropEdit` is single-
+                // media only per editor-tools.md § 4.8.
                 "Edit color adjustments (2)",
                 "Edit frame decoration (2)",
                 "Edit caption (2)",
@@ -282,7 +290,8 @@ class EditContextMenuItemsTest {
                 "Edit shadow (2)",
                 "Edit overlays (2)",
                 "Edit alpha mask (2)",
-                "Edit crop (2)",
+                // "Edit crop" hidden for multi-media — `CropEdit` is single-
+                // media only per editor-tools.md § 4.8.
                 "Edit color adjustments (2)",
                 "Edit frame decoration (2)",
                 "Edit caption (2)",
@@ -311,7 +320,8 @@ class EditContextMenuItemsTest {
                 "Edit shadow (2)",
                 "Edit overlays (2)",
                 "Edit alpha mask (2)",
-                "Edit crop (2)",
+                // "Edit crop" hidden for multi-media — `CropEdit` is single-
+                // media only per editor-tools.md § 4.8.
                 "Edit color adjustments (2)",
                 "Edit frame decoration (2)",
                 "Edit caption (2)",

@@ -43,6 +43,7 @@ import com.mamton.zoomalbum.feature.canvas.actions.EditorAction
 import com.mamton.zoomalbum.feature.canvas.actions.EditorActionEffect
 import com.mamton.zoomalbum.feature.canvas.actions.SelectionContext
 import com.mamton.zoomalbum.feature.canvas.editor.AppearanceTarget
+import com.mamton.zoomalbum.feature.canvas.editor.EditorTool
 import com.mamton.zoomalbum.feature.canvas.view.CanvasScreen
 import com.mamton.zoomalbum.feature.canvas.view.ContextMenuPopup
 import com.mamton.zoomalbum.feature.canvas.view.ContextMenuRequest
@@ -50,6 +51,7 @@ import com.mamton.zoomalbum.feature.canvas.view.SelectionDebugPanel
 import com.mamton.zoomalbum.feature.canvas.view.buildEditContextMenuItems
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
+import com.mamton.zoomalbum.domain.undo.InteractionKind
 import com.mamton.zoomalbum.feature.ide_ui.ui.content.AlphaMaskEditor
 import com.mamton.zoomalbum.feature.ide_ui.ui.content.BackgroundEditor
 import com.mamton.zoomalbum.feature.ide_ui.ui.content.BorderStyleEditor
@@ -352,11 +354,60 @@ fun CanvasScaffold(
                 },
                 )
                 if (editorState.mode == CanvasInteractionMode.Edit) {
+                    val cropTopbarState = if (
+                        editorState.activeTool === EditorTool.CropEdit
+                    ) {
+                        val media = selectedMediaInOrder.singleOrNull()
+                        media?.let {
+                            CropEditTopbarState(
+                                aspectLocked = editorState.cropEdit.aspectLocked,
+                                sourceZoom = it.appearance?.crop?.zoom ?: 1f,
+                            )
+                        }
+                    } else null
+                    val cropTopbarCallbacks = if (cropTopbarState != null) {
+                        val mediaId = selectedMediaInOrder.single().id
+                        CropEditTopbarCallbacks(
+                            onAspectLockedChange = { locked ->
+                                canvasViewModel.onAction(CanvasAction.SetCropEditAspectLocked(locked))
+                            },
+                            onBeginZoomDrag = {
+                                canvasViewModel.onAction(
+                                    CanvasAction.BeginInteraction(InteractionKind.RESIZE),
+                                )
+                            },
+                            onSourceZoomChange = { v ->
+                                canvasViewModel.onAction(CanvasAction.SetCropZoom(mediaId, v))
+                            },
+                            onEndZoomDrag = {
+                                canvasViewModel.onAction(CanvasAction.FinishInteraction)
+                            },
+                            onReset = {
+                                canvasViewModel.onAction(
+                                    CanvasAction.BeginInteraction(InteractionKind.RESIZE),
+                                )
+                                canvasViewModel.onAction(CanvasAction.ResetCropManual(mediaId))
+                                canvasViewModel.onAction(CanvasAction.FinishInteraction)
+                            },
+                            onLeave = {
+                                canvasViewModel.onAction(
+                                    CanvasAction.SetActiveTool(
+                                        EditorTool.Selection,
+                                    ),
+                                )
+                            },
+                            onCancel = {
+                                canvasViewModel.onAction(CanvasAction.CancelCropEdit)
+                            },
+                        )
+                    } else null
                     ToolControlBar(
                         activeTool = editorState.activeTool,
                         onToolSelected = { tool ->
                             canvasViewModel.onAction(CanvasAction.SetActiveTool(tool))
                         },
+                        cropEditState = cropTopbarState,
+                        cropEditCallbacks = cropTopbarCallbacks,
                     )
                 }
             }

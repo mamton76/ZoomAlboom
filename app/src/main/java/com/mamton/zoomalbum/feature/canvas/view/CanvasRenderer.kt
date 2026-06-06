@@ -32,10 +32,12 @@ import com.mamton.zoomalbum.domain.model.BackgroundData
 import com.mamton.zoomalbum.domain.model.BorderStyle
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CropMode
+import com.mamton.zoomalbum.domain.model.CropSettings
 import com.mamton.zoomalbum.domain.model.FrameAppearance
 import com.mamton.zoomalbum.domain.model.MediaAppearance
 import com.mamton.zoomalbum.domain.model.RenderDetail
 import com.mamton.zoomalbum.domain.model.ShadowStyle
+import kotlin.math.max
 
 /**
  * Renders a single [CanvasNode] inside the camera-transformed container.
@@ -550,9 +552,12 @@ private fun FullMediaRenderer(
                 // Bitmap + overlays inside the mask layer.
                 val drawMaskable: DrawScope.() -> Unit = drawMaskable@{
                     withRoundedClip(left, top, right, bottom, cornerRadiusValue) {
-                        translate(left = left, top = top) {
-                            with(painter) { draw(Size(renderW, renderH)) }
-                        }
+                        drawCroppedBitmap(
+                            painter = painter,
+                            crop = appearance?.crop,
+                            left = left, top = top,
+                            renderW = renderW, renderH = renderH,
+                        )
                         drawOverlayStack(
                             overlays = overlays,
                             left = left, top = top, right = right, bottom = bottom,
@@ -608,10 +613,55 @@ private inline fun DrawScope.withRoundedClip(
 private fun CropMode?.toContentScale(): ContentScale = when (this) {
     CropMode.Fit -> ContentScale.Fit
     CropMode.Stretch -> ContentScale.FillBounds
-    // Manual pan/zoom rendering is deferred — fall back to Crop until the
-    // manual-crop renderer lands.
-    CropMode.Manual, CropMode.Fill, null -> ContentScale.Crop
+    CropMode.Fill, null -> ContentScale.Crop
+    // Manual lays the bitmap out manually in `drawCroppedBitmap`; ContentScale
+    // here only affects how Coil treats the requested draw size during loading.
+    // Fit keeps loading state from over-filling and respects source aspect once
+    // we hand the painter an aspect-correct draw size.
+    CropMode.Manual -> ContentScale.Fit
 }
+
+/**
+ * Draws the source bitmap inside the already-clipped media rect, respecting
+ * `crop.mode`. For Fit / Fill / Stretch the painter's `ContentScale` does the
+ * scaling and the rect is the full media rect. For Manual the source is drawn
+ * at `fillScale × crop.zoom` and shifted by `(crop.offsetX, crop.offsetY)`,
+ * with `zoom = 1` defined as the Fill scale on the limiting axis.
+ *
+ * `painter.intrinsicSize` is unspecified while the image loads; the Manual
+ * branch falls back to a Fill-style draw until intrinsics arrive.
+ */
+private fun DrawScope.drawCroppedBitmap(
+    painter: androidx.compose.ui.graphics.painter.Painter,
+    crop: CropSettings?,
+    left: Float, top: Float,
+    renderW: Float, renderH: Float,
+) {
+    if (crop?.mode == CropMode.Manual) {
+        val intrinsic = painter.intrinsicSize
+        val srcW = intrinsic.width
+        val srcH = intrinsic.height
+        if (srcW > 0f && srcH > 0f && srcW.isFinite() && srcH.isFinite()) {
+            val fillScale = max(renderW / srcW, renderH / srcH)
+            val drawScale = (fillScale * crop.zoom).coerceAtLeast(MIN_DRAW_SCALE)
+            val drawW = srcW * drawScale
+            val drawH = srcH * drawScale
+            val drawLeft = -drawW / 2f + crop.offsetX
+            val drawTop = -drawH / 2f + crop.offsetY
+            translate(left = drawLeft, top = drawTop) {
+                with(painter) { draw(Size(drawW, drawH)) }
+            }
+            return
+        }
+        // Intrinsic size not yet known — fall through to Fill-style draw so the
+        // loading frame doesn't pop in from nothing.
+    }
+    translate(left = left, top = top) {
+        with(painter) { draw(Size(renderW, renderH)) }
+    }
+}
+
+private const val MIN_DRAW_SCALE = 1e-3f
 
 @Composable
 private fun MediaPlaceholder(

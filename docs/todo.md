@@ -795,7 +795,7 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 - [x] **Shared overlay-stack helper**: `DrawScope.drawOverlayStack(overlays, left, top, right, bottom, textureBitmaps)` in `OverlayRenderer.kt`. Used by both `FullMediaRenderer` and `FullFrameRenderer` (Overlay phase).
 - [x] `CropMode.Fit` — letterbox within bounding box (`ContentScale.Fit`).
 - [x] `CropMode.Fill` — crop to fill bounding box (`ContentScale.Crop`; respects focal point is deferred until the manual-crop renderer lands).
-- [ ] `CropMode.Manual` — pan/zoom inside bounding box (user-controlled). Currently falls back to `ContentScale.Crop`.
+- [x] `CropMode.Manual` — pan/zoom inside bounding box (user-controlled). Shipped 2026-06-07 in § 20.8 alongside the `CropEdit` tool. Renderer is `FullMediaRenderer.drawCroppedBitmap`; reads `crop.{offsetX, offsetY, zoom}` directly.
 - [x] `CropMode.Stretch` — stretch to bounds ignoring aspect ratio (`ContentScale.FillBounds`).
 - [x] `OverlayStyle` rendering — Solid / Texture / Procedural source with `NodeBlendMode` via `saveLayer(Paint(blendMode, alpha))`. Texture overlays load through `rememberOverlayTextureBitmaps` (Coil `SingletonImageLoader.execute` with `allowHardware(false)`), keyed on the set of `textureRefId`s in the list.
 - [ ] Nine-slice decoration rendering — draw 9 regions independently (corners unscaled, edges scaled one axis).
@@ -828,7 +828,7 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 - [x] Crop mode selector (Fit / Fill / Manual / Stretch) + focal-point sliders (Fill) / manual offset+zoom sliders (Manual).
 - [ ] `frameDecoration` picker (browse built-in + user assets — current UI is asset-URI text field + mode dropdown only).
 - [ ] Color adjustments — sliders exist (`ColorAdjustmentsEditor`) but the renderer doesn't apply them yet; sliders persist values for the future renderer.
-- [ ] Manual crop handle in canvas (the slider UI exists; in-canvas pan/zoom gesture handle is post-MVP).
+- [x] Manual crop handle in canvas — shipped 2026-06-07 as `EditorTool.CropEdit`. See [editor-tools.md § 4.8](architecture/editor-tools.md#48-cropedit) + § 20.8 for the slice details.
 - [ ] Context menu actions: Copy Appearance, Paste Appearance, Save as Preset, Reset Appearance, Save Edited Image.
 
 ### Implementation priority
@@ -907,6 +907,70 @@ See [appearance.md § 13](architecture/appearance.md#13-design-history--overlay-
 - [x] Update `rendering.md § 6b` (`buildFramePaintEvents` description), `background.md § 5` (frame-overlays bullet), `data-model.md § NodeAppearance` to use the unified field
 - [x] Remove the "proposed evolution" banner on `appearance.md` once shipped
 - [x] Refresh `decisions.md`, `media-appearance.md`, and historical §20 entries to drop stale `contentOverlays` mentions
+
+### 20.8 CropEdit slice — Manual renderer + in-canvas handles
+
+Locked 2026-06-06 in [editor-tools.md § 4.8](architecture/editor-tools.md#48-cropedit), shipped 2026-06-07. Renderer + tool ship together — the renderer without the tool reproduces today's persist-only confusion, and the tool without the renderer cannot show its effect.
+
+**Model A (no new `cropRect` field).** The media node's world rect is the fixed viewport; `CropSettings.offsetX / offsetY / zoom` pan and zoom the source behind it. `Selection` and `CropEdit` resize the rect with **different** crop-compensation rules per § 4.8's "Conceptual split": Selection scales offset by the resize factor (same content, just bigger); CropEdit holds the source's world position+size (reveals more of the image). Source rotation, source-space cropRect, aspect-ratio preset chips, faded outside-rect preview, and multi-media CropEdit are explicitly out of scope.
+
+#### 20.8.1 Manual crop renderer
+- [x] `FullMediaRenderer` reads `CropSettings.{offsetX, offsetY, zoom}` for `CropMode.Manual` via a new `drawCroppedBitmap` helper instead of falling through to `ContentScale.Crop`. `zoom = 1` is defined as the Fill scale (`drawScale = fillScale × zoom` where `fillScale = max(renderW/srcW, renderH/srcH)`).
+- [x] Manual composition is verified end-to-end against the per-media pipeline in [media-appearance.md § Rendering Pipeline](architecture/media-appearance.md#rendering-pipeline-per-media-node): rounded corners, `appearance.alphaMask`, `overlays`, border, shadow, surface `opacity`. Source pans / zooms inside the clipped viewport; chrome clips the rendered viewport, not the source.
+- [x] `colorAdjustments` and `frameDecoration` continue to no-op / pass through unchanged.
+- [x] Mode-switch behavior at `CropEdit` tool entry (v1 — no intrinsic-size cache): snap mode to Manual, keep existing offset/zoom values. Fit/Stretch/non-default-Fill → Manual with default values renders as centered Fill (documented one-frame snap).
+- [ ] Precise focal-aware Fill / Fit seed math via a media-asset intrinsic-size cache — follow-up.
+
+#### 20.8.2 `EditorTool.CropEdit` (context-gated)
+- [x] `CropEdit` added to `EditorTool` sealed vocabulary under `feature/canvas/editor/`.
+- [x] Entry gated by `selection == {one Media}`; `enforceCropEditInvariant` auto-exits to `Selection` (and clears the entry snapshot) when the invariant breaks. Wired into `recomputeGroupTransform`, `DeselectAll`, `deleteNodesById`.
+- [x] Not exposed in the primary tool selector; `EditorTool.label` shows "Crop" only when active.
+- [x] On entry, `crop.mode` snaps to `Manual` via a `SetMediaAppearance` command (one undo entry for the mode flip). `entrySnapshot` captures the pre-entry media transform + appearance for the Cancel button.
+- [x] On tool-switch out (including via `Apply`), `entrySnapshot` is cleared; node stays in `Manual`.
+
+#### 20.8.3 Context menu wiring
+- [x] `EditCropAction` dispatches `CanvasAction.SetActiveTool(EditorTool.CropEdit)` via `EditorActionEffect.Dispatch`. Visibility: `isAllMedia && selectedMediaInOrder.size == 1` (multi-media hidden — out of scope).
+- [x] Old `OpenCropEditor` sheet wiring preserved unwired in `CanvasScaffold`; kept for a future "Crop mode…" popup item.
+- [x] `(Edit, CropEdit, [Media])` popup entry per [editor-tools.md § 5](architecture/editor-tools.md#5-popup-derivation) reads `Reset crop / Cancel / Apply`.
+
+#### 20.8.4 Gestures + handles
+- [x] Eight handles drawn while `CropEdit` is active (4 corners + 4 edges) — `SelectionOverlay.NodeChrome` rendering, new `edgeHandlesEnabled` flag. Screen-space sized via `CanvasViewModel.HANDLE_SCREEN_PX`. No rotation handle.
+- [x] New `EdgeHandle { TOP, RIGHT, BOTTOM, LEFT }` enum + `TransformUtils.hitTestEdgeHandle`.
+- [x] `nodeInteractionGestures` extended with optional `hitTestEdgeHandle` / `onEdgeResizeDrag` params; Selection callers pay no cost via defaults.
+- [x] Drag inside viewport → `PanCropSource(nodeId, worldDx, worldDy)`; handler rotates world delta into node-local and adds to `crop.offset`.
+- [x] Drag corner → `ResizeMediaFreeCorner` (always — aspect lock is enforced by projecting the world delta onto the corner's diagonal in node-local before dispatch, so the source-stability compensation always fires).
+- [x] Drag edge → `ResizeMediaEdge` (always one-axis, ignores aspect lock).
+- [x] Two-finger pinch → `PinchCropSource` with centroid-anchored zoom + screen pan. **Overrides** the locked "two-finger = global nav" rule § 1.3 — `infiniteCanvasGestures` callback branches on `activeTool`. Rotation component dropped.
+- [x] `GestureRouter` routes: `routeSelectedNodeTransformStart` Allows `CropEdit`; `routeEditTap` / `routeDoubleTap` route CropEdit to `Ignore`.
+- [x] Tap on empty / tap on viewport without drag is a no-op (router → `Ignore`).
+- [x] Long-press is global popup per § 5.
+- [x] One `Compound` undo entry per gesture via existing `BeginInteraction(RESIZE)` / `FinishInteraction` wraps. Pinch session wraps via `infiniteCanvasGestures` `onGestureBegin` / `onGestureEnd` hooks.
+- [x] Other canvas nodes render but are non-interactive while `CropEdit` is active.
+- [x] Hit testing uses `HANDLE_TOUCH_RADIUS_PX / cam.scale` (same screen-space convention as Selection).
+
+#### 20.8.5 Topbar (`ToolControlBar`)
+- [x] Aspect-ratio lock toggle (default **on**); persists for the tool session in `EditorState.cropEdit.aspectLocked`. Mutation: `SetCropEditAspectLocked`.
+- [x] Source-zoom slider bound to `crop.zoom`, range `[MIN_SOURCE_ZOOM, MAX_SOURCE_ZOOM]` (0.1..4). One `Compound` undo entry per drag session via `BeginInteraction(RESIZE)` / `FinishInteraction` wrapping `SetCropZoom`. Per-frame slider movement does not spam undo.
+- [x] Reset button (`ResetCropManual`): `offsetX = offsetY = 0`, `zoom = 1`. One undo entry.
+- [x] Cancel button (`CancelCropEdit`): restores the `entrySnapshot` transform + appearance, exits to Selection. Does **not** touch undo history — intermediate session entries remain.
+- [x] Apply button (formerly "Leave crop edit"): exits to Selection without changes.
+- [ ] Aspect-ratio preset chips (1:1, 4:3, 16:9) — deferred.
+- [ ] Single-finger zoom thumb on the viewport — deferred (pinch covers the gesture-level zoom).
+
+#### 20.8.6 Preview policy
+- [x] Selected media re-renders continuously during any `CropEdit` gesture. `_state.update` inline-patches both `_allNodes` and `visibleNodes` per event; no full re-cull per frame.
+
+#### 20.8.7 Selection-tool resize compensation
+- [x] `ResizeSelection` action handler now compensates `crop.{offsetX, offsetY}` on media nodes with Manual crop: `offsetX *= factor` (same for Y), `zoom` unchanged. Result: Selection-tool resize on a cropped media keeps the **same content** visible, just at a different size. Frames and non-Manual media pass through unchanged. Distinct from `applyMediaCornerEdgeResize` (CropEdit), which holds the source in world coords instead.
+
+#### 20.8.8 Test updates
+- [x] `EditContextMenuItemsTest`: `Edit crop` now asserts `SetActiveTool(CropEdit)` dispatch (was `OpenCropEditor`). Multi-media expectations dropped the `Edit crop (2)` row (action is single-media only).
+
+#### 20.8.9 Docs follow-up
+- [x] [editor-tools.md § 4.8](architecture/editor-tools.md#48-cropedit) updated to reflect shipped semantics: pinch override, Cancel button, Selection-tool compensation rule, undo wrap details.
+- [x] [media-appearance.md § Implementation status](architecture/media-appearance.md#implementation-status) marks `CropMode.Manual` rendering and in-canvas crop handle as scheduled in the slice.
+- [x] § 20.2 line for `CropMode.Manual` updated to reference this slice.
+- [x] § 20.5 "Manual crop handle in canvas" updated to reference this slice.
 
 ### Post-MVP
 - [ ] `FrameAppearance.contentEffect` — off-screen filter pass (sepia / blur / grayscale of rendered frame contents)

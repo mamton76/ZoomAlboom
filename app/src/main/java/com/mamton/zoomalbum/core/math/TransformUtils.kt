@@ -150,6 +150,34 @@ object TransformUtils {
     }
 
     /**
+     * Edge-handle hit test. Edges sit at the midpoints of the four sides of
+     * the node's rect. Used by `EditorTool.CropEdit` for one-axis viewport
+     * resize. Returns `null` if the point is also inside a corner-handle's
+     * radius — let the caller resolve corner vs. edge (corners win).
+     */
+    fun hitTestEdgeHandle(
+        worldX: Float,
+        worldY: Float,
+        transform: Transform,
+        handleWorldRadius: Float,
+    ): EdgeHandle? {
+        val dx = worldX - transform.cx
+        val dy = worldY - transform.cy
+        val (lx, ly) = rotateVector(dx, dy, -transform.rotation)
+        val halfW = transform.renderW / 2f
+        val halfH = transform.renderH / 2f
+        val edges = arrayOf(
+            EdgeHandle.TOP to (0f to -halfH),
+            EdgeHandle.RIGHT to (halfW to 0f),
+            EdgeHandle.BOTTOM to (0f to halfH),
+            EdgeHandle.LEFT to (-halfW to 0f),
+        )
+        return edges.firstOrNull { (_, pos) ->
+            abs(lx - pos.first) < handleWorldRadius && abs(ly - pos.second) < handleWorldRadius
+        }?.first
+    }
+
+    /**
      * Tests whether a world-space point hits the rotation handle.
      * The handle sits above the top-center of the node, offset by [handleOffset] world units.
      */

@@ -1,5 +1,6 @@
 package com.mamton.zoomalbum.feature.canvas.actions
 
+import com.mamton.zoomalbum.feature.canvas.editor.EditorTool
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction
 import com.mamton.zoomalbum.feature.ide_ui.ui.FrameMembershipIntent
 
@@ -90,14 +91,23 @@ data object EditBackgroundAction : EditorAction {
     override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenBackgroundEditor
 }
 
+/**
+ * Enters the in-canvas `CropEdit` tool — see `docs/architecture/editor-tools.md
+ * § 4.8`. v1 is gated to exactly one media node; multi-media `CropEdit` is out
+ * of scope. Once in `CropEdit`, the node's `crop.mode` snaps to `Manual`; a
+ * separate "Crop mode…" action that re-exposes the Fit / Fill / Stretch picker
+ * is post-v1 (the existing sheet wiring under `OpenCropEditor` is preserved
+ * for that follow-up).
+ */
 data object EditCropAction : EditorAction {
     override val id = "edit.crop"
     override val icon = "✂"
     override val category = ActionCategory.Edit
-    override fun label(ctx: SelectionContext) =
-        labelWithCount("Edit crop", ctx.selectedMediaInOrder.size)
-    override fun isVisible(ctx: SelectionContext) = ctx.isAllMedia
-    override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenCropEditor
+    override fun label(ctx: SelectionContext) = "Edit crop"
+    override fun isVisible(ctx: SelectionContext) =
+        ctx.isAllMedia && ctx.selectedMediaInOrder.size == 1
+    override fun effect(ctx: SelectionContext): EditorActionEffect =
+        EditorActionEffect.Dispatch(CanvasAction.SetActiveTool(EditorTool.CropEdit))
 }
 
 data object EditColorAdjustmentsAction : EditorAction {

@@ -234,12 +234,15 @@ Stored in `filesDir/media/<albumId>/rendered/`.
 - `MediaColorAdjustments` rendering — needs a `ColorMatrix` or shader pass. (Editor sliders persist values.)
 - `MediaFrameDecoration` rendering (Stretch + NineSlice asset draw, `contentInsets`). (Editor takes an asset URI + mode + opacity.)
 - `CaptionStyle` rendering. (Editor takes text + font + color + show toggle.)
-- `CropMode.Manual` pan/zoom (falls back to `Crop` for now; editor sliders persist values).
 - LOD-aware overlay drop-out (today: Full = everything, Simplified+ = placeholders).
+
+**Landed 2026-06-07 (CropEdit slice — see [editor-tools.md § 4.8](editor-tools.md#48-cropedit) and [todo.md § 20.8](../todo.md#208-cropedit-slice--manual-renderer--in-canvas-handles)):**
+- `CropMode.Manual` rendering — `FullMediaRenderer.drawCroppedBitmap` reads `crop.{offsetX, offsetY, zoom}` directly; composes with rounded corners, `alphaMask`, `overlays`, border, and shadow per the pipeline above. `zoom = 1` is the Fill scale.
+- In-canvas crop handle — `EditorTool.CropEdit` ships with four corner + four edge handles, drag-inside-rect pans the source under the viewport, two-finger pinch zooms source around the centroid, topbar slider provides slider-driven zoom, Cancel reverts the session. Model A — no source-space `cropRect` field; `CropSettings` is unchanged.
+- Selection-tool resize on Manual-crop media scales `crop.offsetX/Y` by the same `factor` so the visible source content stays identical (same content, scaled with the rect). Distinct from CropEdit's resize, which holds the source in world coords.
 
 **No code yet:**
 - `frameDecoration` asset picker (current UI is an asset-URI text field rather than a visual browser).
-- In-canvas manual-crop handle (the sliders work; gesture-based pan/zoom inside the rect is post-MVP).
 - `MediaStylePreset` storage and the `SaveAsPreset` / `ApplyPreset` / `CopyAppearance` / `PasteAppearance` / `ResetAppearance` canvas actions.
 - Rendered derivatives (`SaveRenderedDerivative`, `CreateRenderedCopyOnCanvas`, `ReplaceWithRenderedImage`, `SaveToDeviceGallery`).
 - AI auto-enhance, background removal, animated overlays, batch preset application, advanced masks.

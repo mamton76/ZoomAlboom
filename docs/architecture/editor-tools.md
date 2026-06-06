@@ -4,7 +4,7 @@
 
 This doc owns the **gesture-allocation** axis of the editor (three-axis interaction model, per-tool gesture maps, dispatch, state shape). The **UI rendering** of tools and selection actions — `ToolControlSurface`, `SelectionActionSurface`, `ConceptEditorSurface`, `AddContentSurface`, `GlobalChromeSurface` — lives in [editor-surfaces.md](editor-surfaces.md). The two docs are complementary: tools define what gestures *mean*; surfaces define how the user *reaches* them.
 
-**Status — decided 2026-05-24, fully decided 2026-06-03.** Settles `to_discuss.md § 3` (active-tool framework), § 4 (per-tool gesture maps), § 6 (Eraser modes), and the `MaskEdit` portion of § 8 (`MaskNode` editing UX). All seven tools' gesture maps are now locked.
+**Status — decided 2026-05-24, fully decided 2026-06-03; `CropEdit` locked 2026-06-06 and shipped 2026-06-07.** Settles `to_discuss.md § 3` (active-tool framework), § 4 (per-tool gesture maps), § 6 (Eraser modes), the `MaskEdit` portion of § 8 (`MaskNode` editing UX), and the in-canvas crop-handle UX previously deferred in [media-appearance.md § Implementation status](media-appearance.md#implementation-status). All eight tools' gesture maps are now locked; `CropEdit` is the first context-gated tool to ship end-to-end (renderer + handles + topbar + pinch + cancel + Selection-tool resize compensation).
 
 The editor is fundamentally infinite-canvas, gesture-heavy, camera-driven, stylus-oriented, and spatial. To stay coherent as tool variety grows, gesture meaning is governed by an explicit **active tool**, with **navigation** orthogonal and always available. This doc specifies the three-axis interaction model, the locked `SelectionTool` gesture map, and how the framework lands in code.
 
@@ -85,10 +85,11 @@ In **Present mode**, gestures are presentation-domain (advance / dismiss / pan) 
 | `VectorEdit` | Per-node / per-handle editing of vector geometry | § 4.5 (locked) | Node type (smooth / sharp / mirrored / disconnected), close/open path, simplify |
 | `Eraser` | Object delete + vector partial erase (MVP); raster partial post-MVP | § 4.6 (locked) | Mode (object / vector partial); brush size (partial only) |
 | `MaskEdit` | Create and edit `MaskNode`s — owns both creation and editing because no other tool produces them | § 4.7 (locked) | Mask geometry picker (Rect / Ellipse / Path / Free); aspect-ratio toggle for primitives |
+| `CropEdit` | Pan / zoom source pixels behind a media node's viewport (the node's world rect) and resize the viewport | § 4.8 (locked) | Aspect-ratio lock toggle; source-zoom slider; reset |
 
-`VectorEdit`, vector-partial-`Eraser`, and `MaskEdit` depend on data-model concepts not yet implemented (vector nodes, `StrokeNode`, `ShapeNode`, `MaskNode`).
+`VectorEdit`, vector-partial-`Eraser`, and `MaskEdit` depend on data-model concepts not yet implemented (vector nodes, `StrokeNode`, `ShapeNode`, `MaskNode`). `CropEdit` depends only on the `CropMode.Manual` renderer landing in the same slice — no new data-model concept.
 
-`EditorTool` is **flat** — brush presets, shape primitives, eraser modes, and mask geometries are *settings of a tool*, not separate tool identities. `VectorEdit` and `MaskEdit` are **context-gated**: they exist in the type vocabulary but don't appear as permanent entries in the primary tool selector — they're entered when a valid target is selected (exact selector discoverability UX is deferred). The user-facing rendering of tool selection + tool controls is the `ToolControlSurface` — see [editor-surfaces.md § 4](editor-surfaces.md#4-toolcontrolsurface--design).
+`EditorTool` is **flat** — brush presets, shape primitives, eraser modes, and mask geometries are *settings of a tool*, not separate tool identities. `VectorEdit`, `MaskEdit`, and `CropEdit` are **context-gated**: they exist in the type vocabulary but don't appear as permanent entries in the primary tool selector — they're entered when a valid target is selected (exact selector discoverability UX is deferred). The user-facing rendering of tool selection + tool controls is the `ToolControlSurface` — see [editor-surfaces.md § 4](editor-surfaces.md#4-toolcontrolsurface--design).
 
 ---
 
@@ -336,6 +337,106 @@ Path masks (`Path` / `Free` after simplification):
 
 **Multi-mask composition.** When more than one `MaskNode` exists in the same frame/group, their shapes **union** (a sibling pixel is visible if **any** above-it `MaskNode` reveals it). No subtractive masks in MVP; adding a mask never hides more content.
 
+### 4.8 `CropEdit`
+
+Edits the manual crop placement of a single media node — pans / zooms the source pixels behind the media's world rect (the "viewport"), and resizes the viewport itself via corner / edge handles. Mutates `MediaAppearance.crop.{offsetX, offsetY, zoom}` and the media node's `Transform`.
+
+**Conceptual split from `Selection`.** Both tools resize via corner handles, but with different intents:
+
+- **`Selection` resize** = "make this whole object bigger/smaller, same content visible." For media in Manual crop, `ResizeSelection`'s handler scales `crop.{offsetX, offsetY}` by the same `factor` so the visible source portion stays identical — just rendered larger or smaller. `crop.zoom` is unchanged (`fillScale` auto-scales by `factor` when the rect scales uniformly).
+- **`CropEdit` resize** = "edit the crop window, reveal more / less of the source." `applyMediaCornerEdgeResize` compensates `crop` so the source draw rect stays anchored in *world* coords; the rect grows around stationary source pixels, so a bigger rect uncovers more image.
+
+Same underlying `Transform` mutation; different `MediaAppearance.crop` compensation. The user opts into the `CropEdit` semantic by entering the tool. Rotation is **not** a `CropEdit` concern (see below).
+
+**Model A — viewport + source pan/zoom, no new `cropRect` field.** ZoomAlboom's crop model treats the media node's world rect as a fixed-aperture viewport; the source pans / zooms behind it via the existing `CropSettings.offsetX / offsetY / zoom`. `CropEdit` drives those values plus the viewport's `Transform`. No source-space `cropRect` is introduced.
+
+**Selection-awareness.** Entered only when exactly one media node is selected; auto-exits to `Selection` if the selection becomes empty, multi-select, non-media, or if the selected media is deleted (e.g. via undo). Selection itself persists across the auto-exit per § 6.
+
+| Selection on entry | Result |
+|---|---|
+| Exactly one `Media` | Edit mode |
+| Anything else | Tool entry rejected; defensive auto-exit if shape changes mid-session |
+
+**Discoverability — context-menu only for MVP.** `✂ Edit crop` on the long-press popup for a single-media selection dispatches `CanvasAction.SetActiveTool(CropEdit)` (replacing the prior `EditorActionEffect.OpenCropEditor → sheet` path; the sheet wiring is preserved unwired for a future "Crop mode…" popup item that re-exposes Fit / Fill / Stretch picking). Not exposed in the primary tool selector; the `CropEdit` slot in `EditorTool` is type-only at the toolbar level. The Fit / Fill / Stretch picker has no surface in v1 — once a node enters Manual via `CropEdit`, it stays in Manual until that follow-up ships.
+
+**Entry — mode coupling and visual continuity.**
+
+Entering `CropEdit` snaps `crop.mode` to `Manual` if it isn't already. **`offsetX / offsetY / zoom` are not rewritten on entry** — whatever the node already carries is preserved, including the defaults `(0, 0, 1)` for nodes that have never been in Manual.
+
+`zoom = 1` is defined as **the Fill scale** (source scaled to cover the viewport on its longer axis). With this convention:
+
+| Pre-entry `mode` | Behavior at entry | Continuity |
+|---|---|---|
+| `Manual` | Values already authoritative; nothing rewritten | Lossless |
+| `Fill` (default focal point) | Default Manual values `(0, 0, 1)` render identically to Fill | Lossless |
+| `Fill` (focal point ≠ centered) | Default Manual values render Fill **centered** — focal-point shift is lost in v1 | Approximate; one-frame snap to centered Fill |
+| `Fit` | Default Manual values render as Fill (filled, not letterboxed) — one-frame snap, user re-tunes via the source-zoom slider to recover Fit framing | Approximate; one-frame snap |
+| `Stretch` | Cannot be exactly preserved (Manual keeps source aspect, Stretch ignores it). Default Manual values render as Fill (centered, aspect-preserved) | Approximate; one-frame snap |
+
+The pre-entry mode is not recorded. Exiting `CropEdit` (tool-switch back to `Selection`) leaves the node in `Manual`; the user re-picks Fit / Fill / Stretch from the appearance sheet if they want a different framing rule.
+
+> **Seed-math note.** A precise per-mode seed (focal-aware Fill, Fit zoom = `min/max(rw/srcw, rh/srch)`) is possible but requires the source asset's intrinsic size at action-handler time. That cache is post-v1; the simpler "snap mode, keep values" rule above is what ships. Document any tighter seeding in the slice that adds an intrinsic-size cache.
+
+**Gesture map.**
+
+| Gesture | Result | Primary mutation |
+|---|---|---|
+| Drag inside the viewport (the media rect, off any handle) | Pan source under the viewport | `offsetX`, `offsetY` |
+| Drag a corner handle | Resize the viewport from that corner | Media node `Transform.{w, h, cx, cy}` + crop compensation so the source draw rect stays anchored in world coords |
+| Drag an edge handle | Resize the viewport on one axis | Media node `Transform.{w, h, cx, cy}` (one axis) + crop compensation |
+| Two-finger pinch | Centroid-anchored source pan + zoom — `crop.zoom *= zoomFactor`, offset adjusted so the source pixel under the centroid stays under the centroid, then offset shifted by the screen pan delta | `offsetX`, `offsetY`, `zoom` |
+| Tap on empty | No-op | — |
+| Tap on the viewport (without a drag) | No-op | — |
+| Long-press | Global popup (per § 5) | — |
+
+**Aspect-ratio lock.** Topbar toggle. Defaults **on**. Implemented by projecting the world-space drag delta onto the dragged corner's diagonal in node-local coords before dispatch — the same underlying resize action (`ResizeMediaFreeCorner`) runs in both locked and free modes, so the source-stability compensation always fires. Edge handles ignore the toggle (one-axis). Matches `Shape` and `MaskEdit`'s aspect-lock UX.
+
+**No rotation handle in v1.** The media node's `Transform.rotation` is untouched by `CropEdit`. To rotate the whole node, the user switches back to `Selection`. Source-pixel rotation independent of the viewport (a hypothetical `crop.rotation` or source-orientation handle) is out of scope.
+
+**Two-finger pinch in `CropEdit` overrides the global-nav rule.** The locked two-finger = global navigation rule (§ 1.3) is suspended *only* while `CropEdit` is the active tool: pinch drives source pan/zoom around the centroid, not camera. Rotation component is dropped (source rotation out of scope). Camera nav resumes when the user leaves the tool.
+
+**Source zoom — pinch + topbar slider.** Two-finger pinch is the primary in-canvas zoom gesture. The topbar carries an additional slider for `crop.zoom`, range `[MIN_MANUAL_ZOOM, MAX_MANUAL_ZOOM]` (same bounds as the legacy sheet slider), for users who prefer slider control.
+
+**Reset.** Topbar button. Sets `offsetX = offsetY = 0`, `zoom = 1` — the default Manual values, which render as centered Fill under the v1 convention. The deeper "reset to Fit-equivalent" requires source intrinsic size and lands together with the intrinsic-size cache.
+
+**Cancel.** Topbar button. Restores the edited media's `Transform` + `MediaAppearance` to the snapshot captured at `CropEdit` entry, then exits to `Selection`. Snapshot lives in `EditorState.cropEdit.entrySnapshot` (session-only, not persisted; cleared on tool change or auto-exit). v1 caveat: does **not** truncate undo history — the per-gesture entries from the session remain available via Undo. A future revision can pop history down to the entry marker if strict abandon semantics matter.
+
+**Apply / Leave.** Topbar button. Exits to `Selection` without altering current state — opposite of Cancel.
+
+**Topbar settings (MVP).** Aspect-ratio lock toggle, source-zoom slider, Reset, Cancel, Apply. Aspect-ratio preset chips (1:1, 4:3, 16:9) are deferred unless trivial in the host topbar component.
+
+**Preview policy — live.** The selected media re-renders continuously during pan / resize / slider drag. Only one node redraws per frame, no offscreen layers required — unlike `MaskEdit § 4.7`'s commit-only rule (which exists because re-clipping N siblings per frame would be expensive). No cross-node cost here.
+
+**Composition.** Manual crop slots into the existing per-media pipeline at the source-placement step ([media-appearance.md § Rendering Pipeline (per media node)](media-appearance.md#rendering-pipeline-per-media-node)):
+
+1. Source pixels are placed at `offsetX / offsetY` and scaled by `zoom`, clipped to the viewport (the media rect).
+2. `colorAdjustments` (when shipped) apply to the placed pixels.
+3. `overlays` composite above, bounded by the viewport.
+4. `frameDecoration` draws on top.
+5. `cornerRadius`, `border`, `shadow`, surface `opacity` apply unchanged.
+6. `appearance.alphaMask` (when shipped per [appearance.md § 12](appearance.md#12-proposed-evolution--appearance-layers)) clips to the rendered output the same way it does today.
+
+Rounded corners, alpha masks, borders, and shadows clip the rendered viewport — not the source. Manual crop slides source pixels within a fixed clip region.
+
+**Hit testing.** Screen-space hit radius for corner and edge handles — same convention as `VectorEdit § 4.5` and `MaskEdit § 4.7`. Any pointer-down inside the viewport that isn't on a handle initiates a pan.
+
+**Handle visibility.** Eight handles (four corners + four edges) drawn whenever `CropEdit` is the active tool. Screen-space-sized (constant pixel size at all zooms), same as `Selection`'s. No rotation handle.
+
+**Other canvas nodes.** Visible but non-interactive while `CropEdit` is active. Tap / drag on a non-selected node does nothing; the user switches back to `Selection` (or `EditorMode = View`) to interact with them.
+
+**Persistence.** Stay in `CropEdit` after each commit. Explicit tool-switch exit only. Defensive auto-exit when the selection invariant breaks (deletion, multi-select, frame selected, etc.) — falls back to `Selection`.
+
+**Undo granularity.** One `Compound` entry per completed gesture or button click:
+
+- A pan-inside-viewport drag commits one entry on lift (delta from gesture start).
+- A handle drag (corner or edge) commits one entry on lift.
+- A two-finger pinch session commits one entry on lift — wrapped via the `infiniteCanvasGestures` detector's `onGestureBegin` / `onGestureEnd` hooks. Per-event mutations during the pinch coalesce into the single entry.
+- Source-zoom slider opens a `commandSessionId` on drag start and finalizes one entry on lift — same convention as the popup sessions in [appearance.md § 14.6](appearance.md#146-action-dispatch-and-undo). Per-frame slider movement does not spam undo.
+- Reset is one entry.
+- Cancel does **not** push history (it restores the entry snapshot directly); intermediate session entries remain.
+
+**Data-model dependency.** None new. Uses `MediaAppearance.crop: CropSettings` as it stands. Ships together with the `CropMode.Manual` renderer — see [media-appearance.md § Implementation status](media-appearance.md#implementation-status) and [todo.md § 20.8](../todo.md#208-cropedit-slice--manual-renderer--in-canvas-handles).
+
 ---
 
 ## 5. Popup derivation
@@ -356,6 +457,7 @@ Examples:
 | `(Edit, Selection, [Frame])` | Edit appearance / frame settings / navigation target / transform / order / delete |
 | `(Edit, Selection, [Media, Media, …])` | Multi-edit popups for shared concepts ([appearance.md § 14](appearance.md#14-multi-selection)) |
 | `(Edit, VectorEdit, [vector node])` | Node type / simplify path / close-or-open / boolean ops (when available) |
+| `(Edit, CropEdit, [Media])` | Reset crop / Cancel / Apply. No mode picker here — Fit / Fill / Stretch picking has no surface in v1; the future "Crop mode…" popup item is the planned landing spot. |
 | `(Edit, Eraser, anything)` | Eraser size / hardness / mode (also lives in topbar) |
 | `(View, n/a, [Frame])` | Navigate to frame; no edit options |
 | `(Present, n/a, _)` | No popup — Present strips context surfaces |
@@ -482,6 +584,7 @@ Today's `Edit ↔ View` TopBar toggle becomes the `EditorMode` selector. Present
 ## 8. Open Questions
 
 - ~~`MaskEdit` gesture map.~~ **Resolved 2026-06-03.** Locked in § 4.7. `MaskNode` constraints in [appearance.md § 12.10](appearance.md#1210-masknode-boundaries).
+- ~~`CropEdit` gesture map + in-canvas crop handle.~~ **Resolved 2026-06-06.** Locked in § 4.8. Model A (viewport + source pan/zoom, no new source-space `cropRect` field). Ships in one slice together with the `CropMode.Manual` renderer per [todo.md § 20.8](../todo.md#208-cropedit-slice--manual-renderer--in-canvas-handles).
 - **Popup derivation: centralized vs distributed.** § 5. Defer until 3+ tools are implemented and one pattern's pain shows up.
 - **Long-press-on-empty intent.** No defined behavior in the locked Selection map (§ 4.1). Options: no-op (MVP), empty-canvas context menu (paste, add node, canvas settings), or "add content" picker. Defer.
 - **View-mode long-press popup is designed but unwired.** § 5 lists `(View, n/a, [Frame])` popup contents (Navigate to frame; no edit options). `GestureRouter` currently routes all View-mode long-presses to `Suppress` to preserve pre-router behavior — combining the routing extraction with a UX behavior change was explicitly avoided. The view-mode popup ships when the `(mode, tool, selection) → popupContent` derivation in § 5 lands; until then View users reach frames via tap-to-focus and the View top bar.
@@ -520,5 +623,6 @@ The framework is largely a paper architecture until additional tools ship. The M
    - `VectorEdit` (§ 4.5) depends on vector-node existence (from `FreeDraw` / `Shape`) + `VectorEditState` per-tool state.
    - `Eraser` (§ 4.6) — object mode **shipped 2026-06-04**: `TapRoute.EraserDeleteNode` + `routeEraserScrubStart`, dedicated `eraserScrubGestures` detector (Layer 2c), `CanvasAction.DeleteNodes(ids)` with selection-pruning semantics, one `CanvasCommand` per gesture. Vector partial mode depends on `VectorEdit`'s path-splitting math.
    - `MaskEdit` (§ 4.7) depends on `MaskNode` data-model (per [appearance.md § 12.10](appearance.md#1210-masknode-boundaries)) — gesture map locked, ships once `MaskNode` lands per `appearance.md § 12.8`.
+   - `CropEdit` (§ 4.8) depends only on the `CropMode.Manual` renderer landing; no new data-model. Bundled with the renderer as one slice — see [todo.md § 20.8](../todo.md#208-cropedit-slice--manual-renderer--in-canvas-handles). Replaces the `EditorActionEffect.OpenCropEditor → sheet` flow on the popup's `✂ Edit crop` item with `CanvasAction.SetActiveTool(CropEdit)`.
 
 Steps 4 and 5 are the only behavior-changing items in the framework batch. Steps 1-3 are additive type / field declarations that activate Selection-as-tool without removing anything.

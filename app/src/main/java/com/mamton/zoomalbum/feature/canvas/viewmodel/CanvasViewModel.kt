@@ -11,8 +11,9 @@ import com.mamton.zoomalbum.core.math.BoundingBox
 import com.mamton.zoomalbum.core.math.Camera
 import com.mamton.zoomalbum.core.math.CameraAnimation
 import com.mamton.zoomalbum.core.math.CameraInterpolation
+import EdgeHandle
 import com.mamton.zoomalbum.core.math.LodResolver
-import com.mamton.zoomalbum.core.math.ResizeHandle
+import ResizeHandle
 import com.mamton.zoomalbum.core.math.TransformUtils
 import com.mamton.zoomalbum.core.math.ViewportCuller
 import com.mamton.zoomalbum.core.math.toCamera
@@ -22,10 +23,12 @@ import com.mamton.zoomalbum.domain.model.AlbumPresentationProfile
 import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CanvasNodeFactory
+import com.mamton.zoomalbum.domain.model.CropMode
 import com.mamton.zoomalbum.domain.model.EasingType
 import com.mamton.zoomalbum.domain.model.FrameAppearance
 import com.mamton.zoomalbum.domain.model.FrameEditOptions
 import com.mamton.zoomalbum.domain.model.MediaAppearance
+import CropEditEntrySnapshot
 import com.mamton.zoomalbum.feature.canvas.editor.EditorState
 import com.mamton.zoomalbum.feature.canvas.editor.EditorTool
 import com.mamton.zoomalbum.domain.model.FrameFitMode
@@ -33,7 +36,7 @@ import com.mamton.zoomalbum.domain.model.MembershipOrigin
 import com.mamton.zoomalbum.domain.model.MembershipState
 import com.mamton.zoomalbum.domain.model.RenderDetail
 import com.mamton.zoomalbum.domain.model.SceneGraph
-import com.mamton.zoomalbum.domain.model.Transform
+import Transform
 import com.mamton.zoomalbum.domain.model.TransitionPreset
 import com.mamton.zoomalbum.domain.model.withTransform
 import com.mamton.zoomalbum.domain.repository.HistoryRepository
@@ -237,6 +240,99 @@ sealed interface CanvasAction : Intent {
     data class SendToBack(val nodeId: String) : CanvasAction
     data class BringForward(val nodeId: String) : CanvasAction
     data class SendBackward(val nodeId: String) : CanvasAction
+
+    // ── CropEdit (editor-tools.md § 4.8) ────────────────────────────────
+    //
+    // Mutations specific to the in-canvas crop tool. They operate on a single
+    // media node (the one the tool is editing) and run as snapshot commands
+    // wrapped by the existing `BeginInteraction` / `FinishInteraction` undo
+    // protocol — one Compound undo entry per gesture.
+
+    /**
+     * Pan the source pixels of [nodeId] under its viewport. World-space deltas
+     * — the handler rotates by `-transform.rotation` to mutate the node-local
+     * `MediaAppearance.crop.{offsetX, offsetY}`.
+     */
+    data class PanCropSource(
+        val nodeId: String,
+        val worldDx: Float,
+        val worldDy: Float,
+    ) : CanvasAction
+
+    /**
+     * Free (non-aspect-locked) corner-handle resize for the crop viewport on
+     * [nodeId]. The dragged corner follows the finger, opposite corner stays
+     * pinned; `w / h` are rebased to absorb the non-uniform change while
+     * `scale` is left untouched. Aspect-locked corner drags reuse the existing
+     * [ResizeSelection] action instead (uniform scale around the pivot).
+     */
+    data class ResizeMediaFreeCorner(
+        val nodeId: String,
+        val handle: ResizeHandle,
+        val worldDx: Float,
+        val worldDy: Float,
+    ) : CanvasAction
+
+    /**
+     * One-axis edge-handle resize for the crop viewport on [nodeId]. The
+     * dragged edge moves perpendicular to itself; the opposite edge stays
+     * pinned. `w` or `h` is rebased; the other axis and `scale` are
+     * unchanged. Edge handles always ignore the aspect-ratio lock.
+     */
+    data class ResizeMediaEdge(
+        val nodeId: String,
+        val edge: EdgeHandle,
+        val worldDx: Float,
+        val worldDy: Float,
+    ) : CanvasAction
+
+    /** Topbar toggle: aspect-ratio lock for `CropEdit` corner handles. */
+    data class SetCropEditAspectLocked(val locked: Boolean) : CanvasAction
+
+    /**
+     * Topbar slider: absolute source-zoom value for [nodeId]'s Manual crop.
+     * Transient (no snapshot command on its own) — the slider wraps a drag
+     * session with [BeginInteraction] / [FinishInteraction] for one Compound
+     * undo entry. Direct slider taps without a drag still produce one entry
+     * via the same wrap.
+     */
+    data class SetCropZoom(val nodeId: String, val zoom: Float) : CanvasAction
+
+    /**
+     * Reset Manual crop to the default values `(offsetX=0, offsetY=0, zoom=1)`
+     * on [nodeId] — renders as centered Fill under the v1 zoom-1 convention.
+     * Topbar Reset button. Issued inside a [BeginInteraction] /
+     * [FinishInteraction] wrap by the topbar so it produces one undo entry.
+     */
+    data class ResetCropManual(val nodeId: String) : CanvasAction
+
+    /**
+     * Topbar Cancel button. Restores the edited media's transform + appearance
+     * to the snapshot captured at `CropEdit` entry, then exits to `Selection`.
+     * No-op if no active `CropEdit` session.
+     */
+    data object CancelCropEdit : CanvasAction
+
+    /**
+     * Two-finger pinch routed to the `CropEdit` source instead of the camera.
+     * Centroid-anchored zoom + pan: the source pixel under [worldCentroidX,
+     * worldCentroidY] stays under the centroid as `zoom` changes, then the
+     * pan delta shifts the source.
+     *
+     * All coords are world-space (caller converts from screen via
+     * [TransformUtils.screenToWorld] / [TransformUtils.screenDeltaToWorld]).
+     * Wraps the pinch session in [BeginInteraction] / [FinishInteraction]
+     * for one Compound undo entry — the detector's `onGestureBegin` /
+     * `onGestureEnd` hooks call those.
+     */
+    data class PinchCropSource(
+        val nodeId: String,
+        val worldCentroidX: Float,
+        val worldCentroidY: Float,
+        val worldPanX: Float,
+        val worldPanY: Float,
+        val zoomFactor: Float,
+    ) : CanvasAction
 }
 
 // ── ViewModel ─────────────────────────────────────────────────────────
@@ -472,6 +568,7 @@ class CanvasViewModel @Inject constructor(
 
             is CanvasAction.DeselectAll -> {
                 updateEditor { it.copy(selectedNodeIds = emptySet(), groupSelectionTransform = null) }
+                enforceCropEditInvariant()
             }
 
             is CanvasAction.MoveSelection -> {
@@ -519,21 +616,14 @@ class CanvasViewModel @Inject constructor(
                 val py = action.pivotY
 
                 _allNodes.update { nodes ->
-                    nodes.map { node ->
-                        if (node.id in ids) {
-                            val t = node.transform
-                            val newCx = px + (t.cx - px) * factor
-                            val newCy = py + (t.cy - py) * factor
-                            val newScale = (t.scale * factor).coerceIn(0.01f, 1000f)
-                            node.withTransform(t.copy(cx = newCx, cy = newCy, scale = newScale))
-                        } else node
-                    }
+                    nodes.map { node -> if (node.id in ids) resizeNodeUniform(node, factor, px, py) else node }
                 }
-                inlinePatchVisibleNodes(ids) { t ->
-                    val newCx = px + (t.cx - px) * factor
-                    val newCy = py + (t.cy - py) * factor
-                    val newScale = (t.scale * factor).coerceIn(0.01f, 1000f)
-                    t.copy(cx = newCx, cy = newCy, scale = newScale)
+                _state.update { s ->
+                    s.copy(
+                        visibleNodes = s.visibleNodes.map { vn ->
+                            if (vn.node.id in ids) vn.copy(node = resizeNodeUniform(vn.node, factor, px, py)) else vn
+                        },
+                    )
                 }
                 // Group rect: its center moves with the pivot too, w/h scale uniformly.
                 _state.value.editor.groupSelectionTransform?.let { gt ->
@@ -744,7 +834,39 @@ class CanvasViewModel @Inject constructor(
 
             is CanvasAction.SetActiveTool -> {
                 if (_state.value.editor.activeTool == action.tool) return
-                updateEditor { it.copy(activeTool = action.tool) }
+                if (action.tool === EditorTool.CropEdit) {
+                    val media = singleSelectedMedia() ?: return
+                    // Capture entry snapshot for the topbar Cancel button.
+                    val snapshot = CropEditEntrySnapshot(
+                        nodeId = media.id,
+                        transform = media.transform,
+                        appearance = media.appearance,
+                    )
+                    updateEditor {
+                        it.copy(
+                            activeTool = EditorTool.CropEdit,
+                            cropEdit = it.cropEdit.copy(entrySnapshot = snapshot),
+                        )
+                    }
+                    val existing = media.appearance ?: MediaAppearance()
+                    if (existing.crop.mode != CropMode.Manual) {
+                        val updated = existing.copy(crop = existing.crop.copy(mode = CropMode.Manual))
+                        onAction(
+                            CanvasAction.SetMediaAppearance(
+                                appearancesById = mapOf(media.id to updated),
+                            ),
+                        )
+                    }
+                } else {
+                    // Leaving CropEdit — drop the snapshot so it doesn't survive
+                    // the session and confuse a later re-entry.
+                    updateEditor {
+                        it.copy(
+                            activeTool = action.tool,
+                            cropEdit = it.cropEdit.copy(entrySnapshot = null),
+                        )
+                    }
+                }
             }
 
             is CanvasAction.SetContextAnchor -> {
@@ -819,6 +941,301 @@ class CanvasViewModel @Inject constructor(
             is CanvasAction.SendToBack -> applyZIndexReorder(action.nodeId, ZReorder.ToBack)
             is CanvasAction.BringForward -> applyZIndexReorder(action.nodeId, ZReorder.Forward)
             is CanvasAction.SendBackward -> applyZIndexReorder(action.nodeId, ZReorder.Backward)
+
+            is CanvasAction.PanCropSource -> panCropSource(action)
+            is CanvasAction.ResizeMediaFreeCorner -> resizeMediaFreeCorner(action)
+            is CanvasAction.ResizeMediaEdge -> resizeMediaEdge(action)
+            is CanvasAction.SetCropEditAspectLocked -> {
+                if (_state.value.editor.cropEdit.aspectLocked == action.locked) return
+                updateEditor { it.copy(cropEdit = it.cropEdit.copy(aspectLocked = action.locked)) }
+            }
+
+            is CanvasAction.SetCropZoom -> {
+                applyMediaPanPatch(action.nodeId) { current, _ ->
+                    val base = current ?: MediaAppearance()
+                    base.copy(crop = base.crop.copy(zoom = action.zoom))
+                }
+            }
+
+            is CanvasAction.ResetCropManual -> {
+                applyMediaPanPatch(action.nodeId) { current, _ ->
+                    val base = current ?: MediaAppearance()
+                    base.copy(
+                        crop = base.crop.copy(
+                            mode = CropMode.Manual,
+                            offsetX = 0f,
+                            offsetY = 0f,
+                            zoom = 1f,
+                        ),
+                    )
+                }
+            }
+
+            is CanvasAction.PinchCropSource -> {
+                applyMediaPanPatch(action.nodeId) { current, rotation ->
+                    val base = current ?: MediaAppearance()
+                    val crop = base.crop
+                    // World → node-local for both centroid and pan.
+                    val media = _allNodes.value.firstOrNull { it.id == action.nodeId }
+                            as? CanvasNode.Media
+                    if (media != null) {
+                        val t = media.transform
+                        val centroidWX = action.worldCentroidX - t.cx
+                        val centroidWY = action.worldCentroidY - t.cy
+                        val (lx, ly) = TransformUtils.rotateVector(centroidWX, centroidWY, -rotation)
+                        val (pxLocal, pyLocal) = TransformUtils.rotateVector(
+                            action.worldPanX, action.worldPanY, -rotation,
+                        )
+                        val zf = action.zoomFactor
+                        val newOffsetX = lx - (lx - crop.offsetX) * zf + pxLocal
+                        val newOffsetY = ly - (ly - crop.offsetY) * zf + pyLocal
+                        val newZoom = (crop.zoom * zf).coerceAtLeast(MIN_CROP_ZOOM)
+                        base.copy(crop = crop.copy(
+                            offsetX = newOffsetX,
+                            offsetY = newOffsetY,
+                            zoom = newZoom,
+                        ))
+                    } else base
+                }
+            }
+
+            is CanvasAction.CancelCropEdit -> {
+                val snapshot = _state.value.editor.cropEdit.entrySnapshot ?: return
+                // Restore transform + appearance to the entry state, then exit.
+                _allNodes.update { nodes ->
+                    nodes.map { node ->
+                        if (node.id == snapshot.nodeId && node is CanvasNode.Media) {
+                            node.copy(transform = snapshot.transform, appearance = snapshot.appearance)
+                        } else node
+                    }
+                }
+                _state.update { s ->
+                    s.copy(
+                        visibleNodes = s.visibleNodes.map { vn ->
+                            val n = vn.node
+                            if (n.id == snapshot.nodeId && n is CanvasNode.Media) {
+                                vn.copy(node = n.copy(transform = snapshot.transform, appearance = snapshot.appearance))
+                            } else vn
+                        },
+                    )
+                }
+                updateEditor {
+                    it.copy(
+                        activeTool = EditorTool.Selection,
+                        cropEdit = it.cropEdit.copy(entrySnapshot = null),
+                    )
+                }
+            }
+        }
+    }
+
+    // ── CropEdit handlers (editor-tools.md § 4.8) ───────────────────────
+
+    private fun panCropSource(action: CanvasAction.PanCropSource) {
+        if (action.worldDx == 0f && action.worldDy == 0f) return
+        val nodeId = action.nodeId
+        val patchAppearance: (MediaAppearance?, Float) -> MediaAppearance =
+            { current, rotation ->
+                // World → node-local: rotate by `-rotation` so the source
+                // slides under the rotated viewport in screen-aligned fashion.
+                val (lx, ly) = TransformUtils.rotateVector(
+                    action.worldDx, action.worldDy, -rotation,
+                )
+                val base = current ?: MediaAppearance()
+                base.copy(
+                    crop = base.crop.copy(
+                        offsetX = base.crop.offsetX + lx,
+                        offsetY = base.crop.offsetY + ly,
+                    ),
+                )
+            }
+        applyMediaPanPatch(nodeId, patchAppearance)
+    }
+
+    private fun resizeMediaFreeCorner(action: CanvasAction.ResizeMediaFreeCorner) {
+        val (sx, sy) = handleSigns(action.handle)
+        applyMediaCornerEdgeResize(action.nodeId, sx, sy, action.worldDx, action.worldDy)
+    }
+
+    private fun resizeMediaEdge(action: CanvasAction.ResizeMediaEdge) {
+        val (sx, sy) = edgeSigns(action.edge)
+        applyMediaCornerEdgeResize(action.nodeId, sx, sy, action.worldDx, action.worldDy)
+    }
+
+    /**
+     * Common math for free-corner + edge resize. `sx`/`sy` are the signed
+     * directions (-1 / 0 / +1) of the dragged edge or corner in node-local
+     * coords. Mutates `Transform.{w, h, cx, cy}` directly — `scale` is
+     * unchanged so the world-rebase rule from `Transform.kt` holds.
+     *
+     * Also patches `MediaAppearance.crop.{offsetX, offsetY, zoom}` so the
+     * displayed source draw rect stays anchored in *world* coordinates while
+     * the viewport changes shape — the user wants "resize crop window" to
+     * feel like "uncover / cover more of the image", not "rescale the image
+     * to fit the new window." Compensation only fires for `Manual` crop and
+     * when the media's `intrinsicPixelWidth/Height` are non-zero (older nodes
+     * fall back to today's rescale-with-rect behavior).
+     *
+     * Inline-patches `visibleNodes` for per-frame drag perf (full re-cull
+     * would thrash culling on every gesture event).
+     */
+    private fun applyMediaCornerEdgeResize(
+        nodeId: String,
+        sx: Int, sy: Int,
+        worldDx: Float, worldDy: Float,
+    ) {
+        if (worldDx == 0f && worldDy == 0f) return
+        _allNodes.update { nodes ->
+            nodes.map { node ->
+                if (node.id == nodeId && node is CanvasNode.Media) {
+                    val (newTransform, newAppearance) = computeResizedMedia(node, sx, sy, worldDx, worldDy)
+                    node.copy(transform = newTransform, appearance = newAppearance)
+                } else node
+            }
+        }
+        _state.update { s ->
+            s.copy(
+                visibleNodes = s.visibleNodes.map { vn ->
+                    val n = vn.node
+                    if (n.id == nodeId && n is CanvasNode.Media) {
+                        val (newTransform, newAppearance) = computeResizedMedia(n, sx, sy, worldDx, worldDy)
+                        vn.copy(node = n.copy(transform = newTransform, appearance = newAppearance))
+                    } else vn
+                },
+            )
+        }
+    }
+
+    /**
+     * Uniform-scale resize of one node around `(pivotX, pivotY)` by `factor`.
+     * For media nodes with a Manual crop, the crop `offsetX/Y` are scaled by
+     * the same `factor` so the source content visible **through** the rect
+     * stays the same — Selection-tool resize behaves like "make this whole
+     * object bigger/smaller", not like CropEdit's "uncover more of the
+     * source" (which is `applyMediaCornerEdgeResize`'s Fix 2 behavior).
+     *
+     * `zoom` is unchanged: `drawScale = fillScale × zoom`, and `fillScale`
+     * automatically scales by `factor` when the rect scales uniformly — so
+     * the source's display size in the rect-local frame stays proportional.
+     * Combined with offset scaling, the same source portion fills the rect.
+     */
+    private fun resizeNodeUniform(
+        node: CanvasNode,
+        factor: Float,
+        pivotX: Float,
+        pivotY: Float,
+    ): CanvasNode {
+        val t = node.transform
+        val newCx = pivotX + (t.cx - pivotX) * factor
+        val newCy = pivotY + (t.cy - pivotY) * factor
+        val newScale = (t.scale * factor).coerceIn(0.01f, 1000f)
+        val newTransform = t.copy(cx = newCx, cy = newCy, scale = newScale)
+        if (node !is CanvasNode.Media) return node.withTransform(newTransform)
+
+        val crop = node.appearance?.crop
+        if (crop == null || crop.mode != CropMode.Manual) {
+            return node.copy(transform = newTransform)
+        }
+        // Offsets live in node-local world units; scaling them by `factor`
+        // keeps the source's *relative* position inside the rect constant.
+        val newAppearance = node.appearance!!.copy(
+            crop = crop.copy(
+                offsetX = crop.offsetX * factor,
+                offsetY = crop.offsetY * factor,
+            ),
+        ).takeUnless { it == MediaAppearance() }
+        return node.copy(transform = newTransform, appearance = newAppearance)
+    }
+
+    private fun computeResizedMedia(
+        media: CanvasNode.Media,
+        sx: Int, sy: Int,
+        worldDx: Float, worldDy: Float,
+    ): Pair<Transform, MediaAppearance?> {
+        val t = media.transform
+        val (lx, ly) = TransformUtils.rotateVector(worldDx, worldDy, -t.rotation)
+        val effLx = if (sx == 0) 0f else lx
+        val effLy = if (sy == 0) 0f else ly
+        val newRenderW = (t.renderW + sx * effLx).coerceAtLeast(MIN_MEDIA_RENDER_SIZE)
+        val newRenderH = (t.renderH + sy * effLy).coerceAtLeast(MIN_MEDIA_RENDER_SIZE)
+        val centerShiftLx = effLx / 2f
+        val centerShiftLy = effLy / 2f
+        val (centerShiftWx, centerShiftWy) = TransformUtils.rotateVector(
+            centerShiftLx, centerShiftLy, t.rotation,
+        )
+        val scaleSafe = if (t.scale == 0f) 1f else t.scale
+        val newTransform = t.copy(
+            w = newRenderW / scaleSafe,
+            h = newRenderH / scaleSafe,
+            cx = t.cx + centerShiftWx,
+            cy = t.cy + centerShiftWy,
+        )
+
+        val currentAppearance = media.appearance
+        val crop = currentAppearance?.crop
+        val srcW = media.intrinsicPixelWidth.toFloat()
+        val srcH = media.intrinsicPixelHeight.toFloat()
+        val canCompensate = crop != null && crop.mode == CropMode.Manual && srcW > 0f && srcH > 0f
+        val newAppearance = if (canCompensate) {
+            val fillScaleOld = kotlin.math.max(t.renderW / srcW, t.renderH / srcH)
+            val fillScaleNew = kotlin.math.max(newRenderW / srcW, newRenderH / srcH)
+            val zoomCompensation = if (fillScaleNew > 0f) fillScaleOld / fillScaleNew else 1f
+            val newCrop = crop!!.copy(
+                offsetX = crop.offsetX - centerShiftLx,
+                offsetY = crop.offsetY - centerShiftLy,
+                zoom = crop.zoom * zoomCompensation,
+            )
+            currentAppearance!!.copy(crop = newCrop).takeUnless { it == MediaAppearance() }
+        } else {
+            currentAppearance
+        }
+
+        return newTransform to newAppearance
+    }
+
+    private fun handleSigns(handle: ResizeHandle): Pair<Int, Int> =
+        when (handle) {
+            ResizeHandle.TOP_LEFT -> -1 to -1
+            ResizeHandle.TOP_RIGHT -> 1 to -1
+            ResizeHandle.BOTTOM_LEFT -> -1 to 1
+            ResizeHandle.BOTTOM_RIGHT -> 1 to 1
+        }
+
+    private fun edgeSigns(edge: EdgeHandle): Pair<Int, Int> =
+        when (edge) {
+            EdgeHandle.TOP -> 0 to -1
+            EdgeHandle.RIGHT -> 1 to 0
+            EdgeHandle.BOTTOM -> 0 to 1
+            EdgeHandle.LEFT -> -1 to 0
+        }
+
+    /**
+     * Apply an appearance patch to a single media node (and the corresponding
+     * `visibleNodes` entry) without going through the snapshot command path.
+     * The caller controls undo wrap via [BeginInteraction] / [FinishInteraction].
+     */
+    private fun applyMediaPanPatch(
+        nodeId: String,
+        patchAppearance: (current: MediaAppearance?, rotation: Float) -> MediaAppearance,
+    ) {
+        _allNodes.update { list ->
+            list.map { node ->
+                if (node.id == nodeId && node is CanvasNode.Media) {
+                    val updated = patchAppearance(node.appearance, node.transform.rotation)
+                    node.copy(appearance = updated.takeUnless { it == MediaAppearance() })
+                } else node
+            }
+        }
+        _state.update { s ->
+            s.copy(
+                visibleNodes = s.visibleNodes.map { vn ->
+                    val n = vn.node
+                    if (n.id == nodeId && n is CanvasNode.Media) {
+                        val updated = patchAppearance(n.appearance, n.transform.rotation)
+                        vn.copy(node = n.copy(appearance = updated.takeUnless { it == MediaAppearance() }))
+                    } else vn
+                },
+            )
         }
     }
 
@@ -998,7 +1415,7 @@ class CanvasViewModel @Inject constructor(
      *   culled out of the viewport).
      * - Empty selection: null.
      */
-    fun selectionTransform(): com.mamton.zoomalbum.domain.model.Transform? {
+    fun selectionTransform(): Transform? {
         val editor = _state.value.editor
         val ids = editor.selectedNodeIds
         return when {
@@ -1026,6 +1443,19 @@ class CanvasViewModel @Inject constructor(
         val (wx, wy) = TransformUtils.screenToWorld(screenX, screenY, cam)
         val handleWorldRadius = HANDLE_TOUCH_RADIUS_PX / cam.scale
         return TransformUtils.hitTestHandle(wx, wy, t, handleWorldRadius)
+    }
+
+    /**
+     * Returns the edge handle at the given screen point, or null. Corners
+     * win on overlap — callers should test corners first via [hitTestHandle].
+     * Only meaningful in `EditorTool.CropEdit` (Selection has no edge handles).
+     */
+    fun hitTestEdgeHandle(screenX: Float, screenY: Float): EdgeHandle? {
+        val t = selectionTransform() ?: return null
+        val cam = _state.value.camera
+        val (wx, wy) = TransformUtils.screenToWorld(screenX, screenY, cam)
+        val handleWorldRadius = HANDLE_TOUCH_RADIUS_PX / cam.scale
+        return TransformUtils.hitTestEdgeHandle(wx, wy, t, handleWorldRadius)
     }
 
     /** True if the screen point is on the rotation handle. */
@@ -1135,7 +1565,7 @@ class CanvasViewModel @Inject constructor(
      */
     private fun inlinePatchVisibleNodes(
         ids: Set<String>,
-        patchTransform: (com.mamton.zoomalbum.domain.model.Transform) -> com.mamton.zoomalbum.domain.model.Transform,
+        patchTransform: (Transform) -> Transform,
     ) {
         _state.update { s ->
             s.copy(
@@ -1160,16 +1590,44 @@ class CanvasViewModel @Inject constructor(
     private fun recomputeGroupTransform(selectedIds: Set<String>) {
         if (selectedIds.size < 2) {
             updateEditor { it.copy(groupSelectionTransform = null) }
+            enforceCropEditInvariant()
             return
         }
         val selected = _allNodes.value.filter { it.id in selectedIds }
         if (selected.size < 2) {
             updateEditor { it.copy(groupSelectionTransform = null) }
+            enforceCropEditInvariant()
             return
         }
         val cameraRotation = _state.value.camera.rotation
         val gt = TransformUtils.screenAlignedGroupTransform(selected, cameraRotation)
         updateEditor { it.copy(groupSelectionTransform = gt) }
+        enforceCropEditInvariant()
+    }
+
+    /** The single selected node, only if it is exactly one `CanvasNode.Media`. */
+    private fun singleSelectedMedia(): CanvasNode.Media? {
+        val ids = _state.value.editor.selectedNodeIds
+        if (ids.size != 1) return null
+        return _allNodes.value.firstOrNull { it.id in ids } as? CanvasNode.Media
+    }
+
+    /**
+     * Auto-exit `CropEdit` to `Selection` whenever the selection stops being
+     * exactly one media node (delete, multi-select, frame focused, etc.). See
+     * `docs/architecture/editor-tools.md § 4.8` "Persistence". Also drops the
+     * entry snapshot — Cancel applies only inside an active session.
+     */
+    private fun enforceCropEditInvariant() {
+        if (_state.value.editor.activeTool !== EditorTool.CropEdit) return
+        if (singleSelectedMedia() == null) {
+            updateEditor {
+                it.copy(
+                    activeTool = EditorTool.Selection,
+                    cropEdit = it.cropEdit.copy(entrySnapshot = null),
+                )
+            }
+        }
     }
 
     /** Mutates only [EditorState] under [CanvasState.editor]. */
@@ -1346,6 +1804,7 @@ class CanvasViewModel @Inject constructor(
             newSelection.isEmpty() ->
                 updateEditor { it.copy(groupSelectionTransform = null) }
         }
+        enforceCropEditInvariant()
         commit(
             CanvasCommand(
                 before = removedWithIdx.map { it.second },
@@ -1521,6 +1980,17 @@ class CanvasViewModel @Inject constructor(
         const val ROTATION_HANDLE_OFFSET_PX = 40f
         /** Diagonal offset (screen px) applied to duplicated nodes. */
         const val DUPLICATE_SHIFT_PX = 40f
+        /**
+         * Lower clamp for media render dimensions during `CropEdit` corner /
+         * edge drags. World-units; prevents the viewport from collapsing past
+         * a pickable size during fast drags.
+         */
+        const val MIN_MEDIA_RENDER_SIZE = 1f
+        /**
+         * Lower clamp for `crop.zoom` during pinch — prevents the source
+         * from collapsing to invisibility on aggressive pinch-out.
+         */
+        const val MIN_CROP_ZOOM = 1e-3f
         /** ~60 fps tick interval for camera focus animations. */
         private const val FRAME_DELAY_MS = 16L
     }

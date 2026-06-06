@@ -246,6 +246,12 @@ object GestureRouter {
             // a no-op (`editor-tools.md § 4.6`). Scrub is handled separately
             // by `routeEraserScrubStart` + the dedicated scrub detector.
             if (hitNodeId != null) TapRoute.EraserDeleteNode(hitNodeId) else TapRoute.Ignore
+        EditorTool.CropEdit ->
+            // CropEdit consumes single-finger drag for handle / body resize +
+            // source pan, but tap is a no-op — `editor-tools.md § 4.8` lists
+            // both "Tap on empty" and "Tap on viewport without drag" as
+            // no-ops. Tool-switch via the appearance sheet is the exit path.
+            TapRoute.Ignore
     }
 
     fun routeDoubleTap(ctx: GestureRoutingContext): DoubleTapRoute {
@@ -257,6 +263,7 @@ object GestureRouter {
             CanvasInteractionMode.Edit -> when (ctx.activeTool) {
                 EditorTool.Selection,
                 EditorTool.Eraser,
+                EditorTool.CropEdit,
                 -> DoubleTapRoute.Ignore
             }
             // View / Presentation are nil-tool modes — the reset-camera
@@ -313,14 +320,18 @@ object GestureRouter {
     fun routeSelectedNodeTransformStart(
         ctx: GestureRoutingContext,
     ): SelectedNodeTransformRoute {
-        // Selected-node body / handle drag is owned by the Selection tool.
-        // Other tools never claim it, even when selection persists across the
-        // tool switch — otherwise Eraser-while-something-was-selected would
-        // still move/resize that node.
+        // Selected-node body / handle drag is owned by tools that explicitly
+        // claim it. Selection (move / resize / rotate) and CropEdit (viewport
+        // resize + source pan — see `editor-tools.md § 4.8`) both qualify; the
+        // detector callbacks dispatch different actions per-tool. Eraser /
+        // future tools never claim selected-node drag, so Eraser-while-
+        // something-was-selected can't still move/resize that node.
         if (!ctx.hasSelection) return SelectedNodeTransformRoute.Block
         return when (ctx.mode) {
             CanvasInteractionMode.Edit -> when (ctx.activeTool) {
-                EditorTool.Selection -> SelectedNodeTransformRoute.Allow
+                EditorTool.Selection,
+                EditorTool.CropEdit,
+                -> SelectedNodeTransformRoute.Allow
                 EditorTool.Eraser -> SelectedNodeTransformRoute.Block
             }
             CanvasInteractionMode.View,

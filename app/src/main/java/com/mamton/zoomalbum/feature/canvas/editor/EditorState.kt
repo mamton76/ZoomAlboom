@@ -3,6 +3,7 @@ package com.mamton.zoomalbum.feature.canvas.editor
 import com.mamton.zoomalbum.core.math.BoundingBox
 import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
 import com.mamton.zoomalbum.domain.model.FrameEditOptions
+import com.mamton.zoomalbum.domain.model.MediaAppearance
 import com.mamton.zoomalbum.domain.model.Transform
 
 /**
@@ -61,4 +62,37 @@ data class EditorState(
      * See `docs/architecture/context-menu.md § 2`.
      */
     val contextAnchorNodeId: String? = null,
+    /**
+     * Topbar settings for `EditorTool.CropEdit`. Session-only — not persisted
+     * with the album. See `docs/architecture/editor-tools.md § 4.8`.
+     */
+    val cropEdit: CropEditToolState = CropEditToolState(),
+)
+
+/**
+ * Topbar-driven settings for `EditorTool.CropEdit`, plus the entry snapshot
+ * used by the topbar Cancel button. Session-scoped (not persisted).
+ */
+data class CropEditToolState(
+    /**
+     * When `true`, corner-handle drags preserve the viewport's aspect ratio
+     * captured at gesture start; when `false`, corners resize freely. Edge
+     * handles ignore this — they're inherently one-axis. Default `true`
+     * (locked) per `editor-tools.md § 4.8`.
+     */
+    val aspectLocked: Boolean = true,
+    /**
+     * Snapshot of the edited media's transform + appearance captured the
+     * moment the user entered `CropEdit`. The topbar `Cancel` button
+     * restores this; `Leave crop edit` keeps the current state. `null`
+     * outside an active `CropEdit` session.
+     */
+    val entrySnapshot: CropEditEntrySnapshot? = null,
+)
+
+/** Snapshot of one media node for the Cancel revert path. */
+data class CropEditEntrySnapshot(
+    val nodeId: String,
+    val transform: Transform,
+    val appearance: MediaAppearance?,
 )

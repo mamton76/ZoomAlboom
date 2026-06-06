@@ -21,9 +21,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mamton.zoomalbum.core.designsystem.CanvasDark
 import com.mamton.zoomalbum.core.designsystem.CanvasLight
+import com.mamton.zoomalbum.core.math.ResizeHandle
 import com.mamton.zoomalbum.core.math.TransformUtils
 import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
 import com.mamton.zoomalbum.domain.model.CanvasNode
+import com.mamton.zoomalbum.domain.undo.InteractionKind
+import com.mamton.zoomalbum.feature.canvas.editor.EditorTool
 import com.mamton.zoomalbum.domain.model.MembershipState
 import com.mamton.zoomalbum.domain.usecase.FrameMembershipUseCase
 import com.mamton.zoomalbum.feature.canvas.editor.gestures.CameraTransformRoute
@@ -173,21 +176,80 @@ fun CanvasScreen(
                 selectedNodeIds = transformableSelectionIds(state),
                 hitTestBody = { x, y -> viewModel.isOnSelectedNode(x, y) },
                 hitTestHandle = { x, y -> viewModel.hitTestHandle(x, y) },
-                hitTestRotationHandle = { x, y -> viewModel.hitTestRotationHandle(x, y) },
+                hitTestRotationHandle = { x, y ->
+                    // CropEdit doesn't expose a rotation handle (no source-pixel
+                    // rotation in v1; whole-node rotation belongs to Selection).
+                    if (state.editor.activeTool === EditorTool.CropEdit) false
+                    else viewModel.hitTestRotationHandle(x, y)
+                },
+                hitTestEdgeHandle = { x, y ->
+                    // Edge handles only render + hit in CropEdit.
+                    if (state.editor.activeTool === EditorTool.CropEdit) {
+                        viewModel.hitTestEdgeHandle(x, y)
+                    } else null
+                },
                 onDrag = { dx, dy ->
                     val (wdx, wdy) = TransformUtils.screenDeltaToWorld(dx, dy, state.camera)
-                    viewModel.onAction(CanvasAction.MoveSelection(wdx, wdy))
+                    if (state.editor.activeTool === EditorTool.CropEdit) {
+                        // Body drag in CropEdit pans the source pixels under the
+                        // viewport — `editor-tools.md § 4.8`.
+                        val mediaId = state.editor.selectedNodeIds.firstOrNull()
+                            ?: return@nodeInteractionGestures
+                        viewModel.onAction(CanvasAction.PanCropSource(mediaId, wdx, wdy))
+                    } else {
+                        viewModel.onAction(CanvasAction.MoveSelection(wdx, wdy))
+                    }
                 },
                 onResizeDrag = { handle, dx, dy ->
-                    // Use effective selection transform — independent of viewport culling.
+                    val (worldDx, worldDy) = TransformUtils.screenDeltaToWorld(dx, dy, state.camera)
+                    val tool = state.editor.activeTool
+                    if (tool === EditorTool.CropEdit) {
+                        // CropEdit corner drag — always routes through
+                        // ResizeMediaFreeCorner so the source-stability
+                        // compensation in `applyMediaCornerEdgeResize` fires
+                        // (Fix 2). Aspect-lock is enforced by projecting the
+                        // world delta onto the corner's diagonal in node-local
+                        // coords, then rotating back to world.
+                        val mediaId = state.editor.selectedNodeIds.firstOrNull()
+                            ?: return@nodeInteractionGestures
+                        val t = viewModel.selectionTransform() ?: return@nodeInteractionGestures
+                        val (constrainedWx, constrainedWy) = if (state.editor.cropEdit.aspectLocked) {
+                            val (sx, sy) = when (handle) {
+                                ResizeHandle.TOP_LEFT -> -1f to -1f
+                                ResizeHandle.TOP_RIGHT -> 1f to -1f
+                                ResizeHandle.BOTTOM_LEFT -> -1f to 1f
+                                ResizeHandle.BOTTOM_RIGHT -> 1f to 1f
+                            }
+                            val (lx, ly) = TransformUtils.rotateVector(worldDx, worldDy, -t.rotation)
+                            // Project (lx, ly) onto the corner's unit-diagonal
+                            // direction (sx, sy)/√2. Resulting constrained delta
+                            // moves the dragged corner along its diagonal only,
+                            // preserving the aspect ratio of the rect.
+                            val dot = sx * lx + sy * ly
+                            val cLx = sx * dot / 2f
+                            val cLy = sy * dot / 2f
+                            TransformUtils.rotateVector(cLx, cLy, t.rotation)
+                        } else {
+                            worldDx to worldDy
+                        }
+                        viewModel.onAction(
+                            CanvasAction.ResizeMediaFreeCorner(
+                                mediaId, handle, constrainedWx, constrainedWy,
+                            ),
+                        )
+                        return@nodeInteractionGestures
+                    }
+                    // Selection-tool corner drag — uniform scale around opposite
+                    // corner via ResizeSelection (does NOT compensate Manual crop
+                    // offsets; that's the user's choice for whole-object resize).
                     val t = viewModel.selectionTransform() ?: return@nodeInteractionGestures
                     val halfW = t.renderW / 2f
                     val halfH = t.renderH / 2f
                     val (cornerX, cornerY) = when (handle) {
-                        com.mamton.zoomalbum.core.math.ResizeHandle.TOP_LEFT -> -halfW to -halfH
-                        com.mamton.zoomalbum.core.math.ResizeHandle.TOP_RIGHT -> halfW to -halfH
-                        com.mamton.zoomalbum.core.math.ResizeHandle.BOTTOM_LEFT -> -halfW to halfH
-                        com.mamton.zoomalbum.core.math.ResizeHandle.BOTTOM_RIGHT -> halfW to halfH
+                        ResizeHandle.TOP_LEFT -> -halfW to -halfH
+                        ResizeHandle.TOP_RIGHT -> halfW to -halfH
+                        ResizeHandle.BOTTOM_LEFT -> -halfW to halfH
+                        ResizeHandle.BOTTOM_RIGHT -> halfW to halfH
                     }
                     val diagonalLen = kotlin.math.sqrt(cornerX * cornerX + cornerY * cornerY)
                     if (diagonalLen < 0.001f) return@nodeInteractionGestures
@@ -201,7 +263,6 @@ fun CanvasScreen(
                     val pivotX = t.cx + oppXRot
                     val pivotY = t.cy + oppYRot
 
-                    val (worldDx, worldDy) = TransformUtils.screenDeltaToWorld(dx, dy, state.camera)
                     val (localDx, localDy) = TransformUtils.rotateVector(
                         worldDx, worldDy, -t.rotation,
                     )
@@ -215,6 +276,16 @@ fun CanvasScreen(
                     val scaleFactor = (fullDiag + projection) / fullDiag
                     viewModel.onAction(
                         CanvasAction.ResizeSelection(scaleFactor, pivotX, pivotY),
+                    )
+                },
+                onEdgeResizeDrag = { edge, dx, dy ->
+                    // CropEdit only — edge handles aren't rendered or hit in
+                    // any other tool. Edges always ignore aspect lock.
+                    val mediaId = state.editor.selectedNodeIds.firstOrNull()
+                        ?: return@nodeInteractionGestures
+                    val (worldDx, worldDy) = TransformUtils.screenDeltaToWorld(dx, dy, state.camera)
+                    viewModel.onAction(
+                        CanvasAction.ResizeMediaEdge(mediaId, edge, worldDx, worldDy),
                     )
                 },
                 onRotationDragPosition = { screenX, screenY ->
@@ -483,14 +554,64 @@ fun CanvasScreen(
             // calls just leave the popup closed. (Differs from tap /
             // drag-start, where the gesture is discrete and "dismiss only"
             // is the route.)
-            .infiniteCanvasGestures { centroid, pan, zoom, rotation ->
-                val ctx = routingContext(state, isContextMenuOpenLatest)
-                when (GestureRouter.routeCameraTransformStart(ctx)) {
-                    CameraTransformRoute.DismissContextMenuAndProceed -> onCanvasGesture()
-                    CameraTransformRoute.Allow -> Unit
-                }
-                viewModel.onGesture(centroid, pan, zoom, rotation)
-            },
+            .infiniteCanvasGestures(
+                onGestureBegin = {
+                    // CropEdit captures pinch + two-finger pan as source-edit
+                    // gestures; wrap the whole pinch session in one undo entry.
+                    if (viewModel.state.value.editor.activeTool ===
+                        EditorTool.CropEdit
+                    ) {
+                        viewModel.onAction(
+                            CanvasAction.BeginInteraction(
+                                InteractionKind.RESIZE,
+                            ),
+                        )
+                    }
+                },
+                onGestureEnd = {
+                    if (viewModel.state.value.editor.activeTool ===
+                        EditorTool.CropEdit
+                    ) {
+                        viewModel.onAction(CanvasAction.FinishInteraction)
+                    }
+                },
+                onGesture = onGesture@{ centroid, pan, zoom, rotation ->
+                    val ctx = routingContext(state, isContextMenuOpenLatest)
+                    when (GestureRouter.routeCameraTransformStart(ctx)) {
+                        CameraTransformRoute.DismissContextMenuAndProceed -> onCanvasGesture()
+                        CameraTransformRoute.Allow -> Unit
+                    }
+                    if (state.editor.activeTool ===
+                        EditorTool.CropEdit
+                    ) {
+                        // Two-finger pinch in CropEdit drives source pan/zoom,
+                        // not the camera. Rotation is intentionally dropped —
+                        // source rotation is out of scope per editor-tools.md
+                        // § 4.8.
+                        val mediaId = state.editor.selectedNodeIds.firstOrNull()
+                        if (mediaId != null) {
+                            val (wcx, wcy) = TransformUtils.screenToWorld(
+                                centroid.x, centroid.y, state.camera,
+                            )
+                            val (wpx, wpy) = TransformUtils.screenDeltaToWorld(
+                                pan.x, pan.y, state.camera,
+                            )
+                            viewModel.onAction(
+                                CanvasAction.PinchCropSource(
+                                    nodeId = mediaId,
+                                    worldCentroidX = wcx,
+                                    worldCentroidY = wcy,
+                                    worldPanX = wpx,
+                                    worldPanY = wpy,
+                                    zoomFactor = zoom,
+                                ),
+                            )
+                            return@onGesture
+                        }
+                    }
+                    viewModel.onGesture(centroid, pan, zoom, rotation)
+                },
+            ),
     ) {
         // Camera-locked album background: screen-fixed, drawn under everything.
         state.albumBackground?.let { bg ->
@@ -555,6 +676,7 @@ fun CanvasScreen(
                     rotationHandleEnabled = true, // TODO: wire to InteractionSettings
                     groupTransform = state.editor.groupSelectionTransform,
                     anchorNodeId = state.editor.contextAnchorNodeId,
+                    cropEdit = state.editor.activeTool === EditorTool.CropEdit,
                 )
             }
 

@@ -8,6 +8,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import com.mamton.zoomalbum.core.math.EdgeHandle
 import com.mamton.zoomalbum.core.math.ResizeHandle
 import com.mamton.zoomalbum.domain.undo.InteractionKind
 
@@ -39,6 +40,13 @@ fun Modifier.nodeInteractionGestures(
     onRotationDragPosition: (screenX: Float, screenY: Float) -> Unit,
     onDragBegin: (kind: InteractionKind) -> Unit,
     onDragEnd: () -> Unit,
+    /**
+     * Optional edge-handle hit test. Only used by `EditorTool.CropEdit` for
+     * one-axis viewport resize. Defaults to a no-op that returns `null` so
+     * Selection callers don't pay any cost.
+     */
+    hitTestEdgeHandle: (screenX: Float, screenY: Float) -> EdgeHandle? = { _, _ -> null },
+    onEdgeResizeDrag: (edge: EdgeHandle, screenDx: Float, screenDy: Float) -> Unit = { _, _, _ -> },
 ): Modifier = this.pointerInput(selectedNodeIds) {
     if (selectedNodeIds.isEmpty()) return@pointerInput
 
@@ -54,7 +62,7 @@ fun Modifier.nodeInteractionGestures(
         // long-press-to-toggle on selected nodes.
         val slopSq = viewConfiguration.touchSlop * viewConfiguration.touchSlop
 
-        // Priority 1: resize handle
+        // Priority 1: resize handle (corner)
         val handle = hitTestHandle(downX, downY)
         if (handle != null) {
             while (true) {
@@ -69,6 +77,29 @@ fun Modifier.nodeInteractionGestures(
                     onDragBegin(InteractionKind.RESIZE)
                     dragLoop(
                         onDelta = { mdx, mdy -> onResizeDrag(handle, mdx, mdy) },
+                        onEnd = onDragEnd,
+                    )
+                    return@awaitEachGesture
+                }
+            }
+        }
+
+        // Priority 1b: edge handle (CropEdit only; no-op for Selection).
+        // Corners win on overlap because corner hit-test runs first above.
+        val edge = hitTestEdgeHandle(downX, downY)
+        if (edge != null) {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                if (event.changes.size > 1) return@awaitEachGesture
+                val change = event.changes.firstOrNull() ?: return@awaitEachGesture
+                if (change.changedToUp() || change.isConsumed) return@awaitEachGesture
+                val dx = change.position.x - downX
+                val dy = change.position.y - downY
+                if (dx * dx + dy * dy > slopSq) {
+                    change.consume()
+                    onDragBegin(InteractionKind.RESIZE)
+                    dragLoop(
+                        onDelta = { mdx, mdy -> onEdgeResizeDrag(edge, mdx, mdy) },
                         onEnd = onDragEnd,
                     )
                     return@awaitEachGesture

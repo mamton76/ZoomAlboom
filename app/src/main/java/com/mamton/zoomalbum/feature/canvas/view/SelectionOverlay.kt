@@ -33,6 +33,14 @@ fun SelectionOverlay(
     rotationHandleEnabled: Boolean,
     groupTransform: Transform?,
     anchorNodeId: String? = null,
+    /**
+     * When `true`, the single-selected node's chrome shows the `CropEdit`
+     * handle set (4 corners + 4 edges, no rotation handle). When `false`,
+     * the standard `Selection`-tool chrome is drawn. Only applies to the
+     * single-selection case — `CropEdit` is gated to exactly one media node.
+     * See `docs/architecture/editor-tools.md § 4.8`.
+     */
+    cropEdit: Boolean = false,
 ) {
     if (selectedNodes.isEmpty()) return
 
@@ -45,12 +53,14 @@ fun SelectionOverlay(
     }
 
     if (selectedNodes.size == 1) {
-        // Single node: full chrome (border + handles + rotation handle)
+        // Single node: full chrome (border + handles + rotation handle).
+        // CropEdit replaces rotation with edge handles.
         NodeChrome(
             transform = selectedNodes.first().transform,
             cameraScale = cameraScale,
             showHandles = true,
-            rotationHandleEnabled = rotationHandleEnabled,
+            rotationHandleEnabled = rotationHandleEnabled && !cropEdit,
+            edgeHandlesEnabled = cropEdit,
         )
     } else {
         // Multi-select: individual border on each node (no handles)
@@ -116,6 +126,7 @@ private fun NodeChrome(
     cameraScale: Float,
     showHandles: Boolean,
     rotationHandleEnabled: Boolean,
+    edgeHandlesEnabled: Boolean = false,
 ) {
     val renderW = transform.renderW
     val renderH = transform.renderH
@@ -163,6 +174,23 @@ private fun NodeChrome(
                         topLeft = corner,
                         size = Size(handleSize, handleSize),
                     )
+                }
+
+                // Edge handles (CropEdit only)
+                if (edgeHandlesEnabled) {
+                    val edges = listOf(
+                        Offset(-hs, -halfH - hs),    // TOP
+                        Offset(halfW - hs, -hs),     // RIGHT
+                        Offset(-hs, halfH - hs),     // BOTTOM
+                        Offset(-halfW - hs, -hs),    // LEFT
+                    )
+                    for (edge in edges) {
+                        drawRect(
+                            color = AccentCyan,
+                            topLeft = edge,
+                            size = Size(handleSize, handleSize),
+                        )
+                    }
                 }
 
                 // Rotation handle

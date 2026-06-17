@@ -165,6 +165,8 @@ enum class MediaType {
 
 `IMAGE`, `VIDEO`, `AUDIO`, `TEXT`, `STICKER`, `VECTOR_SHAPE` are MVP variants. `ANIMATED_PHOTO` is planned post-MVP.
 
+The Video MVP activates the `VIDEO` path with **no model change** — `mediaRefId` stays a raw URI and no `MediaAsset` indirection is introduced. See [video.md § 2](video.md#2-model-bridge--no-migration).
+
 ### NodeAppearance, MediaAppearance, FrameAppearance
 
 Non-destructive visual styling for canvas nodes. Each variant of `CanvasNode` that supports styling carries its own typed appearance container — `MediaAppearance` on `CanvasNode.Media`, `FrameAppearance` on `CanvasNode.Frame` — both extending a shared sealed `NodeAppearance` base. The base owns cross-cutting properties: `opacity`, `cornerRadius`, `overlays: List<OverlayStyle>`, `border`, `shadow`. Shared *value* types (`OverlayStyle`, `OverlaySource`, `NodeBlendMode`, `BorderStyle`, `ShadowStyle`) are defined once and reused.

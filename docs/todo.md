@@ -972,6 +972,31 @@ Locked 2026-06-06 in [editor-tools.md § 4.8](architecture/editor-tools.md#48-cr
 - [x] § 20.2 line for `CropMode.Manual` updated to reference this slice.
 - [x] § 20.5 "Manual crop handle in canvas" updated to reference this slice.
 
+### 20.9 CropEdit stabilization — invariant + session-compound undo
+
+Decided 2026-06-17 (graduated from `to_discuss.md § 15`); see [editor-tools.md § 4.8](architecture/editor-tools.md#48-cropedit) **Persistence + invariant**, **Undo granularity**, **Cancel**. Pre-video hardening pass. Two strands: close the invariant gaps, and collapse the session into one undoable command.
+
+#### 20.9.1 Snapshot-bound invariant
+- [ ] Strengthen the `CropEdit` invariant from "exactly one media selected" to "selection is exactly `entrySnapshot.nodeId`". `enforceCropEditInvariant()` exits to `Selection` (and clears the snapshot) when `singleSelectedMedia()?.id != entrySnapshot.nodeId`.
+- [ ] **Gap 1 — View/Present switch:** `SetMode` (any Edit-exit) runs `enforceCropEditInvariant()`; `activeTool` resets to `Selection` so Edit re-entry never resumes a stale CropEdit.
+- [ ] **Gap 2 — different single media:** selection moving to another media node exits CropEdit (per the strengthened invariant above). *Re-anchoring* (commit + re-capture snapshot for the new node) is explicitly deferred, not part of this slice.
+- [ ] **Gap 3 — Undo/Redo:** run `enforceCropEditInvariant()` after `Undo` / `Redo` apply, so a command that removes the edited media or changes selection can't leave CropEdit dangling.
+- [ ] Regression-cover the already-safe cases stay safe: delete, multi-select, frame-selected, explicit tool-switch.
+
+#### 20.9.2 Session-compound undo
+- [ ] Suppress per-gesture history while `CropEdit` is active — pan / corner / edge / pinch / slider / Reset no longer each push a `Compound` entry (remove the per-gesture `BeginInteraction`/`FinishInteraction` push for CropEdit, or route it into a session accumulator).
+- [ ] Push **one** `Compound` entry on **Apply / exit** (entry-snapshot → final state). No-op if nothing changed.
+- [ ] `CancelCropEdit` restores the entry snapshot and pushes **nothing** — verify the undo stack is identical before-entry and after-Cancel (no orphan entries).
+- [ ] Update the `to_discuss.md § 15`-era comment on `CancelCropEdit` (`CanvasViewModel.kt`) and the § 20.8.5 Cancel line (which still says "intermediate session entries remain").
+
+#### 20.9.3 Tests
+- [ ] Invariant tests: View/Present switch, different-media selection, undo-removes-media, undo-changes-selection all exit CropEdit cleanly with snapshot cleared.
+- [ ] Undo tests: a multi-gesture CropEdit session = one undo entry on Apply; Cancel leaves the stack unchanged; one Undo after Apply restores the pre-entry state.
+
+#### 20.9.4 Docs follow-up
+- [x] [editor-tools.md § 4.8](architecture/editor-tools.md#48-cropedit) **Persistence + invariant** / **Undo granularity** / **Cancel** rewritten for the snapshot-bound invariant + session-compound model (2026-06-17).
+- [ ] Once shipped, update § 20.8.5 Cancel line and § 20.8.4 undo line to point at the session-compound behavior.
+
 ### Post-MVP
 - [ ] `FrameAppearance.contentEffect` — off-screen filter pass (sepia / blur / grayscale of rendered frame contents)
 - [ ] AI auto-enhance, background removal, old photo restoration, B&W colorization
@@ -1459,6 +1484,49 @@ Local-first automatic snapshot sync with conflict-safe editing. Slices are order
 - [ ] No CRDT-backed scene graph (tracked separately in §18 Future).
 - [ ] No cross-album linking through the cloud.
 - [ ] No web viewer / share-via-link / server-rendered thumbnails (incompatible with the encryption-readiness constraint).
+
+---
+
+## 27. Video MVP
+
+Design decided 2026-06-17 (graduated from `to_discuss.md § 13`) → [video.md](architecture/video.md) is the source of truth. Goal: video as playable "living media" on the canvas, behaving like an image node for all transform/selection. Implementation pending; the first concrete deliverable is an implementation plan, then these slices.
+
+### 27.1 Dependencies
+- [ ] Add Media3 ExoPlayer (playback) to the version catalog + `app/build.gradle.kts`.
+- [ ] Add Coil `coil-video` decoder (poster-frame extraction) and register it with the existing Coil `ImageLoader`.
+
+### 27.2 Video path activation (no model change)
+- [ ] Branch media rendering on `mediaType == MediaType.VIDEO`; keep `mediaRefId` a raw URI (no `MediaAsset`, no migration — see [video.md § 2](architecture/video.md#2-model-bridge--no-migration)).
+- [ ] Place a video on the canvas the same way as an image (add-content path accepts video URIs; `mediaType` set to `VIDEO`).
+
+### 27.3 Poster (zero storage)
+- [ ] Render the poster via the existing Coil path pointed at the video URI with a frame-millis param, decoded by `coil-video`. No import step, no stored poster, no model field.
+- [ ] Subtle play-icon overlay on the poster; fades while playing, reappears on pause.
+- [ ] LOD: poster participates in `RenderDetail` like any image (`Stub`/`Preview` = placeholder, `Full` = poster).
+
+### 27.4 Edit vs. View tap behavior
+- [ ] View/Present: tap anywhere on a video → play/pause.
+- [ ] Edit: tap **selects** (unchanged); add a **node-local play button on the selected node's poster** that sits inside the node, yields to transform handles, and does **not** extend selection or start a marquee.
+- [ ] No accidental playback in Edit outside the explicit play button.
+
+### 27.5 Bounded player pool (simultaneous playback)
+- [ ] Device decoder-capability probe → derive pool size *K* (clamped to a safe ceiling; hardware `MediaCodec` decoders are capped).
+- [ ] Candidates bounded by LOD: only `RenderDetail.Full` videos are playback candidates.
+- [ ] Pool of *K* `ExoPlayer` instances attaches to the *K* most-relevant playing videos; eviction policy (e.g. off-screen / least-recently-started first).
+- [ ] Poster fallback when a video wants to play but can't get a pooled player.
+
+### 27.6 Playback host
+- [ ] `AndroidView`-hosted Media3 `ExoPlayer` surface, mounted only at `RenderDetail.Full` for pool-assigned playing nodes; poster otherwise.
+- [ ] Playback state + the player pool live in a `CanvasScaffold`-level holder keyed by `nodeId` — never in domain models (per [editor-tools.md § 7.1](architecture/editor-tools.md#71-state)).
+- [ ] Player surface participates in the canvas transform but defers pan/zoom/selection gestures to the existing routers (no gesture-routing regressions).
+
+### 27.7 Tests
+- [ ] Video node transforms (move/resize/rotate/select) identically to an image node.
+- [ ] Edit play button starts playback without changing selection; Edit tap elsewhere only selects.
+- [ ] Pool respects *K*: the (K+1)-th requested playback evicts or falls back to poster per policy.
+
+### 27.8 Explicitly out of scope (first slice)
+- [ ] loop / mute / start-position / custom poster / inline controls / autoplay-on-frame-entry / pause-on-leave / `AlbumVideoDefaults` / full Media Library (`to_discuss.md § 14`).
 
 ---
 

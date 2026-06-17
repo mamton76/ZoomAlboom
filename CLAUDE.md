@@ -22,6 +22,7 @@ Source-of-truth docs:
 - `docs/architecture/navigation.md`
 - `docs/architecture/appearance.md` — shared `NodeAppearance` model, `MediaAppearance` vs `FrameAppearance`, `OverlayStyle`, `MaskNode` constraints.
 - `docs/architecture/media-appearance.md` — media-specific appearance surface (crop, color, frame decoration, presets, derivatives)
+- `docs/architecture/video.md` — Video MVP (playable "living media" on the canvas: no-migration `VIDEO` bridge, zero-storage Coil poster, Edit play-button vs. View tap, bounded ExoPlayer pool). Design decided 2026-06-17, implementation pending — slices in `todo.md § 27`.
 - `docs/architecture/context-menu.md` — long-press context menu; `(selection, anchor)` model; baseline rendering of the `SelectionActionSurface`. Status: § 15.4 gesture rewrite + § 15.5 bar removal shipped; remaining slices in `todo.md § 15`.
 - `docs/architecture/presentation-profile.md` — album/frame presentation form factor
 - `docs/architecture/cloud-sync.md` — local-first cloud sync (per-album `RemoteBinding`, revision lineage, conflict-copy policy, encryption-readiness). Decided 2026-06-03, implementation deferred — slices in `todo.md § 26`.
@@ -34,7 +35,7 @@ Working memory / discovered implementation notes:
 
 Pending discussions (scratch, not source-of-truth — may overlap with or contradict architecture docs until reconciled):
 
-- `docs/to_discuss.md` — open design questions. As of 2026-06-03, **no open topics**: § 5 Album storage & cloud sync graduated to `docs/architecture/cloud-sync.md`. Recent graduations (§ 5 cloud sync, § 8 MaskNode UX, § 9 editor surfaces, § 11 EditorState) live in the "Recently graduated" trailer with pointers to their architecture docs.
+- `docs/to_discuss.md` — open design questions. As of 2026-06-17, **3 open topics**: `§ 12` Eraser long-press popup contents, `§ 14` Media Library direction (non-blocking foundation), `§ 16` Frame navigation panel. Section numbers are never reused; graduated topics (§ 5 cloud sync, § 8 MaskNode UX, § 9 editor surfaces, § 11 EditorState, § 13 Video MVP → `video.md`, § 15 CropEdit stabilization → `editor-tools.md § 4.8`, etc.) keep their original number in the "Recently graduated" trailer with pointers to their architecture docs.
 
 ## How to work in this repo
 

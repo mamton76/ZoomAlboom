@@ -1,10 +1,12 @@
 # ZoomAlboom — Open Design Discussions
 
 > This file is for **unresolved** design questions only. Reconciled topics live in `docs/architecture/`.
+>
+> **Numbering:** section numbers are never reused. Graduated topics keep their original `§` number in the "Recently graduated" trailer (currently `§ 1`–`§ 11`, `§ 13`, `§ 15`), so the remaining open topics are `§ 12`, `§ 14`, `§ 16`; new open topics start above `§ 16`.
 
 ---
 
-## § 1 Eraser long-press popup contents
+## § 12 Eraser long-press popup contents
 
 **Status:** open. Surfaced 2026-06-05 during the Object-mode Eraser ship review.
 
@@ -21,7 +23,53 @@ Long-press in Eraser mode currently opens the **same** context menu as Selection
 
 ---
 
+## § 14 Media Library — model and UI direction (must not block § 13)
+
+**Status:** open foundation. Important long-term, but explicitly **non-blocking** for the Video MVP.
+
+The Video MVP must move us *toward* this layer with a minimal bridge, not build it in full. Captured here so the bridge in § 13 is designed in the right direction.
+
+**Target model (future):**
+```
+MediaAsset(id, albumId, sourceUri, mediaType, status,
+           widthPx, heightPx, durationMs?, takenAt?, geo?, poster/thumbnail info)
+CanvasNode.Media(id, mediaRefId, transform, appearance)
+```
+
+**Statuses (technical preparation, not artistic editing):** `available`, `missing`, `importing`, `processing`, `ready` — covering metadata extraction, thumbnail generation, duration read, file-availability check. A missing-file placeholder is required.
+
+**Metadata vs. tags (open principle to lock):** date and geolocation should be stored as metadata and exposed as **filters**, *not* auto-promoted to tags — auto-tagging would flood the tag system. Tags stay semantic/user-facing (`Fedor`, `Budapest`, `summer 2022`, `school`, `recipe`).
+
+**Two-level UI (open shape):**
+- *Canvas-side panel* — compact, available during editing: thumbnails, type/status indicators, simple filters, drag-to-canvas, quick access without leaving the canvas.
+- *Full media manager* — heavier screen/large panel: batch import, delete/manage, advanced + date/geo filters, duplicate detection, find-all-usages, tags, variants/derivatives, metadata inspection.
+
+Do **not** squeeze full media management into the small panel.
+
+**Open questions:**
+1. Exact minimal `MediaAsset` field set for the first bridge vs. fields deferred to the full library.
+2. Where `MediaLibrary`/`MediaAsset` lives relative to the existing data model and whether a migration is needed at all for the video bridge.
+3. Filter model for date/geo metadata (how filters are expressed without becoming tags).
+
+---
+
+## § 16 Frame navigation panel — Edit-vs-View behavior (background)
+
+**Status:** open, not the immediate next item. Recorded so § 13/presentation work keeps it in mind.
+
+The frame panel should behave differently per mode:
+- *Edit mode* — structural editor: frame list, hierarchy / nested frames, reorder, rename, grouping; appearance/colour and presentation order later.
+- *View/Present mode* — navigation: compact list or thumbnails, current frame highlighted, tap to navigate, minimal UI, possibly hidden by default.
+
+Nested frames are a core storytelling model (parent = broad scene, children = details inside it) supporting the Prezi-like "zoom into life moments" experience.
+
+**Note:** hover-like behaviour exists for stylus/mouse only, never finger — base UX must work with tap; hover may *additionally* reveal controls/previews for stylus/mouse later.
+
+---
+
 > Recently graduated out of this file:
+> - **§ 13 Video MVP — Edit-vs-View playback** **design decided 2026-06-17** → `docs/architecture/video.md` (new source of truth); implementation pending. Resolution: video is **playable "living media" on the canvas, not a video editor**; a video node behaves exactly like an image node for transform/selection. Specific resolutions: (Model bridge) **no migration** — `CanvasNode.Media` already carries `mediaRefId` (a raw URI today) + `mediaType` (with `VIDEO` already in the enum); MVP activates the `VIDEO` path and keeps `mediaRefId` a raw URI, no `MediaAsset` indirection, no new field — pointed toward the future Media Library (§ 14) without building it. (Poster) **zero-storage** — lazy frame extraction via Coil's `coil-video` decoder on the existing Coil path; no import step, no stored poster, no model field; custom poster deferred. (Edit vs. View) View/Present taps anywhere → play/pause; **Edit taps select**, playback comes from a **node-local play button on the selected node's poster** that yields to transform handles and never extends selection. (Concurrency) **simultaneous playback via a bounded player pool** built now — LOD bounds candidates to `RenderDetail.Full`, a pool of *K* players (K from a device decoder-capability probe, since hardware `MediaCodec` decoders are capped ~4–8) with an eviction policy and poster fallback when exhausted; a deliberate scope expansion past "keep the first slice small." (Playback host) `AndroidView`-hosted Media3 `ExoPlayer`, mounted only at `RenderDetail.Full` for pool-assigned playing nodes; playback + pool state in a `CanvasScaffold`-level holder keyed by `nodeId`, never in domain models (per § 11). New deps: Media3 ExoPlayer + `coil-video`. Deferred (not first slice): loop/mute/start-position, custom poster, inline controls, autoplay-on-frame-entry, pause-on-leave, `AlbumVideoDefaults`. Next deliverable is the implementation plan; slices in `todo.md § 27`.
+> - **§ 15 CropEdit stabilization — invariant + cancel/undo** **decided 2026-06-17** → `docs/architecture/editor-tools.md § 4.8` (**Persistence + invariant**, **Undo granularity**, **Cancel**); implementation pending. Grounding pass against `CanvasViewModel.kt` found the invariant guard partially wired and a live cancel↔undo inconsistency (each crop gesture pushed its own `Compound` entry while `CancelCropEdit` restored out-of-band, leaving orphan entries on the undo stack). Resolutions: (Invariant) strengthened from "exactly one media selected" to **"the selection is exactly the node in `entrySnapshot`"**; `enforceCropEditInvariant()` must also fire on **View/Present switch** (`SetMode`), on **selection → a different single media** (`selectedMediaId != entrySnapshot.nodeId`), and after **Undo/Redo** — three gaps to fix (the already-wired cases: empty/multi/frame-selected, delete, tool-switch). Re-anchoring to a newly-selected node is a deferred future UX, not part of stabilization. (Undo) **session-compound** — per-gesture history is suppressed while `CropEdit` is active; the whole session is **one `Compound` entry pushed on Apply/exit**; **Cancel pushes nothing** and leaves the stack clean; in-session ops are not individually undoable. Consistent with the per-popup-session compound-undo convention. Implementation slice in `todo.md § 20.9`.
 > - **§ 5 Album storage & cloud sync** **fully decided 2026-06-03** → `docs/architecture/cloud-sync.md` (new source of truth). Resolution: **local-first automatic snapshot sync with conflict-safe editing** — not manual-only backup, not real-time collaboration. Specific resolutions: (Open flow) cloud-connected albums open the local copy immediately in View mode but keep Edit mode disabled until the remote head-revision check completes; offline editing requires an explicit `Edit offline anyway` confirmation. (Conflict policy) divergence preserves the local branch as a separate conflict-copy album (`"Italy Trip" / "Italy Trip — local conflict copy"`) and restores the primary album from the remote head — never overwrite, never auto-merge. (Sync triggers) open-time revision check + post-commit automatic sync at the `FinishInteraction` boundary + retry on network return + manual `Sync now`; debounced/coalesced, background lifecycle is best-effort only. (Model direction) **rejected `storageMode = Local | GoogleDrive`** on `Album`; cloud connection is a separate optional `RemoteBinding` (sealed, per-provider) keyed by stable `AlbumId`. Conflict detection uses **revision lineage**, not timestamps — `(headRevisionId, parentRevisionId)` on each stable commit, with the local `FinishInteraction` boundary as the commit boundary. Per-album = per-Drive-folder. (Future encryption) architecture must remain compatible with end-to-end / zero-knowledge encryption: remote stores opaque blobs only; sync MUST NOT depend on the provider inspecting or merging plaintext — which is exactly why conflict-copy preservation is chosen over auto-merge. Deferred to the implementation slice (not blocking this decision): OAuth flow, concrete `RemoteBinding` field set, debounce window, conflict-copy naming beyond the suffix example, quota/chunking, multi-device advisory hints, encryption key management UX. Documentation-only change; no Google Drive code lands in the current `EditorState` / `ActiveTool` / `Eraser` work. Implementation slices listed (deferred) in `todo.md § 26`.
 > - **§ 9 Tool-based UI layout** **fully decided 2026-06-03** → `docs/architecture/editor-surfaces.md` (new source of truth). Replaces the fixed-zone framing (`left toolbar = tools / topbar = settings / right panel = properties`) with **five logical editor surfaces** that have responsibilities, not placements: `GlobalChromeSurface`, `ToolControlSurface`, `SelectionActionSurface`, `ConceptEditorSurface`, `AddContentSurface`. One baseline layout for both phone and tablet — no separate tablet editor architecture. Future wide-screen / configurable workspaces are alternative *placements* of the same logical contributions, not a second editor. Specific resolutions: (Q1) merges with `todo.md § 5d` — § 5d demoted from "tablet MVP architecture" to "deferred future placement for `ConceptEditorSurface`." (Q2) phone uses a horizontal `ToolControlBar` (active-tool selector + primary controls on one line) instead of a floating switcher; bar is lazy — doesn't render until a second functional tool or real `Selection` settings exist; expected trigger is Object-mode `Eraser`. (Q3) `EditorTool` stays flat — brush variants / shape primitives / eraser modes are settings, not separate tools; `VectorEdit` and `MaskEdit` are context-gated, exact discoverability UX deferred. Three contribution categories deliberately separated: `EditorActionCatalog` (discrete actions, already shipped) ≠ `ToolControl` (retained editable values, future surface-agnostic model — boundary recorded, abstraction deferred until Eraser ships) ≠ concept-editor content composables (reusable across surfaces). Documentation-only change; no code in this slice. Implementation gates: `ToolControlBar` deferred to second-tool slice.
 > - **§ 8 `MaskNode` editing UX + `MaskEdit` gesture map** **fully decided 2026-06-03** → `docs/architecture/editor-tools.md § 4.7` (full gesture map) + `docs/architecture/appearance.md § 12.10` (locked constraints). Resolutions: (1) **Own UX**: dedicated `MaskEdit` tool that owns *both* creation and editing — selection-aware entry (empty → creation mode rubber-band; one `MaskNode` → edit mode; other → disabled slot). Geometry picker mirrors `Shape`: `Rect` / `Ellipse` / `Path` (anchored bezier) / `Free` (raw freehand, simplified on lift). Primitives edit via corner / edge handles; path masks edit per-anchor / per-handle like `VectorEdit`. (2) **Binding**: implicit — every sibling within the same frame/group below the `MaskNode` in z-order is masked; no per-sibling selection UI; placement + z-order *is* the binding. (3) **Z-order tiebreaker**: a `MaskNode` at z=N clips siblings at z<N only (locked over the "all in group" alternative). (4) **Multi-mask composition**: union — a sibling pixel is visible wherever any above-it `MaskNode` reveals it; no subtractive masks in MVP. (5) **Preview policy**: commit-only — masked siblings re-clip on gesture lift, not continuously during drag (the `MaskNode`'s own outline does update live). Stay-in-tool persistence; long-press always opens the global popup; two-finger always navigates. Topbar = primitive picker + aspect-ratio toggle (primitives only); feather + future mask-source options (image / gradient / procedural per § 12.2) live on the popup. Implementation depends on `MaskNode` data-model landing per `appearance.md § 12.8`.

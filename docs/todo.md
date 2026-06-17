@@ -925,7 +925,7 @@ Locked 2026-06-06 in [editor-tools.md § 4.8](architecture/editor-tools.md#48-cr
 - [x] `CropEdit` added to `EditorTool` sealed vocabulary under `feature/canvas/editor/`.
 - [x] Entry gated by `selection == {one Media}`; `enforceCropEditInvariant` auto-exits to `Selection` (and clears the entry snapshot) when the invariant breaks. Wired into `recomputeGroupTransform`, `DeselectAll`, `deleteNodesById`.
 - [x] Not exposed in the primary tool selector; `EditorTool.label` shows "Crop" only when active.
-- [x] On entry, `crop.mode` snaps to `Manual` via a `SetMediaAppearance` command (one undo entry for the mode flip). `entrySnapshot` captures the pre-entry media transform + appearance for the Cancel button.
+- [x] On entry, `crop.mode` snaps to `Manual`. `entrySnapshot` captures the pre-entry media transform + appearance (for Cancel **and** as the session-compound baseline). **As of § 20.9.2** the snap is no-history (`snapCropModeToManualNoHistory`) — folded into the single session entry committed on exit, not its own `SetMediaAppearance` command.
 - [x] On tool-switch out (including via `Apply`), `entrySnapshot` is cleared; node stays in `Manual`.
 
 #### 20.8.3 Context menu wiring
@@ -944,7 +944,7 @@ Locked 2026-06-06 in [editor-tools.md § 4.8](architecture/editor-tools.md#48-cr
 - [x] `GestureRouter` routes: `routeSelectedNodeTransformStart` Allows `CropEdit`; `routeEditTap` / `routeDoubleTap` route CropEdit to `Ignore`.
 - [x] Tap on empty / tap on viewport without drag is a no-op (router → `Ignore`).
 - [x] Long-press is global popup per § 5.
-- [x] One `Compound` undo entry per gesture via existing `BeginInteraction(RESIZE)` / `FinishInteraction` wraps. Pinch session wraps via `infiniteCanvasGestures` `onGestureBegin` / `onGestureEnd` hooks.
+- [x] ~~One `Compound` undo entry per gesture via existing `BeginInteraction(RESIZE)` / `FinishInteraction` wraps.~~ **Superseded 2026-06-17 by § 20.9.2:** per-gesture history is suppressed while CropEdit is active; the whole session is one `Compound` entry on Apply/exit. Pinch session still wraps via `infiniteCanvasGestures` hooks (the snapshot is just dropped, not committed).
 - [x] Other canvas nodes render but are non-interactive while `CropEdit` is active.
 - [x] Hit testing uses `HANDLE_TOUCH_RADIUS_PX / cam.scale` (same screen-space convention as Selection).
 
@@ -952,7 +952,7 @@ Locked 2026-06-06 in [editor-tools.md § 4.8](architecture/editor-tools.md#48-cr
 - [x] Aspect-ratio lock toggle (default **on**); persists for the tool session in `EditorState.cropEdit.aspectLocked`. Mutation: `SetCropEditAspectLocked`.
 - [x] Source-zoom slider bound to `crop.zoom`, range `[MIN_SOURCE_ZOOM, MAX_SOURCE_ZOOM]` (0.1..4). One `Compound` undo entry per drag session via `BeginInteraction(RESIZE)` / `FinishInteraction` wrapping `SetCropZoom`. Per-frame slider movement does not spam undo.
 - [x] Reset button (`ResetCropManual`): `offsetX = offsetY = 0`, `zoom = 1`. One undo entry.
-- [x] Cancel button (`CancelCropEdit`): restores the `entrySnapshot` transform + appearance, exits to Selection. Does **not** touch undo history — intermediate session entries remain.
+- [x] Cancel button (`CancelCropEdit`): restores the `entrySnapshot` transform + appearance, exits to Selection. Pushes **nothing** to undo history — and **as of § 20.9.2 there are no intermediate session entries to leave** (per-gesture history is suppressed; the session commits once on Apply only).
 - [x] Apply button (formerly "Leave crop edit"): exits to Selection without changes.
 - [ ] Aspect-ratio preset chips (1:1, 4:3, 16:9) — deferred.
 - [ ] Single-finger zoom thumb on the viewport — deferred (pinch covers the gesture-level zoom).
@@ -976,26 +976,26 @@ Locked 2026-06-06 in [editor-tools.md § 4.8](architecture/editor-tools.md#48-cr
 
 Decided 2026-06-17 (graduated from `to_discuss.md § 15`); see [editor-tools.md § 4.8](architecture/editor-tools.md#48-cropedit) **Persistence + invariant**, **Undo granularity**, **Cancel**. Pre-video hardening pass. Two strands: close the invariant gaps, and collapse the session into one undoable command.
 
-#### 20.9.1 Snapshot-bound invariant
-- [ ] Strengthen the `CropEdit` invariant from "exactly one media selected" to "selection is exactly `entrySnapshot.nodeId`". `enforceCropEditInvariant()` exits to `Selection` (and clears the snapshot) when `singleSelectedMedia()?.id != entrySnapshot.nodeId`.
-- [ ] **Gap 1 — View/Present switch:** `SetMode` (any Edit-exit) runs `enforceCropEditInvariant()`; `activeTool` resets to `Selection` so Edit re-entry never resumes a stale CropEdit.
-- [ ] **Gap 2 — different single media:** selection moving to another media node exits CropEdit (per the strengthened invariant above). *Re-anchoring* (commit + re-capture snapshot for the new node) is explicitly deferred, not part of this slice.
-- [ ] **Gap 3 — Undo/Redo:** run `enforceCropEditInvariant()` after `Undo` / `Redo` apply, so a command that removes the edited media or changes selection can't leave CropEdit dangling.
-- [ ] Regression-cover the already-safe cases stay safe: delete, multi-select, frame-selected, explicit tool-switch.
+#### 20.9.1 Snapshot-bound invariant — shipped 2026-06-17 (`CanvasViewModel.kt`)
+- [x] Strengthened the `CropEdit` invariant to "selection is exactly `entrySnapshot.nodeId`". `enforceCropEditInvariant()` exits via `exitCropEditToSelection(keepChanges=true)` when `snapshot == null || singleSelectedMedia() == null || media.id != snapshot.nodeId`.
+- [x] **Gap 1 — View/Present switch:** `SetMode` calls `exitCropEditToSelection(keepChanges=true)` on any leave-Edit, so the tool + snapshot can't survive into View/Present.
+- [x] **Gap 2 — different single media:** covered by the strengthened invariant — `SelectNode`/`ToggleNodeSelection` → `recomputeGroupTransform` → `enforceCropEditInvariant`. *Re-anchoring* explicitly deferred.
+- [x] **Gap 3 — Undo/Redo:** `Undo`/`Redo` call `exitCropEditToSelection(keepChanges=true)` before navigating history (and `applyCommand` → `recomputeGroupTransform` → `enforce` is a second guard).
+- [x] Already-safe cases preserved: delete (`deleteNodesById`), multi-select (`recomputeGroupTransform`), `DeselectAll`, explicit tool-switch (`SetActiveTool` else-branch).
 
-#### 20.9.2 Session-compound undo
-- [ ] Suppress per-gesture history while `CropEdit` is active — pan / corner / edge / pinch / slider / Reset no longer each push a `Compound` entry (remove the per-gesture `BeginInteraction`/`FinishInteraction` push for CropEdit, or route it into a session accumulator).
-- [ ] Push **one** `Compound` entry on **Apply / exit** (entry-snapshot → final state). No-op if nothing changed.
-- [ ] `CancelCropEdit` restores the entry snapshot and pushes **nothing** — verify the undo stack is identical before-entry and after-Cancel (no orphan entries).
-- [ ] Update the `to_discuss.md § 15`-era comment on `CancelCropEdit` (`CanvasViewModel.kt`) and the § 20.8.5 Cancel line (which still says "intermediate session entries remain").
+#### 20.9.2 Session-compound undo — shipped 2026-06-17 (`CanvasViewModel.kt`)
+- [x] Per-gesture history suppressed while `CropEdit` is active — `commitPendingInteraction()` early-returns (drops the in-flight snapshot) when `activeTool === CropEdit`, covering pan / corner / edge / pinch / slider / Reset. Entry Manual-flip routed through `snapCropModeToManualNoHistory` (no command).
+- [x] One `Compound` entry pushed on **Apply / exit** via `finalizeCropEditSession()` (entry-snapshot → current); no-op if unchanged or the node was deleted.
+- [x] `CancelCropEdit` restores the entry snapshot then `exitCropEditToSelection(keepChanges=false)` — pushes nothing; stack identical before-entry and after-Cancel.
+- [x] Updated the `CancelCropEdit` comment in `CanvasViewModel.kt`; § 20.8.5 / § 20.8.4 lines refreshed below.
 
 #### 20.9.3 Tests
-- [ ] Invariant tests: View/Present switch, different-media selection, undo-removes-media, undo-changes-selection all exit CropEdit cleanly with snapshot cleared.
-- [ ] Undo tests: a multi-gesture CropEdit session = one undo entry on Apply; Cancel leaves the stack unchanged; one Undo after Apply restores the pre-entry state.
+- [x] **Invariant predicate** extracted to a pure function `cropEditInvariantBroken` (`feature/canvas/editor/CropEditInvariant.kt`); `enforceCropEditInvariant()` delegates to it. Unit-tested in `CropEditInvariantTest` — holds for matching node; breaks on different-media / empty-or-multi / missing-snapshot; never breaks outside CropEdit. Pure-function approach matches the repo's test convention (no VM/coroutine harness needed).
+- [ ] **Stateful undo/exit flows — deferred.** A multi-gesture session = one undo entry on Apply; Cancel leaves the stack unchanged; one Undo after Apply restores pre-entry state; View/Present + Undo/Redo exits. These need a `CanvasViewModel` harness (no harness exists; VM uses hardcoded `Dispatchers.Default`/`IO` + `viewModelScope`, so a dispatcher-injection seam + fakes for `Context`/`MediaRepository`/`HistoryRepository` are required first). Covered by manual QA for now; revisit if VM-level testing is invested in.
 
 #### 20.9.4 Docs follow-up
 - [x] [editor-tools.md § 4.8](architecture/editor-tools.md#48-cropedit) **Persistence + invariant** / **Undo granularity** / **Cancel** rewritten for the snapshot-bound invariant + session-compound model (2026-06-17).
-- [ ] Once shipped, update § 20.8.5 Cancel line and § 20.8.4 undo line to point at the session-compound behavior.
+- [x] § 20.8.5 Cancel line and § 20.8.4 undo line updated to point at the session-compound behavior (below).
 
 ### Post-MVP
 - [ ] `FrameAppearance.contentEffect` — off-screen filter pass (sepia / blur / grayscale of rendered frame contents)

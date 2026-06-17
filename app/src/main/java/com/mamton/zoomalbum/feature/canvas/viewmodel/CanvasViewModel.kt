@@ -11,9 +11,7 @@ import com.mamton.zoomalbum.core.math.BoundingBox
 import com.mamton.zoomalbum.core.math.Camera
 import com.mamton.zoomalbum.core.math.CameraAnimation
 import com.mamton.zoomalbum.core.math.CameraInterpolation
-import EdgeHandle
 import com.mamton.zoomalbum.core.math.LodResolver
-import ResizeHandle
 import com.mamton.zoomalbum.core.math.TransformUtils
 import com.mamton.zoomalbum.core.math.ViewportCuller
 import com.mamton.zoomalbum.core.math.toCamera
@@ -28,7 +26,6 @@ import com.mamton.zoomalbum.domain.model.EasingType
 import com.mamton.zoomalbum.domain.model.FrameAppearance
 import com.mamton.zoomalbum.domain.model.FrameEditOptions
 import com.mamton.zoomalbum.domain.model.MediaAppearance
-import CropEditEntrySnapshot
 import com.mamton.zoomalbum.feature.canvas.editor.EditorState
 import com.mamton.zoomalbum.feature.canvas.editor.EditorTool
 import com.mamton.zoomalbum.domain.model.FrameFitMode
@@ -36,7 +33,9 @@ import com.mamton.zoomalbum.domain.model.MembershipOrigin
 import com.mamton.zoomalbum.domain.model.MembershipState
 import com.mamton.zoomalbum.domain.model.RenderDetail
 import com.mamton.zoomalbum.domain.model.SceneGraph
-import Transform
+import com.mamton.zoomalbum.core.math.EdgeHandle
+import com.mamton.zoomalbum.core.math.ResizeHandle
+import com.mamton.zoomalbum.domain.model.Transform
 import com.mamton.zoomalbum.domain.model.TransitionPreset
 import com.mamton.zoomalbum.domain.model.withTransform
 import com.mamton.zoomalbum.domain.repository.HistoryRepository
@@ -50,6 +49,8 @@ import com.mamton.zoomalbum.domain.undo.CommandHistory
 import com.mamton.zoomalbum.domain.undo.CommandKind
 import com.mamton.zoomalbum.domain.undo.InteractionKind
 import com.mamton.zoomalbum.domain.undo.toCommandKind
+import com.mamton.zoomalbum.feature.canvas.editor.CropEditEntrySnapshot
+import com.mamton.zoomalbum.feature.canvas.editor.cropEditInvariantBroken
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -794,12 +795,17 @@ class CanvasViewModel @Inject constructor(
                 // operates on a consistent state. Gesture detectors should consume
                 // pointer events before reaching this branch.
                 commitPendingInteraction()
+                // Finalize + exit any active CropEdit session so undo runs on a
+                // clean Selection state — never on an uncommitted in-flight crop
+                // session. § 4.8 invariant, gap 3.
+                exitCropEditToSelection(keepChanges = true)
                 history.undo()?.let { applyCommand(it, reverse = true) }
                 refreshHistoryFlags()
             }
 
             is CanvasAction.Redo -> {
                 commitPendingInteraction()
+                exitCropEditToSelection(keepChanges = true)
                 history.redo()?.let { applyCommand(it, reverse = false) }
                 refreshHistoryFlags()
             }
@@ -811,6 +817,12 @@ class CanvasViewModel @Inject constructor(
             is CanvasAction.SetMode -> {
                 val target = action.mode
                 if (_state.value.editor.mode == target) return
+                // Leaving Edit exits any active CropEdit session (commits as one
+                // entry, resets tool + snapshot) so a stale tool can't survive into
+                // View/Present and resume on Edit re-entry. § 4.8 invariant, gap 1.
+                if (target != CanvasInteractionMode.Edit) {
+                    exitCropEditToSelection(keepChanges = true)
+                }
                 updateEditor { e ->
                     if (target != CanvasInteractionMode.Edit) {
                         // Any non-Edit mode is read-only — clear selection so
@@ -836,7 +848,9 @@ class CanvasViewModel @Inject constructor(
                 if (_state.value.editor.activeTool == action.tool) return
                 if (action.tool === EditorTool.CropEdit) {
                     val media = singleSelectedMedia() ?: return
-                    // Capture entry snapshot for the topbar Cancel button.
+                    // Capture the pre-entry snapshot BEFORE the Manual-mode flip —
+                    // it is both the Cancel revert target and the baseline for the
+                    // session-compound undo entry (entry -> final). § 4.8.
                     val snapshot = CropEditEntrySnapshot(
                         nodeId = media.id,
                         transform = media.transform,
@@ -848,18 +862,15 @@ class CanvasViewModel @Inject constructor(
                             cropEdit = it.cropEdit.copy(entrySnapshot = snapshot),
                         )
                     }
-                    val existing = media.appearance ?: MediaAppearance()
-                    if (existing.crop.mode != CropMode.Manual) {
-                        val updated = existing.copy(crop = existing.crop.copy(mode = CropMode.Manual))
-                        onAction(
-                            CanvasAction.SetMediaAppearance(
-                                appearancesById = mapOf(media.id to updated),
-                            ),
-                        )
-                    }
+                    // Snap to Manual without its own undo entry; the whole session
+                    // commits once on exit via finalizeCropEditSession().
+                    snapCropModeToManualNoHistory(media.id)
                 } else {
-                    // Leaving CropEdit — drop the snapshot so it doesn't survive
-                    // the session and confuse a later re-entry.
+                    // Leaving CropEdit — commit the session as one Compound entry,
+                    // then drop the snapshot so it doesn't survive into a re-entry.
+                    if (_state.value.editor.activeTool === EditorTool.CropEdit) {
+                        finalizeCropEditSession()
+                    }
                     updateEditor {
                         it.copy(
                             activeTool = action.tool,
@@ -1001,7 +1012,9 @@ class CanvasViewModel @Inject constructor(
 
             is CanvasAction.CancelCropEdit -> {
                 val snapshot = _state.value.editor.cropEdit.entrySnapshot ?: return
-                // Restore transform + appearance to the entry state, then exit.
+                // Restore transform + appearance to the entry state, then exit
+                // WITHOUT committing — Cancel leaves the undo stack untouched
+                // (per-gesture history was suppressed during the session). § 4.8.
                 _allNodes.update { nodes ->
                     nodes.map { node ->
                         if (node.id == snapshot.nodeId && node is CanvasNode.Media) {
@@ -1019,12 +1032,7 @@ class CanvasViewModel @Inject constructor(
                         },
                     )
                 }
-                updateEditor {
-                    it.copy(
-                        activeTool = EditorTool.Selection,
-                        cropEdit = it.cropEdit.copy(entrySnapshot = null),
-                    )
-                }
+                exitCropEditToSelection(keepChanges = false)
             }
         }
     }
@@ -1613,20 +1621,88 @@ class CanvasViewModel @Inject constructor(
     }
 
     /**
-     * Auto-exit `CropEdit` to `Selection` whenever the selection stops being
-     * exactly one media node (delete, multi-select, frame focused, etc.). See
-     * `docs/architecture/editor-tools.md § 4.8` "Persistence". Also drops the
-     * entry snapshot — Cancel applies only inside an active session.
+     * Defensive auto-exit for `CropEdit`. The invariant is **snapshot-bound**:
+     * `CropEdit` may be active only when the selection is exactly the media node
+     * captured in `cropEdit.entrySnapshot`. It breaks on empty / multi / frame
+     * selection, on selecting a *different* media node, and on deletion of the
+     * edited node. On any break the session is finalized (committed as one
+     * Compound entry if the node still exists and changed) and the tool falls
+     * back to `Selection`. See `docs/architecture/editor-tools.md § 4.8`.
+     *
+     * Reached from every selection-mutating path via `recomputeGroupTransform`
+     * (single + multi select, `DeselectAll`, `deleteNodesById`, and `applyCommand`
+     * — so Undo/Redo are covered) plus the explicit `SetMode` call for the
+     * leave-Edit case.
      */
     private fun enforceCropEditInvariant() {
+        val broken = cropEditInvariantBroken(
+            activeTool = _state.value.editor.activeTool,
+            entrySnapshotNodeId = _state.value.editor.cropEdit.entrySnapshot?.nodeId,
+            selectedMediaId = singleSelectedMedia()?.id,
+        )
+        if (broken) exitCropEditToSelection(keepChanges = true)
+    }
+
+    /**
+     * Snap a media node's crop mode to `Manual` directly on `_allNodes` /
+     * `visibleNodes` **without** an undo entry. Used on `CropEdit` entry — the
+     * mode flip is rolled into the single session-compound entry committed on
+     * exit, so it must not push its own command. No-op if already `Manual`.
+     */
+    private fun snapCropModeToManualNoHistory(nodeId: String) {
+        fun patch(media: CanvasNode.Media): CanvasNode.Media {
+            val appr = media.appearance ?: MediaAppearance()
+            if (appr.crop.mode == CropMode.Manual) return media
+            return media.copy(appearance = appr.copy(crop = appr.crop.copy(mode = CropMode.Manual)))
+        }
+        _allNodes.update { nodes ->
+            nodes.map { if (it.id == nodeId && it is CanvasNode.Media) patch(it) else it }
+        }
+        _state.update { s ->
+            s.copy(
+                visibleNodes = s.visibleNodes.map { vn ->
+                    val n = vn.node
+                    if (n.id == nodeId && n is CanvasNode.Media) vn.copy(node = patch(n)) else vn
+                },
+            )
+        }
+    }
+
+    /**
+     * Commit the active `CropEdit` session as **one** `Compound` undo entry
+     * (entry-snapshot -> current state) if the edited node still exists and
+     * actually changed. No-op otherwise (unchanged session, or the node was
+     * deleted). Does not touch `activeTool` or the snapshot — callers do.
+     */
+    private fun finalizeCropEditSession() {
+        val snapshot = _state.value.editor.cropEdit.entrySnapshot ?: return
+        val current = _allNodes.value.firstOrNull { it.id == snapshot.nodeId } as? CanvasNode.Media ?: return
+        val baseline = current.copy(transform = snapshot.transform, appearance = snapshot.appearance)
+        if (baseline == current) return
+        commit(
+            CanvasCommand(
+                before = listOf(baseline),
+                after = listOf(current),
+                kind = CommandKind.SET_MEDIA_APPEARANCE,
+                timestampMs = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    /**
+     * Exit an active `CropEdit` session back to `Selection`. When [keepChanges]
+     * the session is finalized into one Compound entry first; pass `false` only
+     * after the caller has already reverted (`CancelCropEdit`). Clears the entry
+     * snapshot and resets the tool. No-op when `CropEdit` is not active.
+     */
+    private fun exitCropEditToSelection(keepChanges: Boolean) {
         if (_state.value.editor.activeTool !== EditorTool.CropEdit) return
-        if (singleSelectedMedia() == null) {
-            updateEditor {
-                it.copy(
-                    activeTool = EditorTool.Selection,
-                    cropEdit = it.cropEdit.copy(entrySnapshot = null),
-                )
-            }
+        if (keepChanges) finalizeCropEditSession()
+        updateEditor {
+            it.copy(
+                activeTool = EditorTool.Selection,
+                cropEdit = it.cropEdit.copy(entrySnapshot = null),
+            )
         }
     }
 
@@ -1821,8 +1897,20 @@ class CanvasViewModel @Inject constructor(
      * Commits the in-flight gesture snapshot, if any. Called on FinishInteraction
      * and defensively on Undo/Redo. Skips the push if the gesture was a no-op
      * (before == after — e.g. user pressed a handle and lifted without moving).
+     *
+     * While `CropEdit` is active, per-gesture history is **suppressed**: the
+     * whole crop session collapses into one Compound entry committed on exit
+     * (`finalizeCropEditSession`). The in-flight snapshot is dropped here without
+     * a push. See `docs/architecture/editor-tools.md § 4.8` "Undo granularity".
      */
     private fun commitPendingInteraction() {
+        if (_state.value.editor.activeTool === EditorTool.CropEdit) {
+            pendingSnapshot = null
+            pendingKind = null
+            pendingGestureNodeIds = null
+            pendingEditedFrameIds = emptySet()
+            return
+        }
         val before = pendingSnapshot ?: run {
             // No snapshot in flight — clear gesture-augment fields defensively and exit.
             pendingGestureNodeIds = null

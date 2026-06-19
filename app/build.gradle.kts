@@ -43,6 +43,10 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11
+        // Media3 marks ExoPlayer / PlayerView @UnstableApi (opt-in = ERROR).
+        // The video playback host uses them deliberately; opt in module-wide
+        // rather than annotating every call site.
+        freeCompilerArgs.add("-opt-in=androidx.media3.common.util.UnstableApi")
     }
 }
 
@@ -80,6 +84,11 @@ dependencies {
 
     // Coil image loading
     implementation(libs.coil.compose)
+    implementation(libs.coil.video) // video poster-frame decoder
+
+    // Media3 (ExoPlayer) — video playback on the canvas
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.ui)
 
     // Kotlinx Serialization
     implementation(libs.kotlinx.serialization.json)

@@ -133,6 +133,15 @@ class GestureRouterTest {
         )
     }
 
+    @Test
+    fun `single-tap on a video focuses-selects like any node (play is double-tap)`() {
+        // Uniform model: single-tap = mode default everywhere; playback moved to
+        // double-tap. A video is not special-cased on single-tap.
+        assertEquals(TapRoute.ViewFocus("v1"), GestureRouter.routeTap(viewCtx(), hitNodeId = "v1"))
+        assertEquals(TapRoute.ViewFocus("v1"), GestureRouter.routeTap(presentCtx(), hitNodeId = "v1"))
+        assertEquals(TapRoute.EditSelect("v1"), GestureRouter.routeTap(editCtx(), hitNodeId = "v1"))
+    }
+
     // ── routeDoubleTap ────────────────────────────────────────────────────
 
     @Test
@@ -159,6 +168,47 @@ class GestureRouterTest {
         assertEquals(
             DoubleTapRoute.Ignore,
             GestureRouter.routeDoubleTap(editCtx(tool = EditorTool.Eraser)),
+        )
+    }
+
+    @Test
+    fun `double-tap on a video plays-pauses in View, Presentation, and Edit-Selection`() {
+        assertEquals(
+            DoubleTapRoute.PlayPauseVideo("v1"),
+            GestureRouter.routeDoubleTap(viewCtx(), hitNodeId = "v1", hitIsVideo = true),
+        )
+        assertEquals(
+            DoubleTapRoute.PlayPauseVideo("v1"),
+            GestureRouter.routeDoubleTap(presentCtx(), hitNodeId = "v1", hitIsVideo = true),
+        )
+        assertEquals(
+            DoubleTapRoute.PlayPauseVideo("v1"),
+            GestureRouter.routeDoubleTap(editCtx(), hitNodeId = "v1", hitIsVideo = true),
+        )
+    }
+
+    @Test
+    fun `double-tap play is claimed only by Selection in Edit specialized tools keep their map`() {
+        // Eraser / CropEdit don't surrender double-tap to playback.
+        assertEquals(
+            DoubleTapRoute.Ignore,
+            GestureRouter.routeDoubleTap(editCtx(tool = EditorTool.Eraser), hitNodeId = "v1", hitIsVideo = true),
+        )
+        assertEquals(
+            DoubleTapRoute.Ignore,
+            GestureRouter.routeDoubleTap(editCtx(tool = EditorTool.CropEdit), hitNodeId = "v1", hitIsVideo = true),
+        )
+    }
+
+    @Test
+    fun `double-tap on a non-video keeps the mode default`() {
+        assertEquals(
+            DoubleTapRoute.ResetCamera,
+            GestureRouter.routeDoubleTap(viewCtx(), hitNodeId = "n1", hitIsVideo = false),
+        )
+        assertEquals(
+            DoubleTapRoute.Ignore,
+            GestureRouter.routeDoubleTap(editCtx(), hitNodeId = "n1", hitIsVideo = false),
         )
     }
 

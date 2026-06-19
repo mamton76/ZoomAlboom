@@ -1489,44 +1489,86 @@ Local-first automatic snapshot sync with conflict-safe editing. Slices are order
 
 ## 27. Video MVP
 
-Design decided 2026-06-17 (graduated from `to_discuss.md § 13`) → [video.md](architecture/video.md) is the source of truth. Goal: video as playable "living media" on the canvas, behaving like an image node for all transform/selection. Implementation pending; the first concrete deliverable is an implementation plan, then these slices.
+Design decided 2026-06-17 (graduated from `to_discuss.md § 13`) → [video.md](architecture/video.md) is the source of truth. Goal: video as playable "living media" on the canvas, behaving like an image node for all transform/selection.
+
+### Implementation plan (delivery order — decided 2026-06-17)
+
+The § 27.x checklists below are grouped into delivery slices, **re-ordered to front-load the poster and a single player** so something ships on a working base and the hardest part (concurrency) lands last. Grounding notes reference the code that each slice touches.
+
+- **Slice A — Poster only, no playback.** § 27.1 + § 27.2 + § 27.3. Add Media3 + `coil-video` deps; register `VideoFrameDecoder.Factory()` by making `ZoomAlbumApp` a `SingletonImageLoader.Factory`; video picker + `MediaMetadataRetriever` dimensions; parameterize `CanvasNodeFactory.createMedia` with `mediaType`; branch `MediaRenderer` (`CanvasRenderer.kt`) on `mediaType == VIDEO` → same Coil path + a `videoFrameMillis` request param + play-icon overlay. *Outcome: drop a video, see poster + play badge, transform it like an image. No ExoPlayer.*
+- **Slice B — Single-player View playback.** Subset of § 27.6 + § 27.4 (View half). `CanvasScaffold`-level playback holder keyed by `nodeId` (one `ExoPlayer` first, not a pool); `AndroidView` ExoPlayer surface mounted inside the camera Box in `CanvasScreen.kt` for the one playing node at `RenderDetail.Full`; new `GestureRouter` tap route — View-mode tap on a video plays/pauses instead of `FocusNode`. *Outcome: tap-to-play in View; proves host + gesture deferral + transform compat.*
+- **Slice C — Bounded pool + concurrency.** § 27.5 + rest of § 27.6. Device decoder probe → *K* (clamp to a conservative ceiling, e.g. 2–3, for MVP); pool of *K* `ExoPlayer`s; relevance ranking; eviction; poster fallback.
+- **Slice D — Edit-mode play affordance.** § 27.4 (Edit half). Shipped as a context-menu `Play / Pause` item (`PlayVideoAction`) instead of a node-local poster button — see § 27.4.
+- **Slice E — Tests.** § 27.7.
+
+**Status: COMPLETE — Slices A–E + § 27.9 live appearance, implemented + verified on-device 2026-06-20.** Edit play landed as a menu item *and* uniform double-tap (Slice D, revised § 27.4). Posters render through the shared surface chrome (§ 27.6 masked-poster fix). All § 27 checklist items done; § 27.8 out-of-scope items remain deferred by design.
 
 ### 27.1 Dependencies
-- [ ] Add Media3 ExoPlayer (playback) to the version catalog + `app/build.gradle.kts`.
-- [ ] Add Coil `coil-video` decoder (poster-frame extraction) and register it with the existing Coil `ImageLoader`.
+- [x] Add Media3 ExoPlayer (playback) to the version catalog + `app/build.gradle.kts`. (`media3 = "1.5.1"`, `media3-exoplayer` + `media3-ui`; wired, used from Slice B.)
+- [x] Add Coil `coil-video` decoder (poster-frame extraction) and register it with the existing Coil `ImageLoader`. (`ZoomAlbumApp : SingletonImageLoader.Factory` adds `VideoFrameDecoder.Factory()`.)
 
 ### 27.2 Video path activation (no model change)
-- [ ] Branch media rendering on `mediaType == MediaType.VIDEO`; keep `mediaRefId` a raw URI (no `MediaAsset`, no migration — see [video.md § 2](architecture/video.md#2-model-bridge--no-migration)).
-- [ ] Place a video on the canvas the same way as an image (add-content path accepts video URIs; `mediaType` set to `VIDEO`).
+- [x] Branch media rendering on `mediaType == MediaType.VIDEO`; keep `mediaRefId` a raw URI (no `MediaAsset`, no migration — see [video.md § 2](architecture/video.md#2-model-bridge--no-migration)). (`MediaRenderer`/`FullMediaRenderer` in `CanvasRenderer.kt`.)
+- [x] Place a video on the canvas the same way as an image (add-content path accepts video URIs; `mediaType` set to `VIDEO`). (`videoPicker` (VideoOnly) in `CanvasScaffold.kt` → `addMedia(uri, VIDEO)`; `decodeVideoDimensions` via `MediaMetadataRetriever`; `createMedia(mediaType=…)`.)
 
 ### 27.3 Poster (zero storage)
-- [ ] Render the poster via the existing Coil path pointed at the video URI with a frame-millis param, decoded by `coil-video`. No import step, no stored poster, no model field.
-- [ ] Subtle play-icon overlay on the poster; fades while playing, reappears on pause.
-- [ ] LOD: poster participates in `RenderDetail` like any image (`Stub`/`Preview` = placeholder, `Full` = poster).
+- [x] Lazy `coil-video` frame extraction, no import step / stored poster / model field. **Rendered through `VideoPosterSurface`, not the shared image renderer** — loaded as an explicit `ARGB_8888` bitmap via `rememberVideoPosterBitmap` (a `coil-video` frame in `FullMediaRenderer`'s offscreen masks as opaque black; see § 27.6). [video.md § 3](architecture/video.md#3-poster--thumbnail--zero-storage).
+- [x] Subtle play-icon badge on the poster. (`drawPlayBadge` inside `VideoPosterSurface`, inside the mask so it doesn't paint over masked-out regions. While playing there's no badge — the live surface replaces the poster.)
+- [x] LOD: poster participates in `RenderDetail` (`Stub`/`Preview`/`Simplified` = placeholder via `MediaRenderer`; `Full` = `VideoPosterSurface`).
 
-### 27.4 Edit vs. View tap behavior
-- [ ] View/Present: tap anywhere on a video → play/pause.
-- [ ] Edit: tap **selects** (unchanged); add a **node-local play button on the selected node's poster** that sits inside the node, yields to transform handles, and does **not** extend selection or start a marquee.
-- [ ] No accidental playback in Edit outside the explicit play button.
+### 27.4 Playback affordance — uniform double-tap (revised 2026-06-19)
+
+Superseded the original "View single-tap = play" design with a **uniform double-tap** across modes (see [video.md § 4](architecture/video.md#4-playback-affordance--uniform-double-tap)).
+- [x] Single-tap = mode default everywhere (View/Present = focus, Edit = select); no video special-case on single-tap.
+- [x] Double-tap on a video → play/pause in View, Presentation, and Edit (Selection only). `DoubleTapRoute.PlayPauseVideo` + `hitIsVideo` flag on `routeDoubleTap`; `CanvasScreen.onDoubleTap` hit-tests and toggles `VideoPlaybackController`. Eraser/CropEdit keep their own double-tap.
+- [x] Edit context-menu `Play / Pause` (`PlayVideoAction` → `EditorActionEffect.ToggleVideoPlayback`) — discoverable menu alternative to the gesture.
+- [x] No accidental playback: single-tap never plays; double-tap on a non-video keeps the mode default (View = reset camera, Edit = no-op).
 
 ### 27.5 Bounded player pool (simultaneous playback)
-- [ ] Device decoder-capability probe → derive pool size *K* (clamped to a safe ceiling; hardware `MediaCodec` decoders are capped).
-- [ ] Candidates bounded by LOD: only `RenderDetail.Full` videos are playback candidates.
-- [ ] Pool of *K* `ExoPlayer` instances attaches to the *K* most-relevant playing videos; eviction policy (e.g. off-screen / least-recently-started first).
-- [ ] Poster fallback when a video wants to play but can't get a pooled player.
+- [x] Device decoder-capability probe → derive pool size *K* (clamped to a safe ceiling; hardware `MediaCodec` decoders are capped). (`VideoDecoderProbe.maxConcurrentVideoPlayers()` — best per-codec `maxSupportedInstances`, clamped to `[1, POOL_CEILING=4]`, default 2 on failure.)
+- [x] Candidates bounded by LOD: only `RenderDetail.Full` videos are playback candidates. (`CanvasScreen` computes `fullVideoIds`; `reconcile`/`selectPlaybackKeepSet` intersect with it.)
+- [x] Pool of *K* `ExoPlayer` instances attaches to the *K* most-relevant playing videos; eviction policy (off-screen / least-recently-started first). (`VideoPlaybackController` pool + `selectPlaybackKeepSet` — recency via `startOrder`; evicted players recycled to a free list.)
+- [x] Poster fallback when a video wants to play but can't get a pooled player. (Unassigned playing nodes mount no surface → poster + badge show through.)
 
-### 27.6 Playback host
-- [ ] `AndroidView`-hosted Media3 `ExoPlayer` surface, mounted only at `RenderDetail.Full` for pool-assigned playing nodes; poster otherwise.
-- [ ] Playback state + the player pool live in a `CanvasScaffold`-level holder keyed by `nodeId` — never in domain models (per [editor-tools.md § 7.1](architecture/editor-tools.md#71-state)).
-- [ ] Player surface participates in the canvas transform but defers pan/zoom/selection gestures to the existing routers (no gesture-routing regressions).
+### 27.6 Playback host & rendering
+Full-detail videos render through a shared **`VideoSurfaceChrome`** (two-layer: rotation/opacity outer, clipped + offscreen mask inner) used by both `VideoPlayerSurface` (live) and `VideoPosterSurface` (static). See [video.md § 6](architecture/video.md#6-playback-host--rendering-implemented-2026-06-20).
+- [x] Live surface = bare **`TextureView`** (`isOpaque = false`) bound via `player.setVideoTextureView` — *not* `PlayerView`/`SurfaceView`, which ignore container alpha / clip / offscreen masking. Mounted only at `RenderDetail.Full` for pool-assigned nodes (keyed by `nodeId`).
+- [x] **Masked-poster fix (2026-06-20):** a `coil-video` frame in the shared image renderer's single-layer offscreen (rotation on the offscreen layer) composited the mask's cut-away region as opaque black. Fixed by rendering posters through the same two-layer chrome as the live player (`VideoPosterSurface`), as an `ARGB_8888` bitmap. `VideoPosterSurface` renders **inline in the paint loop** so it keeps z-order; the live `AndroidView` surface mounts after the loop (playing video draws on top — accepted MVP limitation).
+- [x] Playback state + pool live in a `CanvasScaffold`-level holder keyed by `nodeId` — never in domain models (per [editor-tools.md § 7.1](architecture/editor-tools.md#71-state)). (`VideoPlaybackController` via `rememberVideoPlaybackController`; node carries no `isPlaying`.)
+- [x] Surfaces defer pan/zoom/selection to the existing routers (non-clickable/non-focusable view) — confirmed on-device that pinch/pan over a playing video still route to the canvas.
 
 ### 27.7 Tests
-- [ ] Video node transforms (move/resize/rotate/select) identically to an image node.
-- [ ] Edit play button starts playback without changing selection; Edit tap elsewhere only selects.
-- [ ] Pool respects *K*: the (K+1)-th requested playback evicts or falls back to poster per policy.
+- [x] Video node transforms (move/resize/rotate/select) identically to an image node. (`MediaTransformParityTest` — `createMedia` geometry parity + `withTransform` move/resize/rotate is type-agnostic and preserves `mediaType`.)
+- [x] Playback gesture routing: single-tap never plays (mode default), double-tap on a video plays in View/Present/Edit-Selection, specialized tools keep their map, non-video double-tap keeps the mode default. (`GestureRouterTest` — `single-tap on a video focuses-selects…`, `double-tap on a video plays-pauses…`, `double-tap play is claimed only by Selection…`, `double-tap on a non-video keeps the mode default`.)
+- [x] Pool respects *K*: the (K+1)-th requested playback evicts or falls back to poster per policy. (`VideoPlaybackKeepSetTest` — under-K / over-K eviction / off-screen exclusion / empty + zero-pool.)
 
 ### 27.8 Explicitly out of scope (first slice)
 - [ ] loop / mute / start-position / custom poster / inline controls / autoplay-on-frame-entry / pause-on-leave / `AlbumVideoDefaults` / full Media Library (`to_discuss.md § 14`).
+
+### 27.9 Live appearance on playing video (decided 2026-06-19)
+
+Today `MediaAppearance` renders only on the **poster** (`FullMediaRenderer`); the live `PlayerView` surface applies none of it, so styling snaps off during playback. Decision: make the appearance ops **that already render on the poster** also apply to the live surface. Scope is the 7 rendered ops only — `colorAdjustments` / `frameDecoration` / `caption` render *nowhere* today (model + editor stubs), so they are explicitly **not** part of this slice (separate general-appearance work).
+
+Foundational requirement: switch `PlayerView` from its default `SurfaceView` to **`TextureView`** (`surface_type=texture_view`) — a SurfaceView ignores container alpha / clip / offscreen compositing, which all the ops below need.
+
+**§ 27.9a — TextureView + container-level ops — DONE 2026-06-19:**
+- [x] Replaced `PlayerView` with a bare `TextureView` bound via `player.setVideoTextureView` (composites with alpha/clip; SurfaceView can't).
+- [x] Opacity → container `graphicsLayer.alpha`.
+- [x] Corner radius → rounded clip on the content container (px-space `Shape` via `roundedPxShape`).
+- [x] Border → Compose stroke on the clip edge (reuses `drawNodeBorder`, now `internal`).
+- [x] Shadow → Compose draw behind the surface (reuses `drawNodeShadow`, now `internal`).
+- [x] Crop Fit / Fill / Stretch → content sizing (`videoContentRect` + `cropPlaced` layout modifier), TextureView sized aspect-correct, overflow clipped. Null crop matches the poster's Fill default.
+
+**§ 27.9b — Manual crop + overlays — DONE 2026-06-19:**
+- [x] Manual crop → `videoContentRect` handles `CropMode.Manual` (`zoom`/`offsetX`/`offsetY` over the Fill scale, mirroring `drawCroppedBitmap`). Landed with 9a since it's the same sizing function.
+- [x] Overlays → `drawOverlayStack` + `rememberOverlayTextureBitmaps` drawn over the live frames in a `drawWithContent` block (inside the mask, matching FullMediaRenderer).
+
+**§ 27.9c — Live alpha mask — DONE 2026-06-19 (highest risk — needs on-device confirmation):**
+- [x] Offscreen-composite the TextureView (`graphicsLayer { compositingStrategy = Offscreen }`, gated on mask presence) and apply the mask via `drawWithAlphaMask` (`BlendMode.DstIn`) + `rememberAlphaMaskBitmap` in the same `drawWithContent`. **Risk:** offscreen-compositing a layer containing an embedded `AndroidView`/`TextureView` is the part most likely to misbehave on real hardware — verify a masked playing video actually shows the mask (and falls back to unmasked, not blank, if it doesn't).
+
+**§ 27.9d — Transparency fixes (2026-06-19, from on-device feedback):**
+- [x] `TextureView.isOpaque = false` — a TextureView is opaque by default, which defeated both the DstIn mask and `< 1` container opacity; masked-out regions / transparent opacity now show the canvas behind.
+- [x] Skip the poster (`CanvasNodeRenderer`) for nodes with a live surface (`CanvasScreen` paint loop checks `playbackController.assignments.keys`). Was double-drawing: a semi-transparent / masked playing surface revealed the static frame-0 poster underneath (the "first frame shows during playback" bug), and border/overlays painted twice. Known trade-off: a playing video draws on top of z-order, and a brief transparent gap shows during buffering before the first frame (poster-until-first-frame is a possible polish via `Player.onRenderedFirstFrame`).
 
 ---
 

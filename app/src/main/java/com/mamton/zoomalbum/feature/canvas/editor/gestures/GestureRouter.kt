@@ -75,6 +75,14 @@ sealed interface DoubleTapRoute {
      */
     data object ResetCamera : DoubleTapRoute
 
+    /**
+     * Double-tap on a video node → play / pause it. The uniform "double-tap =
+     * play" affordance across View / Presentation and Edit (Selection). The
+     * video is "living media"; single-tap stays the mode default (focus /
+     * select). See `video.md § 4`.
+     */
+    data class PlayPauseVideo(val nodeId: String) : DoubleTapRoute
+
     /** Owned by the active tool but no current tool defines double-tap. */
     data object Ignore : DoubleTapRoute
 }
@@ -232,6 +240,8 @@ object GestureRouter {
         if (ctx.isContextMenuOpen) return TapRoute.DismissContextMenuOnly
         return when (ctx.mode) {
             CanvasInteractionMode.Edit -> routeEditTap(ctx.activeTool, hitNodeId)
+            // Single-tap does the mode default everywhere (focus). Playback is on
+            // double-tap, uniformly across modes — see [routeDoubleTap].
             CanvasInteractionMode.View,
             CanvasInteractionMode.Presentation,
             -> if (hitNodeId != null) TapRoute.ViewFocus(hitNodeId) else TapRoute.Ignore
@@ -254,8 +264,24 @@ object GestureRouter {
             TapRoute.Ignore
     }
 
-    fun routeDoubleTap(ctx: GestureRoutingContext): DoubleTapRoute {
+    fun routeDoubleTap(
+        ctx: GestureRoutingContext,
+        hitNodeId: String? = null,
+        hitIsVideo: Boolean = false,
+    ): DoubleTapRoute {
         if (ctx.isContextMenuOpen) return DoubleTapRoute.DismissContextMenuOnly
+        // Double-tap a video → play/pause, uniformly. In Edit only the default
+        // Selection tool claims it; specialized tools (Eraser / CropEdit) keep
+        // their own double-tap semantics so playback can't interrupt them.
+        if (hitIsVideo && hitNodeId != null) {
+            val claims = when (ctx.mode) {
+                CanvasInteractionMode.View,
+                CanvasInteractionMode.Presentation,
+                -> true
+                CanvasInteractionMode.Edit -> ctx.activeTool == EditorTool.Selection
+            }
+            if (claims) return DoubleTapRoute.PlayPauseVideo(hitNodeId)
+        }
         return when (ctx.mode) {
             // Edit: per the locked per-tool gesture maps in editor-tools.md § 4,
             // no MVP tool claims double-tap. (`VectorEdit` will, when it lands.)

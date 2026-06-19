@@ -43,20 +43,25 @@ A node is a video iff `mediaType == MediaType.VIDEO`. Image vs. video is the onl
 
 ## 3. Poster / thumbnail — zero storage
 
-The poster is **the existing Coil path**, pointed at the video URI with a frame-millis parameter, decoded by Coil's `coil-video` decoder. There is **no** generated-on-import step, **no** stored poster, and **no** new model field. Extraction is lazy, on first render, cached by Coil like any other image. Custom poster-frame selection is deferred.
+The poster frame is extracted lazily by Coil's `coil-video` decoder (pointed at the video URI with a frame-millis parameter) and cached like any other image. There is **no** generated-on-import step, **no** stored poster, and **no** new model field. Custom poster-frame selection is deferred.
+
+**Implementation note (updated 2026-06-20).** The poster does **not** render through the shared image renderer (`FullMediaRenderer`). It is loaded as an explicit `ARGB_8888` software bitmap via `rememberVideoPosterBitmap` (mirroring the alpha-mask loader) and drawn through `VideoPosterSurface` (see § 6). The shared image path could not be reused: a `coil-video` frame composited in `FullMediaRenderer`'s single-layer offscreen masks its cut-away region as **opaque black** (a plain image is fine). Rendering the poster through the same surface chrome as the live player — and as an ARGB bitmap — is what makes masked / styled posters correct.
 
 ---
 
-## 4. Edit vs. View playback
+## 4. Playback affordance — uniform double-tap
 
-| Mode | Tap behavior | Play affordance |
-|---|---|---|
-| **View / Present** | Tap anywhere on the video → play / pause. | The poster play-icon overlay (fades while playing). |
-| **Edit** | Tap **selects** (unchanged). Playback must not fight selection. | A small **play button drawn on the selected node's poster**. |
+**Updated 2026-06-19 (supersedes the original single-tap-in-View design).** Playback is a **uniform double-tap** across modes; single-tap keeps each mode's default so it never fights selection / focus.
 
-**Edit-mode play button rules.** The button is a **node-local** hit-target: it sits *inside* the node, yields to transform handles, and must **not** extend selection or start a marquee. It is the same play-icon affordance already required by the poster, made tappable on the selected node only.
+| Mode | Single-tap | Double-tap on a video | Other play affordance |
+|---|---|---|---|
+| **View / Present** | Focus the node (camera fit). | Play / pause. | — |
+| **Edit (Selection)** | Select (unchanged). | Play / pause. | Context-menu `Play / Pause`. |
+| **Edit (Eraser / CropEdit)** | Tool default. | Tool default (no play). | — |
 
-No accidental playback in Edit: outside the explicit play button, Edit taps/drags do exactly what Selection does today.
+- **Why double-tap, not single-tap-in-View:** a single mental model across modes ("double-tap a video to play"), and single-tap stays free for the mode's primary action. Implemented via `DoubleTapRoute.PlayPauseVideo` (router branches on a `hitIsVideo` flag); the Edit context-menu item (`PlayVideoAction` → `EditorActionEffect.ToggleVideoPlayback`) is a discoverable alternative.
+- **No accidental playback:** single-tap never plays; double-tap on a *non-video* keeps the mode default (View = reset camera, Edit = no-op). Specialized Edit tools (Eraser, CropEdit) keep their own double-tap so playback can't interrupt them.
+- The poster's play-icon badge remains the static affordance (drawn inside the mask so it doesn't paint over masked-out regions).
 
 ---
 
@@ -73,11 +78,24 @@ This is a deliberate expansion past "keep the first slice small," chosen as the 
 
 ---
 
-## 6. Playback host
+## 6. Playback host & rendering (implemented 2026-06-20)
 
-- The player surface is an **`AndroidView` hosting a Media3 `ExoPlayer`**, mounted **only** at `RenderDetail.Full` for pool-assigned, currently-playing nodes. Every other video renders its poster via the Coil path of [media-appearance.md § Rendering Pipeline](media-appearance.md#rendering-pipeline-per-media-node).
-- **Playback state and the player pool live in a `CanvasScaffold`-level holder keyed by `nodeId`** — never in domain models. This follows the editor-state rule that UI-surface / transient state stays out of `CanvasState` ([editor-tools.md § 7.1](editor-tools.md#71-state)); a video node carries no "isPlaying" field.
-- The host must not fight gesture routing: the player surface participates in the canvas transform but defers pan/zoom/selection gestures to the existing routers.
+At `RenderDetail.Full` a video renders through a dedicated Compose surface, **not** the shared image renderer. Both the live and the static cases share one structure, **`VideoSurfaceChrome`** (`feature/canvas/playback/`):
+
+- **Outer layer** — the node's world translate / rotate / opacity (`clip = false` so the shadow can extend past the node rect).
+- **Inner layer** — clipped to the rounded node rect and, when an alpha mask is present, composited **offscreen** (`CompositingStrategy.Offscreen`) via `drawWithContent`: base content, then overlays, then the mask's `BlendMode.DstIn`. Border + shadow stay outside the mask.
+- Keeping the rotation on the **outer** layer and the mask's offscreen on an **inner, clipped, un-rotated** layer is load-bearing. The shared image renderer's single-layer offscreen (rotation *on* the offscreen layer) composited a masked video frame's cut-away region as **opaque black**; the two-layer split fixes it.
+
+Two users of the chrome:
+
+- **`VideoPlayerSurface`** (live) — a bare **`TextureView`** (not `PlayerView`) bound via `player.setVideoTextureView`, set `isOpaque = false` so opacity / mask actually show through. A `SurfaceView` would ignore container alpha / clip / offscreen compositing. The view is non-clickable / non-focusable so pan / zoom / selection gestures still reach the Compose routers.
+- **`VideoPosterSurface`** (static) — draws the `ARGB_8888` poster bitmap (§ 3) + the play badge.
+
+**Mounting / z-order.** `VideoPosterSurface` is pure Compose, so it renders **inline in the paint loop** and keeps the node's z-order. The live `VideoPlayerSurface` is an `AndroidView`, mounted **after** the loop — so an actively-playing video draws on top of z-order (an accepted MVP limitation). Videos below `Full` render a placeholder via the normal renderer.
+
+**Live appearance.** Because poster and player share the chrome, every `MediaAppearance` op that renders on the poster also applies to the playing frame — opacity, corner radius, border, shadow, crop (Fit/Fill/Stretch/Manual), overlays, alpha mask — so styling never snaps off during playback. `colorAdjustments` / `frameDecoration` / `caption` are excluded (they render nowhere yet). Tracked in [todo.md § 27.9](../todo.md#279-live-appearance-on-playing-video-decided-2026-06-19).
+
+**State.** Playback state + the player pool live in a `CanvasScaffold`-level holder (`VideoPlaybackController`) keyed by `nodeId` — never in domain models, per the editor-state rule that UI-surface / transient state stays out of `CanvasState` ([editor-tools.md § 7.1](editor-tools.md#71-state)). A video node carries no `isPlaying` field.
 
 ---
 
@@ -94,4 +112,6 @@ Today only Coil 3 image (`coil-compose 3.4.0`) is wired — both are new.
 
 ## 8. Implementation status
 
-**No code yet.** Design decided 2026-06-17. Next deliverable is the implementation plan; slices tracked in [todo.md § 27](../todo.md#27-video-mvp).
+**Implemented + verified on-device, 2026-06-20.** Slices A–E (deps, poster, single-player → bounded pool, gestures, tests) plus § 27.9 live appearance. Code lives in `feature/canvas/playback/` (`VideoPlaybackController`, `VideoDecoderProbe`, `VideoSurfaceChrome` / `VideoPlayerSurface` / `VideoPosterSurface`) with wiring in `CanvasScreen` / `CanvasScaffold` and the picker/import path in `CanvasViewModel`. Slice detail + remaining polish in [todo.md § 27](../todo.md#27-video-mvp).
+
+Out of scope (unchanged from § 1): loop / mute / start-position / custom poster / inline controls / autoplay-on-frame-entry / pause-on-leave / `AlbumVideoDefaults` / full Media Library.

@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -25,6 +27,11 @@ import com.mamton.zoomalbum.core.math.ResizeHandle
 import com.mamton.zoomalbum.core.math.TransformUtils
 import com.mamton.zoomalbum.domain.model.CanvasInteractionMode
 import com.mamton.zoomalbum.domain.model.CanvasNode
+import com.mamton.zoomalbum.domain.model.MediaType
+import com.mamton.zoomalbum.domain.model.RenderDetail
+import com.mamton.zoomalbum.feature.canvas.playback.VideoPlaybackController
+import com.mamton.zoomalbum.feature.canvas.playback.VideoPlayerSurface
+import com.mamton.zoomalbum.feature.canvas.playback.VideoPosterSurface
 import com.mamton.zoomalbum.domain.undo.InteractionKind
 import com.mamton.zoomalbum.feature.canvas.editor.EditorTool
 import com.mamton.zoomalbum.domain.model.MembershipState
@@ -55,6 +62,12 @@ import kotlin.math.atan2
 @Composable
 fun CanvasScreen(
     viewModel: CanvasViewModel = hiltViewModel(),
+    /**
+     * Shared single-player playback holder (`video.md § 6`). Hoisted in
+     * `CanvasScaffold`; View-mode taps on a video toggle playback through it
+     * and the render loop mounts its ExoPlayer surface over the active node.
+     */
+    playbackController: VideoPlaybackController,
     onShowContextMenu: (ContextMenuRequest) -> Unit = {},
     /**
      * Fired when the user starts any canvas gesture that should dismiss an open
@@ -487,11 +500,20 @@ fun CanvasScreen(
                         TapRoute.Ignore -> Unit
                     }
                 },
-                onDoubleTap = {
+                onDoubleTap = { offset ->
+                    // Double-tap a video → play/pause (uniform across modes). Hit-
+                    // test so the router can branch on video-ness; non-video
+                    // double-taps keep their mode default (camera reset / no-op).
+                    val hit = viewModel.hitTest(offset.x, offset.y)
+                    val hitIsVideo = (hit as? CanvasNode.Media)?.mediaType == MediaType.VIDEO
                     val ctx = routingContext(state, isContextMenuOpenLatest)
-                    when (GestureRouter.routeDoubleTap(ctx)) {
+                    when (GestureRouter.routeDoubleTap(ctx, hit?.id, hitIsVideo)) {
                         DoubleTapRoute.DismissContextMenuOnly -> onCanvasGesture()
                         DoubleTapRoute.ResetCamera -> viewModel.reset()
+                        is DoubleTapRoute.PlayPauseVideo ->
+                            (hit as? CanvasNode.Media)?.let {
+                                playbackController.togglePlayback(it.id, it.mediaRefId)
+                            }
                         DoubleTapRoute.Ignore -> Unit
                     }
                 },
@@ -654,14 +676,64 @@ fun CanvasScreen(
             val paintEvents = remember(state.visibleNodes) {
                 buildFramePaintEvents(state.visibleNodes, membershipUseCase)
             }
+            // Full-detail videos render through a Compose surface (the proven
+            // mask path), NOT FullMediaRenderer — a video frame in
+            // FullMediaRenderer's offscreen masked as opaque black. Not playing →
+            // VideoPosterSurface inline here (keeps z-order). Playing → its
+            // VideoPlayerSurface paints on top (below). Lower-LOD videos and all
+            // other nodes keep CanvasNodeRenderer.
+            val playingVideoIds = playbackController.assignments.keys
             for (event in paintEvents) {
                 when (event) {
-                    is FramePaintEvent.NodePass ->
-                        CanvasNodeRenderer(event.node, event.detail)
+                    is FramePaintEvent.NodePass -> {
+                        val n = event.node
+                        val isFullVideo = n is CanvasNode.Media &&
+                            n.mediaType == MediaType.VIDEO &&
+                            event.detail == RenderDetail.Full
+                        if (isFullVideo) {
+                            if (n.id !in playingVideoIds) {
+                                key(n.id) {
+                                    val poster = rememberVideoPosterBitmap(n.mediaRefId)
+                                    if (poster != null) {
+                                        VideoPosterSurface(node = n, bitmap = poster)
+                                    }
+                                }
+                            }
+                        } else {
+                            CanvasNodeRenderer(n, event.detail)
+                        }
+                    }
                     is FramePaintEvent.LayeredFrameSurface ->
                         FrameRendererPhased(event.frame, event.detail, FramePaintPhase.Surface)
                     is FramePaintEvent.LayeredFrameOverlay ->
                         FrameRendererPhased(event.frame, event.detail, FramePaintPhase.Overlay)
+                }
+            }
+
+            // Video playback: a bounded pool of ExoPlayers mounted over the
+            // playing video nodes, painted on top of their posters. Candidacy is
+            // LOD-bounded — only RenderDetail.Full videos can hold a player; when
+            // a node leaves the viewport or drops below Full it loses its player
+            // and the poster shows again (`video.md § 5–6`, `todo.md § 27.5`).
+            val fullVideoIds = remember(state.visibleNodes) {
+                state.visibleNodes.asSequence()
+                    .filter { it.detail == RenderDetail.Full }
+                    .map { it.node }
+                    .filterIsInstance<CanvasNode.Media>()
+                    .filter { it.mediaType == MediaType.VIDEO }
+                    .map { it.id }
+                    .toSet()
+            }
+            LaunchedEffect(fullVideoIds, playbackController.playingNodeIds) {
+                playbackController.reconcile(fullVideoIds)
+            }
+            for ((nodeId, player) in playbackController.assignments) {
+                key(nodeId) {
+                    val mediaNode = state.visibleNodes
+                        .firstOrNull { it.node.id == nodeId }?.node as? CanvasNode.Media
+                    if (mediaNode != null) {
+                        VideoPlayerSurface(node = mediaNode, player = player)
+                    }
                 }
             }
 

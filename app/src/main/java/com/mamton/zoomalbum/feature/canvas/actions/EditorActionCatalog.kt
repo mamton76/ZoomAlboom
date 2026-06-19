@@ -1,5 +1,6 @@
 package com.mamton.zoomalbum.feature.canvas.actions
 
+import com.mamton.zoomalbum.domain.model.MediaType
 import com.mamton.zoomalbum.feature.canvas.editor.EditorTool
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction
 import com.mamton.zoomalbum.feature.ide_ui.ui.FrameMembershipIntent
@@ -141,6 +142,25 @@ data object EditCaptionAction : EditorAction {
 }
 
 // ── Navigation ───────────────────────────────────────────────────────────────
+
+/**
+ * Edit-mode play/pause for a single selected video. Lets the user start
+ * playback without leaving Edit, as the explicit affordance required by
+ * `video.md § 4` ("no accidental playback in Edit"). Visible only for a single
+ * video node; toggles the shared [VideoPlaybackController] via the host.
+ */
+data object PlayVideoAction : EditorAction {
+    override val id = "media.play_video"
+    override val icon = "▶"
+    override val category = ActionCategory.Navigation
+    override fun label(ctx: SelectionContext) = "Play / Pause"
+    override fun isVisible(ctx: SelectionContext) =
+        ctx.singleSelectedMedia?.mediaType == MediaType.VIDEO
+    override fun effect(ctx: SelectionContext): EditorActionEffect? =
+        ctx.singleSelectedMedia?.let {
+            EditorActionEffect.ToggleVideoPlayback(it.id, it.mediaRefId)
+        }
+}
 
 data object NavigateToFrameAction : EditorAction {
     override val id = "navigation.focus_frame"
@@ -297,6 +317,7 @@ object EditorActionCatalog {
         EditColorAdjustmentsAction,
         EditFrameDecorationAction,
         EditCaptionAction,
+        PlayVideoAction,
         NavigateToFrameAction,
         BringToFrontAction,
         BringForwardAction,

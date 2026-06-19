@@ -2,6 +2,11 @@ package com.mamton.zoomalbum.feature.canvas.view
 
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
@@ -11,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -20,9 +26,16 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Constraints
 import androidx.core.graphics.toColorInt
+import coil3.SingletonImageLoader
 import coil3.compose.rememberAsyncImagePainter
+import coil3.request.ImageRequest
+import coil3.request.SuccessResult
+import coil3.request.allowHardware
+import coil3.toBitmap
+import coil3.video.videoFrameMillis
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipPath
@@ -334,7 +347,7 @@ private fun SimplifiedFrameRenderer(
     )
 }
 
-private fun DrawScope.drawNodeBorder(
+internal fun DrawScope.drawNodeBorder(
     border: BorderStyle?,
     fallbackColorHex: String?,
     fallbackAlpha: Float,
@@ -363,7 +376,7 @@ private fun DrawScope.drawNodeBorder(
     )
 }
 
-private fun DrawScope.drawNodeShadow(
+internal fun DrawScope.drawNodeShadow(
     shadow: ShadowStyle,
     topLeft: Offset,
     size: Size,
@@ -485,6 +498,9 @@ private fun StubRenderer(
 @Composable
 private fun MediaRenderer(media: CanvasNode.Media, detail: RenderDetail) {
     val t = media.transform
+    // Video nodes are NOT rendered here at Full detail — `CanvasScreen` routes
+    // them to `VideoPosterSurface` / `VideoPlayerSurface` (the offscreen mask
+    // path that works for video frames). This renderer stays image-only.
     when (detail) {
         RenderDetail.Hidden -> return
         RenderDetail.Stub, RenderDetail.Preview ->
@@ -584,6 +600,46 @@ private fun FullMediaRenderer(
             }
         }
     Spacer(modifier = nodeModifier)
+}
+
+private const val VIDEO_POSTER_FRAME_MILLIS = 0L
+
+/**
+ * Loads a video's poster frame as an explicit `ARGB_8888` software [ImageBitmap]
+ * — mirrors [rememberAlphaMaskBitmap]. Returns null for a null [uri] (non-video
+ * nodes) or until the frame decodes. The explicit `.copy(ARGB_8888)` is the
+ * crucial bit: `allowHardware(false)` alone can still yield an RGB_565 frame
+ * (no alpha channel), which the offscreen `DstIn` mask can't cut → opaque black.
+ */
+@Composable
+internal fun rememberVideoPosterBitmap(uri: String?): ImageBitmap? {
+    val context = LocalContext.current
+    var bitmap by remember(uri) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(uri) {
+        if (uri == null) {
+            bitmap = null
+            return@LaunchedEffect
+        }
+        runCatching {
+            val request = ImageRequest.Builder(context)
+                .data(uri)
+                .videoFrameMillis(VIDEO_POSTER_FRAME_MILLIS)
+                .allowHardware(false)
+                .build()
+            val result = SingletonImageLoader.get(context).execute(request)
+            val image = (result as? SuccessResult)?.image
+            if (image != null) {
+                val raw = image.toBitmap()
+                val safe = if (raw.config == android.graphics.Bitmap.Config.ARGB_8888) {
+                    raw
+                } else {
+                    raw.copy(android.graphics.Bitmap.Config.ARGB_8888, false) ?: raw
+                }
+                bitmap = safe.asImageBitmap()
+            }
+        }
+    }
+    return bitmap
 }
 
 /**

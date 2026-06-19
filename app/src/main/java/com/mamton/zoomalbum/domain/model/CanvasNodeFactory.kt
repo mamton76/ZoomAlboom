@@ -103,6 +103,7 @@ object CanvasNodeFactory {
         viewport: BoundingBox,
         nextZIndex: Float,
         camera: Camera,
+        mediaType: MediaType = MediaType.IMAGE,
     ): CanvasNode.Media {
         val visibleWorldW = screenWidth / camera.scale
         val visibleWorldH = screenHeight / camera.scale
@@ -133,7 +134,7 @@ object CanvasNodeFactory {
                 zIndex = nextZIndex,
             ),
             mediaRefId = uri,
-            mediaType = MediaType.IMAGE,
+            mediaType = mediaType,
             intrinsicPixelWidth = imageWidth.coerceAtLeast(0),
             intrinsicPixelHeight = imageHeight.coerceAtLeast(0),
             visibilityPolicy = VisibilityPolicy(referenceScale = camera.scale),

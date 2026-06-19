@@ -59,6 +59,14 @@ sealed interface EditorActionEffect {
     data class FrameMembership(val intent: FrameMembershipIntent) : EditorActionEffect
     data object OpenAddSheet : EditorActionEffect
 
+    /**
+     * Play/pause for a single selected video from the context menu, routed to
+     * the `CanvasScaffold`-level [VideoPlaybackController]. A menu alternative to
+     * the gesture path (`DoubleTapRoute.PlayPauseVideo`) — both toggle the same
+     * controller (`video.md § 4`).
+     */
+    data class ToggleVideoPlayback(val nodeId: String, val uri: String) : EditorActionEffect
+
     // Per-concept appearance editors (`docs/architecture/appearance.md § 14.1`).
     // Each opens a single-concept bottom sheet that edits one field of
     // FrameAppearance/MediaAppearance across the entire selection — the rest

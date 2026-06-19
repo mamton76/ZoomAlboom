@@ -34,6 +34,8 @@ import com.mamton.zoomalbum.domain.model.CaptionStyle
 import com.mamton.zoomalbum.domain.model.CropSettings
 import com.mamton.zoomalbum.domain.model.FrameAppearance
 import com.mamton.zoomalbum.domain.model.MediaAppearance
+import com.mamton.zoomalbum.domain.model.MediaType
+import com.mamton.zoomalbum.feature.canvas.playback.rememberVideoPlaybackController
 import com.mamton.zoomalbum.domain.model.MediaColorAdjustments
 import com.mamton.zoomalbum.domain.model.MediaFrameDecoration
 import com.mamton.zoomalbum.domain.model.OverlayStyle
@@ -87,8 +89,20 @@ fun CanvasScaffold(
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        canvasViewModel.addMedia(uri)
+        canvasViewModel.addMedia(uri, MediaType.IMAGE)
     }
+
+    val videoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        canvasViewModel.addMedia(uri, MediaType.VIDEO)
+    }
+
+    // Single-player video playback holder, scoped to the canvas composition
+    // (released on dispose). Shared with CanvasScreen for tap-to-play + the
+    // ExoPlayer render surface — `video.md § 6`.
+    val playbackController = rememberVideoPlaybackController()
 
     var showAddSheet by remember { mutableStateOf(false) }
     var showFrameList by remember { mutableStateOf(false) }
@@ -245,6 +259,8 @@ fun CanvasScaffold(
             is EditorActionEffect.Dispatch -> canvasViewModel.onAction(effect.action)
             is EditorActionEffect.FrameMembership -> dispatchFrameMembership(effect.intent)
             EditorActionEffect.OpenAddSheet -> showAddSheet = true
+            is EditorActionEffect.ToggleVideoPlayback ->
+                playbackController.togglePlayback(effect.nodeId, effect.uri)
 
             // Per-concept editors (`appearance.md § 14.1`).
             EditorActionEffect.OpenOpacityEditor -> opacityEditing = universalTargetForSelection()
@@ -428,6 +444,7 @@ fun CanvasScaffold(
                 .padding(padding),
         ) {
             CanvasScreen(
+                playbackController = playbackController,
                 onShowContextMenu = { request -> contextMenuRequest = request },
                 // Tap / double-tap / drag-start dismisses an open context menu
                 // *without* running its normal canvas action — outside-tap of
@@ -480,6 +497,13 @@ fun CanvasScaffold(
                         showAddSheet = false
                         photoPicker.launch(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                        null
+                    }
+                    "Video" -> {
+                        showAddSheet = false
+                        videoPicker.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
                         )
                         null
                     }

@@ -2,6 +2,7 @@ package com.mamton.zoomalbum.feature.canvas.viewmodel
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.SavedStateHandle
@@ -26,6 +27,7 @@ import com.mamton.zoomalbum.domain.model.EasingType
 import com.mamton.zoomalbum.domain.model.FrameAppearance
 import com.mamton.zoomalbum.domain.model.FrameEditOptions
 import com.mamton.zoomalbum.domain.model.MediaAppearance
+import com.mamton.zoomalbum.domain.model.MediaType
 import com.mamton.zoomalbum.feature.canvas.editor.EditorState
 import com.mamton.zoomalbum.feature.canvas.editor.EditorTool
 import com.mamton.zoomalbum.domain.model.FrameFitMode
@@ -468,23 +470,28 @@ class CanvasViewModel @Inject constructor(
      * Copies [sourceUri] to app-private storage and adds a [CanvasNode.Media] node.
      * Must be called from any thread — does IO work internally.
      */
-    fun addMedia(sourceUri: Uri) {
+    fun addMedia(sourceUri: Uri, mediaType: MediaType = MediaType.IMAGE) {
         viewModelScope.launch(Dispatchers.IO) {
-            val (imgW, imgH) = decodeImageDimensions(sourceUri)
-            val localPath = copyToAppStorage(sourceUri) ?: return@launch
+            val (mediaW, mediaH) = when (mediaType) {
+                MediaType.VIDEO -> decodeVideoDimensions(sourceUri)
+                else -> decodeImageDimensions(sourceUri)
+            }
+            val extension = if (mediaType == MediaType.VIDEO) "mp4" else "jpg"
+            val localPath = copyToAppStorage(sourceUri, extension) ?: return@launch
             val viewport = currentViewport()
             val camera = currentCamera()
             val zIndex = nextZIndex()
             val (sw, sh) = screenSize()
             val node = CanvasNodeFactory.createMedia(
                 uri = localPath,
-                imageWidth = imgW,
-                imageHeight = imgH,
+                imageWidth = mediaW,
+                imageHeight = mediaH,
                 screenWidth = sw,
                 screenHeight = sh,
                 viewport = viewport,
                 nextZIndex = zIndex,
                 camera = camera,
+                mediaType = mediaType,
             )
             withContext(Dispatchers.Main) { addNode(node) }
         }
@@ -1552,10 +1559,41 @@ class CanvasViewModel @Inject constructor(
         return w to h
     }
 
-    private fun copyToAppStorage(uri: Uri): String? {
+    /**
+     * Extracts the source video's pixel dimensions, honoring the rotation
+     * metadata (a portrait phone clip is stored as a rotated landscape track,
+     * so width/height are swapped for 90°/270°). Mirrors the EXIF swap in
+     * [decodeImageDimensions]. Returns `0 to 0` on failure — [CanvasNodeFactory]
+     * falls back to a default aspect.
+     */
+    private fun decodeVideoDimensions(uri: Uri): Pair<Int, Int> {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(context, uri)
+            var w = retriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH,
+            )?.toIntOrNull() ?: 0
+            var h = retriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT,
+            )?.toIntOrNull() ?: 0
+            val rotation = retriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION,
+            )?.toIntOrNull() ?: 0
+            if (rotation == 90 || rotation == 270) {
+                val tmp = w; w = h; h = tmp
+            }
+            w to h
+        } catch (_: Exception) {
+            0 to 0
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    private fun copyToAppStorage(uri: Uri, extension: String = "jpg"): String? {
         return try {
             val dir = File(context.filesDir, "media/$albumId").also { it.mkdirs() }
-            val dest = File(dir, "img_${System.currentTimeMillis()}.jpg")
+            val dest = File(dir, "media_${System.currentTimeMillis()}.$extension")
             context.contentResolver.openInputStream(uri)?.use { input ->
                 dest.outputStream().use { output -> input.copyTo(output) }
             }

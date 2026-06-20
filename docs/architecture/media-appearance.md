@@ -136,12 +136,17 @@ data class MediaFrameDecoration(
     val sliceTop: Float = 0f,
     val sliceRight: Float = 0f,
     val sliceBottom: Float = 0f,
-    // Usable content area inside the decoration
-    // e.g. Polaroid has extra space at bottom for caption
+    // The frame's opening (fractions 0..1 of the node edge). The media is drawn
+    // ONLY inside this rect, then the decoration PNG draws over the full rect on
+    // top — so the photo/video never leaks past the frame. All-zero = no crop.
     val contentInsetLeft: Float = 0f,
     val contentInsetTop: Float = 0f,
     val contentInsetRight: Float = 0f,
     val contentInsetBottom: Float = 0f,
+    // Arbitrary (non-rectangular) opening — planned, not yet consumed. When set
+    // it OVERRIDES the rectangular contentInset* (oval / arch / torn paper);
+    // null = use the rectangular insets above.
+    val openingMaskUri: String? = null,
 )
 
 @Serializable
@@ -165,12 +170,14 @@ Corners are never distorted. Edges stretch along one axis only. Center (content 
 
 In order:
 
-1. Decode source asset, apply `CropSettings` (mode + focal point).
+1. Decode source asset, apply `CropSettings` (mode + focal point). When `frameDecoration` defines a non-zero opening (`contentInset*`), the source is scaled into and clipped to that **opening rect** rather than the full node rect, so it can't leak past the frame.
 2. Apply `colorAdjustments` if non-null.
-3. Draw each entry of `overlays` in list order — each `OverlayStyle` with its own `OverlaySource`, `blendMode`, and `opacity` per [appearance.md § 7.1](appearance.md#71-overlaystyle). Entry `[i]` composites above entry `[i-1]`.
-4. Draw `frameDecoration` (Stretch or NineSlice) on top of overlays.
+3. Draw each entry of `overlays` in list order — each `OverlayStyle` with its own `OverlaySource`, `blendMode`, and `opacity` per [appearance.md § 7.1](appearance.md#71-overlaystyle). Entry `[i]` composites above entry `[i-1]`. Overlays are clipped to the same opening rect as the source.
+4. Draw `frameDecoration` (Stretch or NineSlice) over the **full** node rect, on top of the opening-clipped media. Composited **after** the `alphaMask` layer (steps 1–3 are masked; the decoration is not) so the frame is never cut by the node's alpha mask.
 5. Apply `cornerRadius`, `border`, `shadow`, overall `opacity` (all inherited from `NodeAppearance`).
 6. Draw `caption` if present.
+
+> **Opening crop** is rectangular today (`contentInset*`). The planned `openingMaskUri` will override it for arbitrary shapes (oval / arch / torn paper): the media is masked by that asset's white/alpha area instead of a rectangle. Same render hook (`MediaFrameDecoration.openingRect` in `CanvasRenderer`) — the mask is swapped in when present.
 
 **LOD:** At `Stub` or `Preview` detail levels, skip overlay and frame-decoration rendering — show the cropped source only. Full pipeline runs at `Full` detail. At intermediate levels, the renderer may also draw only the first overlay entry (or only entries with non-`Normal` blend that visibly change tone).
 
@@ -227,14 +234,20 @@ Stored in `filesDir/media/<albumId>/rendered/`.
 - `MediaAppearance` data class + `appearance: MediaAppearance?` on `CanvasNode.Media`.
 - All shared types: `BorderStyle`, `ShadowStyle`, `OverlayStyle`, `OverlaySource` (Solid / Texture / Procedural), all 7 `NodeBlendMode` values.
 - All media-specific value types: `CropSettings`+`CropMode`, `MediaColorAdjustments`, `MediaFrameDecoration`+`MediaFrameDecorationMode`, `CaptionStyle`, `MediaStylePreset`.
-- `FullMediaRenderer` paints: surface opacity, cornerRadius (rounded clip), shadow, cropped source (`CropMode` → `ContentScale`), overlay stack, border. Texture overlays load through `rememberOverlayTextureBitmaps` (Coil `SingletonImageLoader.execute` with `allowHardware(false)`, keyed on the unique `textureRefId` set).
+- `FullMediaRenderer` paints: surface opacity, cornerRadius (rounded clip), shadow, cropped source (`CropMode` → `ContentScale`), overlay stack, frame decoration, border. Texture overlays load through `rememberOverlayTextureBitmaps` (Coil `SingletonImageLoader.execute` with `allowHardware(false)`, keyed on the unique `textureRefId` set).
+- `MediaFrameDecorationRenderer` paints `frameDecoration` on top of the overlay stack (step 4): `Stretch` scales the asset to the rect; `NineSlice` splits both source and dest by the `slice*` fractions (0..1 of the asset edge), drawing corners unscaled relative to each other and stretching the four edges along one axis so one asset fits any media aspect ratio. The decoration bitmap loads through `rememberDecorationBitmap` (single-asset analogue of `rememberOverlayTextureBitmaps`, ARGB_8888 to preserve transparency).
 - `MediaAppearanceBottomSheet` covers every field: opacity / cornerRadius / crop (mode + focal / manual) / color adjustments / border / shadow / overlays (shared `OverlayListEditor`) / frame decoration / caption. Reached from the long-press context-menu popup's `✦ Edit appearance` entry (dispatched via `EditorActionCatalog.EditMediaAppearanceAction` — see [context-menu.md](context-menu.md)) when a single Media is selected. Backed by `CanvasAction.SetMediaAppearance` + `CommandKind.SET_MEDIA_APPEARANCE`; undoable like any other snapshot command.
 
 **Model + editor land, renderer pending:**
 - `MediaColorAdjustments` rendering — needs a `ColorMatrix` or shader pass. (Editor sliders persist values.)
-- `MediaFrameDecoration` rendering (Stretch + NineSlice asset draw, `contentInsets`). (Editor takes an asset URI + mode + opacity.)
 - `CaptionStyle` rendering. (Editor takes text + font + color + show toggle.)
+- `MediaFrameDecoration.openingMaskUri` — modelled + persisted, not yet consumed. Arbitrary-shape opening that will override the rectangular `contentInset*` crop. (Rectangular opening crop landed; see below.)
 - LOD-aware overlay drop-out (today: Full = everything, Simplified+ = placeholders).
+
+**Landed 2026-06-20 (frame decoration):**
+- `MediaFrameDecorationEditor` asset picker — SAF `OpenDocument` (`image/*`) with thumbnail + Pick/Replace/Clear, mirroring the mask/overlay pickers (replaced the asset-URI text field). Slice border (NineSlice) and Opening insets are **integer-percent text fields** (`PercentField`, 0–49%). Each of the Slice and Opening sections has its own **"Edit each edge separately"** checkbox toggling between symmetric input (one slice field; Horizontal/Vertical opening fields) and asymmetric input (four `PercentField`s). Each checkbox defaults to that section's actual symmetry in the initial decoration (`isSliceAsymmetric` / `isOpeningAsymmetric`), so opening an asymmetric frame (e.g. Polaroid) doesn't silently flatten it.
+- `MediaFrameDecorationRenderer` — `Stretch` + `NineSlice` asset draw; `rememberDecorationBitmap` for the (transparent) asset. Applied by **both** the still-media path (`FullMediaRenderer`) and video (`VideoSurfaceChrome`, live + poster).
+- **Opening crop** — `contentInset*` is consumed: the media is scaled into + clipped to the opening rect (`MediaFrameDecoration.openingRect`), the decoration draws over the full rect on top, composited **after** the `alphaMask` layer so the frame isn't cut by the mask. Video clips (does not rescale) its content to the opening — documented limitation. Arbitrary openings (`openingMaskUri`) reuse the same hook later.
 
 **Landed 2026-06-07 (CropEdit slice — see [editor-tools.md § 4.8](editor-tools.md#48-cropedit) and [todo.md § 20.8](../todo.md#208-cropedit-slice--manual-renderer--in-canvas-handles)):**
 - `CropMode.Manual` rendering — `FullMediaRenderer.drawCroppedBitmap` reads `crop.{offsetX, offsetY, zoom}` directly; composes with rounded corners, `alphaMask`, `overlays`, border, and shadow per the pipeline above. `zoom = 1` is the Fill scale.
@@ -242,7 +255,6 @@ Stored in `filesDir/media/<albumId>/rendered/`.
 - Selection-tool resize on Manual-crop media scales `crop.offsetX/Y` by the same `factor` so the visible source content stays identical (same content, scaled with the rect). Distinct from CropEdit's resize, which holds the source in world coords.
 
 **No code yet:**
-- `frameDecoration` asset picker (current UI is an asset-URI text field rather than a visual browser).
 - `MediaStylePreset` storage and the `SaveAsPreset` / `ApplyPreset` / `CopyAppearance` / `PasteAppearance` / `ResetAppearance` canvas actions.
 - Rendered derivatives (`SaveRenderedDerivative`, `CreateRenderedCopyOnCanvas`, `ReplaceWithRenderedImage`, `SaveToDeviceGallery`).
 - AI auto-enhance, background removal, animated overlays, batch preset application, advanced masks.

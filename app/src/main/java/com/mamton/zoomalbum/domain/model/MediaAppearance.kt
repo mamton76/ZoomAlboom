@@ -92,11 +92,20 @@ data class MediaFrameDecoration(
     val sliceTop: Float = 0f,
     val sliceRight: Float = 0f,
     val sliceBottom: Float = 0f,
-    // Usable content area inside the decoration (e.g. Polaroid caption strip).
+    // The frame's opening: the media is drawn ONLY inside this rectangle (insets
+    // are fractions 0..1 of the node edge), so it never leaks past the frame.
+    // The decoration PNG is then drawn over the full node rect, on top.
+    // All-zero = no opening crop (media fills the whole rect; legacy behaviour).
     val contentInsetLeft: Float = 0f,
     val contentInsetTop: Float = 0f,
     val contentInsetRight: Float = 0f,
     val contentInsetBottom: Float = 0f,
+    // Arbitrary (non-rectangular) opening — planned, not yet consumed by the
+    // renderer. When set later it OVERRIDES the rectangular `contentInset*`:
+    // the media is masked by this asset's white/alpha area (oval, arch, torn
+    // paper). Absent (null) = use the rectangular insets above. See
+    // `docs/architecture/media-appearance.md § Media frame decoration`.
+    val openingMaskUri: String? = null,
 )
 
 // ── Caption ──────────────────────────────────────────────────────────────────

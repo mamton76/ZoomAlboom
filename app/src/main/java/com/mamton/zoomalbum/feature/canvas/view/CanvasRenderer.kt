@@ -48,6 +48,7 @@ import com.mamton.zoomalbum.domain.model.CropMode
 import com.mamton.zoomalbum.domain.model.CropSettings
 import com.mamton.zoomalbum.domain.model.FrameAppearance
 import com.mamton.zoomalbum.domain.model.MediaAppearance
+import com.mamton.zoomalbum.domain.model.MediaFrameDecoration
 import com.mamton.zoomalbum.domain.model.RenderDetail
 import com.mamton.zoomalbum.domain.model.ShadowStyle
 import kotlin.math.max
@@ -532,6 +533,8 @@ private fun FullMediaRenderer(
     val cornerRadiusValue = appearance?.cornerRadius ?: 0f
     val alphaMask = appearance?.alphaMask
     val alphaMaskBitmap = rememberAlphaMaskBitmap(alphaMask)
+    val frameDecoration = appearance?.frameDecoration
+    val decorationBitmap = rememberDecorationBitmap(frameDecoration)
 
     val nodeModifier = Modifier
         .nodeLayoutModifier(renderW, renderH, alphaMask != null)
@@ -565,26 +568,50 @@ private fun FullMediaRenderer(
                 // Shadow outside the mask layer (§ 12.5 — shadow on clip rect).
                 appearance?.shadow?.let { drawNodeShadow(it, topLeft, nodeSize, radius) }
 
-                // Bitmap + overlays inside the mask layer.
+                // The frame's opening: when the decoration defines content
+                // insets, the media is confined to this rect so it can't leak
+                // past the frame. Null = fill the whole node rect (legacy).
+                val opening = frameDecoration?.openingRect(left, top, renderW, renderH)
+
+                // Bitmap + overlays inside the mask layer, clipped to the opening.
                 val drawMaskable: DrawScope.() -> Unit = drawMaskable@{
                     withRoundedClip(left, top, right, bottom, cornerRadiusValue) {
-                        drawCroppedBitmap(
-                            painter = painter,
-                            crop = appearance?.crop,
-                            left = left, top = top,
-                            renderW = renderW, renderH = renderH,
-                        )
-                        drawOverlayStack(
-                            overlays = overlays,
-                            left = left, top = top, right = right, bottom = bottom,
-                            textureBitmaps = overlayTextureBitmaps,
-                        )
+                        withOptionalOpeningClip(opening) {
+                            val mLeft = opening?.left ?: left
+                            val mTop = opening?.top ?: top
+                            val mRight = opening?.right ?: right
+                            val mBottom = opening?.bottom ?: bottom
+                            drawCroppedBitmap(
+                                painter = painter,
+                                crop = appearance?.crop,
+                                left = mLeft, top = mTop,
+                                renderW = mRight - mLeft, renderH = mBottom - mTop,
+                            )
+                            drawOverlayStack(
+                                overlays = overlays,
+                                left = mLeft, top = mTop, right = mRight, bottom = mBottom,
+                                textureBitmaps = overlayTextureBitmaps,
+                            )
+                        }
                     }
                 }
                 if (alphaMask == null) {
                     drawMaskable()
                 } else {
                     drawWithAlphaMask(rect, alphaMask, alphaMaskBitmap) { drawMaskable() }
+                }
+
+                // Step 4: picture-frame decoration over the FULL node rect, on
+                // top of the (opening-cropped, mask-cut) media — composited
+                // AFTER the alpha-mask layer so the frame is never cut by it.
+                if (frameDecoration != null) {
+                    withRoundedClip(left, top, right, bottom, cornerRadiusValue) {
+                        drawFrameDecoration(
+                            decoration = frameDecoration,
+                            bitmap = decorationBitmap,
+                            left = left, top = top, right = right, bottom = bottom,
+                        )
+                    }
                 }
 
                 // Border outside the mask layer (§ 12.5 — border on clip outline).
@@ -640,6 +667,49 @@ internal fun rememberVideoPosterBitmap(uri: String?): ImageBitmap? {
         }
     }
     return bitmap
+}
+
+/**
+ * The frame decoration's opening rect in node-local coords (centred on 0,0).
+ * The media is drawn only inside this rect; the decoration PNG draws over the
+ * full node rect on top. See [MediaFrameDecoration] `contentInset*`.
+ */
+internal data class OpeningRect(
+    val left: Float, val top: Float, val right: Float, val bottom: Float,
+)
+
+/**
+ * Rectangular opening from `contentInset*` (fractions of the node edge), or null
+ * when no inset crop applies (all-zero, or insets that collapse the opening).
+ * The eventual `openingMaskUri` path will branch here, overriding the rectangle.
+ */
+internal fun MediaFrameDecoration.openingRect(
+    left: Float, top: Float, renderW: Float, renderH: Float,
+): OpeningRect? {
+    val l = contentInsetLeft.coerceIn(0f, 1f)
+    val t = contentInsetTop.coerceIn(0f, 1f)
+    val r = contentInsetRight.coerceIn(0f, 1f)
+    val b = contentInsetBottom.coerceIn(0f, 1f)
+    if (l == 0f && t == 0f && r == 0f && b == 0f) return null
+    if (l + r >= 1f || t + b >= 1f) return null
+    return OpeningRect(
+        left = left + l * renderW,
+        top = top + t * renderH,
+        right = left + renderW - r * renderW,
+        bottom = top + renderH - b * renderH,
+    )
+}
+
+/** Clips [block] to [opening] when present; draws unclipped otherwise. */
+private inline fun DrawScope.withOptionalOpeningClip(
+    opening: OpeningRect?,
+    block: DrawScope.() -> Unit,
+) {
+    if (opening == null) {
+        block()
+    } else {
+        clipRect(opening.left, opening.top, opening.right, opening.bottom) { block() }
+    }
 }
 
 /**

@@ -176,6 +176,7 @@ private fun VideoSurfaceChrome(
 fun VideoPlayerSurface(
     node: CanvasNode.Media,
     player: ExoPlayer,
+    paused: Boolean = false,
 ) {
     val t = node.transform
     val content = remember(
@@ -195,7 +196,12 @@ fun VideoPlayerSurface(
     }
     VideoSurfaceChrome(
         node = node,
-        drawBase = { drawContent() }, // renders the TextureView child
+        drawBase = {
+            drawContent() // renders the TextureView child
+            // Paused-in-place: badge over the frozen frame so it reads as paused
+            // (not a still). Inside the chrome's draw so it's masked/clipped too.
+            if (paused) drawPlayBadge()
+        },
         child = {
             AndroidView(
                 factory = { ctx ->

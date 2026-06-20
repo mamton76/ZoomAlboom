@@ -2,7 +2,7 @@
 
 > Related: [data-model.md § MediaType](data-model.md#mediatype) | [rendering.md § 4b LOD](rendering.md#4b-level-of-detail-resolution-lod) | [media-appearance.md](media-appearance.md) | [editor-tools.md](editor-tools.md) | [PRD](../product/PRD.md) | [todo.md § 27](../todo.md#27-video-mvp)
 
-**Status — design decided 2026-06-17 (settles `to_discuss.md § 13`); implementation pending.** This doc is the source of truth for how video objects live on the infinite canvas. It captures the resolved design; the implementation plan + slices live in [todo.md § 27](../todo.md#27-video-mvp).
+**Status — first implementation shipped 2026-06-20** (design decided 2026-06-17, settling `to_discuss.md § 13`). The MVP video-node slice is implemented: video nodes can be placed on the canvas, poster frames are rendered through `coil-video`, playback is handled by a bounded ExoPlayer pool, and playback is triggered through uniform double-tap / the Edit context menu. This doc is the source of truth for how video objects live on the infinite canvas; remaining work + slice detail live in [todo.md § 27](../todo.md#27-video-mvp). (See § 8 for the file map.)
 
 The product goal is **not** a video editor. It is: *let video objects appear as elegant, playable "living media" on the infinite canvas* — the "living album" / Harry-Potter-newspaper direction. A video behaves like an image node for all transform/selection purposes; the only additions are playback and a poster.
 
@@ -39,6 +39,8 @@ data class Media(
 
 A node is a video iff `mediaType == MediaType.VIDEO`. Image vs. video is the only branch.
 
+**URI handling.** Because `mediaRefId` is a raw ref, playback must not assume it is a filesystem path. It can be a `content://` URI (Android media picker), a `file://` URI, an `http(s)://` URL, or a bare path (today the import flow copies picked media into app storage and stores its absolute path). Conversion goes through `mediaRefToUri` (`feature/canvas/playback/MediaUri.kt`): refs that already carry a scheme are passed through `Uri.parse` untouched; bare paths use `Uri.fromFile`. This avoids corrupting a `content://` ref into `file://content:/…` — the trap of blindly wrapping the ref in `Uri.fromFile(File(ref))`.
+
 ---
 
 ## 3. Poster / thumbnail — zero storage
@@ -61,6 +63,7 @@ The poster frame is extracted lazily by Coil's `coil-video` decoder (pointed at 
 
 - **Why double-tap, not single-tap-in-View:** a single mental model across modes ("double-tap a video to play"), and single-tap stays free for the mode's primary action. Implemented via `DoubleTapRoute.PlayPauseVideo` (router branches on a `hitIsVideo` flag); the Edit context-menu item (`PlayVideoAction` → `EditorActionEffect.ToggleVideoPlayback`) is a discoverable alternative.
 - **No accidental playback:** single-tap never plays; double-tap on a *non-video* keeps the mode default (View = reset camera, Edit = no-op). Specialized Edit tools (Eraser, CropEdit) keep their own double-tap so playback can't interrupt them.
+- **Play / pause is pause-*in-place*, not stop.** Double-tapping a playing video pauses it (`playWhenReady = false`) keeping its position + frozen frame; the next double-tap resumes from there. A video never *stops* via gesture — it leaves the active set only by pool eviction (off-screen / lost the recency race) or node delete. Pause is tracked in `VideoPlaybackController.pausedNodeIds` (so it survives `reconcile`), and a play badge is drawn over the paused frame so it reads as paused rather than a still.
 - The poster's play-icon badge remains the static affordance (drawn inside the mask so it doesn't paint over masked-out regions).
 
 ---
@@ -91,7 +94,9 @@ Two users of the chrome:
 - **`VideoPlayerSurface`** (live) — a bare **`TextureView`** (not `PlayerView`) bound via `player.setVideoTextureView`, set `isOpaque = false` so opacity / mask actually show through. A `SurfaceView` would ignore container alpha / clip / offscreen compositing. The view is non-clickable / non-focusable so pan / zoom / selection gestures still reach the Compose routers.
 - **`VideoPosterSurface`** (static) — draws the `ARGB_8888` poster bitmap (§ 3) + the play badge.
 
-**Mounting / z-order.** `VideoPosterSurface` is pure Compose, so it renders **inline in the paint loop** and keeps the node's z-order. The live `VideoPlayerSurface` is an `AndroidView`, mounted **after** the loop — so an actively-playing video draws on top of z-order (an accepted MVP limitation). Videos below `Full` render a placeholder via the normal renderer.
+**Mounting / z-order.** Both surfaces are emitted **inline in the paint loop**, at the node's z-order position — playing → `VideoPlayerSurface`, else → `VideoPosterSurface`. The poster is pure Compose; the live player is an `AndroidView`, but because it hosts a **`TextureView`** (an in-hierarchy view, not a separate `SurfaceView` window layer) Compose interleaves it with the drawn nodes by composition order, so a playing video keeps its z-order too (verified on-device 2026-06-20). (A separate pool-reconcile `LaunchedEffect` only decides *which* nodes hold a player.) Videos below `Full` render a placeholder via the normal renderer.
+
+The inline emission is gated by the `PLAYER_SURFACE_INLINE` constant in `CanvasScreen.kt` (default `true`). Setting it `false` falls back to mounting the live player surfaces **after** the paint loop — they then draw above z-order, but it's a stable layout, kept as an escape hatch in case a device layers the inline `TextureView` against transformed `graphicsLayer` content inconsistently.
 
 **Live appearance.** Because poster and player share the chrome, every `MediaAppearance` op that renders on the poster also applies to the playing frame — opacity, corner radius, border, shadow, crop (Fit/Fill/Stretch/Manual), overlays, alpha mask — so styling never snaps off during playback. `colorAdjustments` / `frameDecoration` / `caption` are excluded (they render nowhere yet). Tracked in [todo.md § 27.9](../todo.md#279-live-appearance-on-playing-video-decided-2026-06-19).
 

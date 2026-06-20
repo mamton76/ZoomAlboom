@@ -1,7 +1,6 @@
 package com.mamton.zoomalbum.feature.canvas.playback
 
 import android.content.Context
-import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Stable
@@ -12,8 +11,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import java.io.File
 
 /**
  * `CanvasScaffold`-level playback holder, keyed by `nodeId`. Owns a **bounded
@@ -23,17 +22,20 @@ import java.io.File
  * a domain model — a video node carries no `isPlaying` field (`video.md § 6`).
  *
  * Model:
- * - [playingNodeIds] — the set of videos the user has toggled on (tap in View,
- *   or the Edit "Play / Pause" menu item).
+ * - [playingNodeIds] — the set of videos the user has activated (double-tap, or
+ *   the Edit "Play / Pause" menu item).
+ * - [pausedNodeIds] — activated videos paused in place (keep their player +
+ *   position + frozen frame).
  * - [reconcile] assigns the pool's players to the top-[poolSize] *candidates*
- *   (playing AND currently a `RenderDetail.Full` visible node), ranked by most
- *   recently started. Nodes that want to play but can't get a player — because
- *   they're off-screen or lost the eviction race — simply show their poster.
+ *   (active AND currently a `RenderDetail.Full` visible node), ranked by most
+ *   recently started. Nodes that want a player but can't get one — off-screen or
+ *   lost the eviction race — show their poster.
  * - [assignments] — the live nodeId → player bindings the render loop mounts.
  *
- * MVP notes: tapping a playing video stops it (drops it from [playingNodeIds]
- * and restarts on the next play — no resume-from-position); an ended clip keeps
- * its player until evicted. Loop / mute / start-position are out of scope.
+ * MVP notes: [togglePlayback] is pause/resume-in-place (a video never *stops*
+ * via gesture — it leaves only by eviction or node delete); an ended clip
+ * replays from 0 on the next toggle. Loop / mute / start-position are out of
+ * scope, and a paused video evicted under pool pressure loses its position.
  */
 @Stable
 class VideoPlaybackController(
@@ -54,26 +56,49 @@ class VideoPlaybackController(
     private val startOrder = mutableMapOf<String, Long>()
     private var orderCounter = 0L
 
-    /** Videos the user has requested to play (may exceed [poolSize]). */
+    /** Videos the user has activated (may exceed [poolSize]). */
     var playingNodeIds by mutableStateOf<Set<String>>(emptySet())
         private set
 
-    /** True iff this node currently holds a pooled player (i.e. is actually playing). */
-    fun isPlaying(nodeId: String): Boolean = nodeId in _assignments
+    /**
+     * Active videos that are paused **in place** — they keep their pooled player
+     * and current position, showing the frozen frame (+ a play badge) rather than
+     * the poster. A node here is also in [playingNodeIds]. Compose state so the
+     * render loop can show/hide the paused badge.
+     */
+    var pausedNodeIds by mutableStateOf<Set<String>>(emptySet())
+        private set
 
     /**
-     * Toggle a video in/out of the playing set. Adding it makes it the most
-     * recently started candidate (so it wins the next eviction). The actual
-     * player assignment happens in [reconcile].
+     * Double-tap / menu toggle:
+     * - has a player & **playing** → **pause** in place (keep position + frame);
+     * - has a player & **paused**  → **resume** from where it left off;
+     * - no player (stopped / poster) → become the most-recent active candidate
+     *   so [reconcile] assigns a player and starts it from the top.
+     *
+     * This never *stops* a video (drops it from [playingNodeIds]); a video leaves
+     * only via pool eviction (off-screen / lost the recency race) or node delete.
+     * That's the "living media" intent — see `video.md § 4`.
      */
     fun togglePlayback(nodeId: String, uri: String) {
         uris[nodeId] = uri
-        playingNodeIds = if (nodeId in playingNodeIds) {
-            startOrder.remove(nodeId)
-            playingNodeIds - nodeId
+        val player = _assignments[nodeId]
+        if (player != null) {
+            if (player.playbackState == Player.STATE_ENDED) {
+                // No loop in MVP — an ended clip replays from the top instead of
+                // being stuck on its final frame.
+                player.seekTo(0)
+                player.playWhenReady = true
+                pausedNodeIds = pausedNodeIds - nodeId
+            } else {
+                val pausing = player.playWhenReady
+                player.playWhenReady = !pausing
+                pausedNodeIds = if (pausing) pausedNodeIds + nodeId else pausedNodeIds - nodeId
+            }
         } else {
+            pausedNodeIds = pausedNodeIds - nodeId
             startOrder[nodeId] = orderCounter++
-            playingNodeIds + nodeId
+            playingNodeIds = playingNodeIds + nodeId
         }
     }
 
@@ -98,9 +123,13 @@ class VideoPlaybackController(
             if (id in _assignments) continue
             val uri = uris[id] ?: continue
             val player = obtainPlayer() ?: break
-            player.setMediaItem(MediaItem.fromUri(Uri.fromFile(File(uri))))
+            // mediaRefId may be a content:// / file:// URI or a bare path — convert
+            // safely so an already-formed URI isn't corrupted (see mediaRefToUri).
+            player.setMediaItem(MediaItem.fromUri(mediaRefToUri(uri)))
             player.prepare()
-            player.playWhenReady = true
+            // Honor a pre-existing pause so a paused node reacquiring a player
+            // (e.g. after returning on-screen) doesn't auto-resume.
+            player.playWhenReady = id !in pausedNodeIds
             _assignments[id] = player
         }
     }

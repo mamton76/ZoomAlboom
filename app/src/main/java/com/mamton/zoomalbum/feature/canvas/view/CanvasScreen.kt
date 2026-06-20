@@ -59,6 +59,22 @@ import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasState
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
 import kotlin.math.atan2
 
+/**
+ * Where the live [VideoPlayerSurface] is emitted in the canvas paint pass.
+ *
+ * - `true` (default) — **inline** in the node paint loop, at the video's z-order
+ *   position. The player's `TextureView` is an in-hierarchy view, so Compose
+ *   interleaves it with the drawn nodes by composition order and a playing video
+ *   keeps its z-order. Verified on-device 2026-06-20.
+ * - `false` — **after** the paint loop. A playing video then draws above normal
+ *   z-order, but it's a stable layout. Kept as a one-flag escape hatch in case a
+ *   device mis-z-orders the inline TextureView (some HW/Compose combos layer
+ *   `AndroidView`s against transformed `graphicsLayer` content inconsistently).
+ *
+ * See `docs/architecture/video.md § 6` and `todo.md § 27.6 / § 27.11`.
+ */
+private const val PLAYER_SURFACE_INLINE = true
+
 @Composable
 fun CanvasScreen(
     viewModel: CanvasViewModel = hiltViewModel(),
@@ -678,11 +694,11 @@ fun CanvasScreen(
             }
             // Full-detail videos render through a Compose surface (the proven
             // mask path), NOT FullMediaRenderer — a video frame in
-            // FullMediaRenderer's offscreen masked as opaque black. Not playing →
-            // VideoPosterSurface inline here (keeps z-order). Playing → its
-            // VideoPlayerSurface paints on top (below). Lower-LOD videos and all
-            // other nodes keep CanvasNodeRenderer.
-            val playingVideoIds = playbackController.assignments.keys
+            // FullMediaRenderer's offscreen masked as opaque black. Both the live
+            // player and the poster are emitted INLINE here, at the node's z-order
+            // position: playing → VideoPlayerSurface (its TextureView interleaves
+            // with the drawn nodes by composition order), else → VideoPosterSurface.
+            // Lower-LOD videos and all other nodes keep CanvasNodeRenderer.
             for (event in paintEvents) {
                 when (event) {
                     is FramePaintEvent.NodePass -> {
@@ -691,11 +707,24 @@ fun CanvasScreen(
                             n.mediaType == MediaType.VIDEO &&
                             event.detail == RenderDetail.Full
                         if (isFullVideo) {
-                            if (n.id !in playingVideoIds) {
-                                key(n.id) {
-                                    val poster = rememberVideoPosterBitmap(n.mediaRefId)
-                                    if (poster != null) {
-                                        VideoPosterSurface(node = n, bitmap = poster)
+                            key(n.id) {
+                                val player = playbackController.assignments[n.id]
+                                when {
+                                    // Playing: inline → correct z-order (default).
+                                    // The after-loop fallback path renders it instead
+                                    // when PLAYER_SURFACE_INLINE is off (see below).
+                                    player != null && PLAYER_SURFACE_INLINE ->
+                                        VideoPlayerSurface(
+                                            node = n,
+                                            player = player,
+                                            paused = n.id in playbackController.pausedNodeIds,
+                                        )
+                                    player != null -> Unit // rendered after the loop
+                                    else -> {
+                                        val poster = rememberVideoPosterBitmap(n.mediaRefId)
+                                        if (poster != null) {
+                                            VideoPosterSurface(node = n, bitmap = poster)
+                                        }
                                     }
                                 }
                             }
@@ -710,11 +739,10 @@ fun CanvasScreen(
                 }
             }
 
-            // Video playback: a bounded pool of ExoPlayers mounted over the
-            // playing video nodes, painted on top of their posters. Candidacy is
-            // LOD-bounded — only RenderDetail.Full videos can hold a player; when
-            // a node leaves the viewport or drops below Full it loses its player
-            // and the poster shows again (`video.md § 5–6`, `todo.md § 27.5`).
+            // Bounded-pool reconciliation: assign the K players to the most-
+            // relevant Full-detail videos (candidacy is LOD-bounded). The surfaces
+            // themselves are emitted inline in the paint loop above; this only
+            // drives which nodes hold a player (`video.md § 5–6`, `todo.md § 27.5`).
             val fullVideoIds = remember(state.visibleNodes) {
                 state.visibleNodes.asSequence()
                     .filter { it.detail == RenderDetail.Full }
@@ -727,12 +755,23 @@ fun CanvasScreen(
             LaunchedEffect(fullVideoIds, playbackController.playingNodeIds) {
                 playbackController.reconcile(fullVideoIds)
             }
-            for ((nodeId, player) in playbackController.assignments) {
-                key(nodeId) {
-                    val mediaNode = state.visibleNodes
-                        .firstOrNull { it.node.id == nodeId }?.node as? CanvasNode.Media
-                    if (mediaNode != null) {
-                        VideoPlayerSurface(node = mediaNode, player = player)
+
+            // Fallback z-order path: when inline emission is disabled, mount the
+            // live player surfaces here, after the loop (they draw above z-order,
+            // but it's a stable layout if a device mis-z-orders the inline
+            // TextureView). Default is inline — see PLAYER_SURFACE_INLINE.
+            if (!PLAYER_SURFACE_INLINE) {
+                for ((nodeId, player) in playbackController.assignments) {
+                    key(nodeId) {
+                        val mediaNode = state.visibleNodes
+                            .firstOrNull { it.node.id == nodeId }?.node as? CanvasNode.Media
+                        if (mediaNode != null) {
+                            VideoPlayerSurface(
+                                node = mediaNode,
+                                player = player,
+                                paused = nodeId in playbackController.pausedNodeIds,
+                            )
+                        }
                     }
                 }
             }

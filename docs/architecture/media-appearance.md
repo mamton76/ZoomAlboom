@@ -177,7 +177,7 @@ In order:
 5. Apply `cornerRadius`, `border`, `shadow`, overall `opacity` (all inherited from `NodeAppearance`).
 6. Draw `caption` if present.
 
-> **Opening crop** is rectangular today (`contentInset*`). The planned `openingMaskUri` will override it for arbitrary shapes (oval / arch / torn paper): the media is masked by that asset's white/alpha area instead of a rectangle. Same render hook (`MediaFrameDecoration.openingRect` in `CanvasRenderer`) — the mask is swapped in when present.
+> **Opening crop** is rectangular (`contentInset*`, via `MediaFrameDecoration.openingRect`) or, when `openingMaskUri` is set, an arbitrary shape: `openingAlphaMask()` builds a synthetic `AlphaMask` (Image / Luminance / Stretch) DstIn-composited over the media in the offscreen layer — white = opening. The mask overrides the rectangular insets (`openingRect` returns null when a mask URI is present).
 
 **LOD:** At `Stub` or `Preview` detail levels, skip overlay and frame-decoration rendering — show the cropped source only. Full pipeline runs at `Full` detail. At intermediate levels, the renderer may also draw only the first overlay entry (or only entries with non-`Normal` blend that visibly change tone).
 
@@ -241,13 +241,13 @@ Stored in `filesDir/media/<albumId>/rendered/`.
 **Model + editor land, renderer pending:**
 - `MediaColorAdjustments` rendering — needs a `ColorMatrix` or shader pass. (Editor sliders persist values.)
 - `CaptionStyle` rendering. (Editor takes text + font + color + show toggle.)
-- `MediaFrameDecoration.openingMaskUri` — modelled + persisted, not yet consumed. Arbitrary-shape opening that will override the rectangular `contentInset*` crop. (Rectangular opening crop landed; see below.)
 - LOD-aware overlay drop-out (today: Full = everything, Simplified+ = placeholders).
 
 **Landed 2026-06-20 (frame decoration):**
 - `MediaFrameDecorationEditor` asset picker — SAF `OpenDocument` (`image/*`) with thumbnail + Pick/Replace/Clear, mirroring the mask/overlay pickers (replaced the asset-URI text field). Slice border (NineSlice) and Opening insets are **integer-percent text fields** (`PercentField`, 0–49%). Each of the Slice and Opening sections has its own **"Edit each edge separately"** checkbox toggling between symmetric input (one slice field; Horizontal/Vertical opening fields) and asymmetric input (four `PercentField`s). Each checkbox defaults to that section's actual symmetry in the initial decoration (`isSliceAsymmetric` / `isOpeningAsymmetric`), so opening an asymmetric frame (e.g. Polaroid) doesn't silently flatten it.
 - `MediaFrameDecorationRenderer` — `Stretch` + `NineSlice` asset draw; `rememberDecorationBitmap` for the (transparent) asset. Applied by **both** the still-media path (`FullMediaRenderer`) and video (`VideoSurfaceChrome`, live + poster).
-- **Opening crop** — `contentInset*` is consumed: the media is scaled into + clipped to the opening rect (`MediaFrameDecoration.openingRect`), the decoration draws over the full rect on top, composited **after** the `alphaMask` layer so the frame isn't cut by the mask. Video clips (does not rescale) its content to the opening — documented limitation. Arbitrary openings (`openingMaskUri`) reuse the same hook later.
+- **Opening crop** — `contentInset*` is consumed: the media is scaled into + clipped to the opening rect (`MediaFrameDecoration.openingRect`), the decoration draws over the full rect on top, composited **after** the `alphaMask` layer so the frame isn't cut by the mask. Video rescales into the opening too — `videoContentRect` computes against the opening rect (`CanvasNode.Media.contentTargetRect`), so a framed video fills the hole like a framed photo.
+- **Arbitrary-shape opening** — `openingMaskUri` is consumed: `MediaFrameDecoration.openingAlphaMask()` builds a synthetic `AlphaMask` (Image source, Luminance, Stretch) that the renderer DstIn-composites over the media in the offscreen layer (alongside any node `alphaMask`), overriding the rectangular `contentInset*`. White = opening. Works on both still media and video; the editor's Opening section has a mask picker that hides the rectangular inset fields when a mask is set.
 
 **Landed 2026-06-07 (CropEdit slice — see [editor-tools.md § 4.8](editor-tools.md#48-cropedit) and [todo.md § 20.8](../todo.md#208-cropedit-slice--manual-renderer--in-canvas-handles)):**
 - `CropMode.Manual` rendering — `FullMediaRenderer.drawCroppedBitmap` reads `crop.{offsetX, offsetY, zoom}` directly; composes with rounded corners, `alphaMask`, `overlays`, border, and shadow per the pipeline above. `zoom = 1` is the Fill scale.

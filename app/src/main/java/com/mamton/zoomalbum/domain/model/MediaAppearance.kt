@@ -100,11 +100,11 @@ data class MediaFrameDecoration(
     val contentInsetTop: Float = 0f,
     val contentInsetRight: Float = 0f,
     val contentInsetBottom: Float = 0f,
-    // Arbitrary (non-rectangular) opening — planned, not yet consumed by the
-    // renderer. When set later it OVERRIDES the rectangular `contentInset*`:
-    // the media is masked by this asset's white/alpha area (oval, arch, torn
-    // paper). Absent (null) = use the rectangular insets above. See
-    // `docs/architecture/media-appearance.md § Media frame decoration`.
+    // Arbitrary (non-rectangular) opening. When set it OVERRIDES the rectangular
+    // `contentInset*`: the media is masked by this asset's luminance (white =
+    // opening) — oval, arch, torn paper. Absent (null) = use the rectangular
+    // insets above. See `docs/architecture/media-appearance.md § Media frame
+    // decoration`.
     val openingMaskUri: String? = null,
 )
 

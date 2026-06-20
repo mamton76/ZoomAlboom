@@ -535,12 +535,17 @@ private fun FullMediaRenderer(
     val alphaMaskBitmap = rememberAlphaMaskBitmap(alphaMask)
     val frameDecoration = appearance?.frameDecoration
     val decorationBitmap = rememberDecorationBitmap(frameDecoration)
+    // Arbitrary-shape frame opening (overrides the rectangular contentInset crop).
+    val openingMask = frameDecoration?.openingAlphaMask()
+    val openingMaskBitmap = rememberAlphaMaskBitmap(openingMask)
+    // Either mask needs the offscreen layer DstIn composites into.
+    val needsLayer = alphaMask != null || openingMask != null
 
     val nodeModifier = Modifier
-        .nodeLayoutModifier(renderW, renderH, alphaMask != null)
+        .nodeLayoutModifier(renderW, renderH, needsLayer)
         .graphicsLayer {
             // See FullFrameRenderer for the masked / unmasked split rationale.
-            if (alphaMask != null) {
+            if (needsLayer) {
                 translationX = cx - renderW / 2f
                 translationY = cy - renderH / 2f
                 transformOrigin = TransformOrigin(0.5f, 0.5f)
@@ -555,7 +560,7 @@ private fun FullMediaRenderer(
             alpha = surfaceAlpha
         }
         .drawBehind {
-            withOptionalMaskOriginShift(alphaMask != null, renderW, renderH) {
+            withOptionalMaskOriginShift(needsLayer, renderW, renderH) {
                 val left = -renderW / 2f
                 val top = -renderH / 2f
                 val right = renderW / 2f
@@ -595,10 +600,16 @@ private fun FullMediaRenderer(
                         }
                     }
                 }
-                if (alphaMask == null) {
-                    drawMaskable()
-                } else {
-                    drawWithAlphaMask(rect, alphaMask, alphaMaskBitmap) { drawMaskable() }
+                // Draw media, then attenuate by each mask (DstIn) in the
+                // offscreen layer: the opening mask shapes the photo to the
+                // frame's hole, the node alphaMask cuts the whole silhouette.
+                // Both multiply alpha, so the result is their intersection.
+                drawMaskable()
+                if (openingMask != null) {
+                    drawWithAlphaMask(rect, openingMask, openingMaskBitmap) {}
+                }
+                if (alphaMask != null) {
+                    drawWithAlphaMask(rect, alphaMask, alphaMaskBitmap) {}
                 }
 
                 // Step 4: picture-frame decoration over the FULL node rect, on
@@ -686,6 +697,8 @@ internal data class OpeningRect(
 internal fun MediaFrameDecoration.openingRect(
     left: Float, top: Float, renderW: Float, renderH: Float,
 ): OpeningRect? {
+    // An arbitrary-shape opening mask overrides the rectangular insets.
+    if (!openingMaskUri.isNullOrBlank()) return null
     val l = contentInsetLeft.coerceIn(0f, 1f)
     val t = contentInsetTop.coerceIn(0f, 1f)
     val r = contentInsetRight.coerceIn(0f, 1f)

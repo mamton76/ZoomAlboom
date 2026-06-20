@@ -778,7 +778,7 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 - [x] `MediaAppearance : NodeAppearance` — `crop`, `colorAdjustments`, `overlays: List<OverlayStyle> = emptyList()` (ordered; entry `[i]` over entry `[i-1]`; replaces prior `overlays: List<MediaOverlay>` + `OverlayKind`/`OverlayBlendMode`), `frameDecoration: MediaFrameDecoration?` (decorative photo-frame around one media — *not* a `CanvasNode.Frame`), `caption`
 - [x] `CropSettings` + `CropMode` enum (Fit, Fill, Manual, Stretch) with focal point
 - [x] `MediaColorAdjustments` — brightness, contrast, saturation, temperature, tint, exposure, highlights, shadows, blur, sharpen, vignette
-- [x] `MediaFrameDecoration` (renamed from `FrameOverlay`) — assetUri, opacity, mode, slice insets, content insets
+- [x] `MediaFrameDecoration` (renamed from `FrameOverlay`) — assetUri, opacity, mode, slice insets, content insets (the rectangular frame opening), `openingMaskUri` (arbitrary-shape opening)
 - [x] `MediaFrameDecorationMode` enum (renamed from `FrameRenderMode`) — `Stretch`, `NineSlice`
 - [x] `MediaStylePreset` — id, name, appearance (saved recipe). Storage/wiring (§20.3) still pending.
 - [x] `appearance: MediaAppearance?` on `CanvasNode.Media`
@@ -790,7 +790,7 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 - [ ] `FrameContentEffect` variants — sealed-class stub exists; concrete variants (Sepia / Grayscale / Blur) plus the off-screen pass rendering are post-MVP.
 
 ### 20.2 Rendering pipeline
-- [x] **Media rendering** (`FullMediaRenderer`): shadow → cropped source (`CropMode` → `ContentScale`) → `overlays` (in list order, clipped to a rounded rect when `cornerRadius > 0`) → border → surface opacity via `graphicsLayer.alpha`. `colorAdjustments`, `frameDecoration`, `caption` persist but render as no-ops for now.
+- [x] **Media rendering** (`FullMediaRenderer`): shadow → cropped source (`CropMode` → `ContentScale`, confined to the frame-decoration opening when set) → `overlays` (in list order, clipped to a rounded rect when `cornerRadius > 0`) → `frameDecoration` (over the full rect, after the alpha-mask layer) → border → surface opacity via `graphicsLayer.alpha`. `colorAdjustments`, `caption` persist but render as no-ops for now.
 - [x] **Layered frame rendering**: paint loop in `CanvasScreen` walks `FramePaintEvent`s built by `buildFramePaintEvents` — Surface (shadow + background) at `frame.zIndex`, members in their own z-order, Overlay (`overlays` + border) at `max(memberZ, frameZ) + epsilon`. Plain frames (no `overlays`) still paint single-pass. See [rendering.md § 6b](architecture/rendering.md#6b-layered-frame-rendering).
 - [x] **Shared overlay-stack helper**: `DrawScope.drawOverlayStack(overlays, left, top, right, bottom, textureBitmaps)` in `OverlayRenderer.kt`. Used by both `FullMediaRenderer` and `FullFrameRenderer` (Overlay phase).
 - [x] `CropMode.Fit` — letterbox within bounding box (`ContentScale.Fit`).
@@ -798,8 +798,10 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 - [x] `CropMode.Manual` — pan/zoom inside bounding box (user-controlled). Shipped 2026-06-07 in § 20.8 alongside the `CropEdit` tool. Renderer is `FullMediaRenderer.drawCroppedBitmap`; reads `crop.{offsetX, offsetY, zoom}` directly.
 - [x] `CropMode.Stretch` — stretch to bounds ignoring aspect ratio (`ContentScale.FillBounds`).
 - [x] `OverlayStyle` rendering — Solid / Texture / Procedural source with `NodeBlendMode` via `saveLayer(Paint(blendMode, alpha))`. Texture overlays load through `rememberOverlayTextureBitmaps` (Coil `SingletonImageLoader.execute` with `allowHardware(false)`), keyed on the set of `textureRefId`s in the list.
-- [ ] Nine-slice decoration rendering — draw 9 regions independently (corners unscaled, edges scaled one axis).
-- [ ] `MediaFrameDecoration.contentInsets` — defines usable content area (e.g. Polaroid caption space).
+- [x] Nine-slice decoration rendering — `MediaFrameDecorationRenderer.drawNineSlice` draws the 9 regions independently (corners uniform-scaled to keep aspect, edges scaled one axis), shared edges rounded once to avoid seams. Stretch mode also shipped. Applied by `FullMediaRenderer` + `VideoSurfaceChrome`. Shipped 2026-06-20.
+- [x] `MediaFrameDecoration.contentInsets` — consumed as the **frame opening**: media is scaled into + clipped to the opening rect (`MediaFrameDecoration.openingRect`), decoration drawn over the full rect on top. Shipped 2026-06-20.
+- [x] `MediaFrameDecoration.openingMaskUri` — arbitrary-shape opening (oval / arch / torn paper) overriding the rectangular insets. `openingAlphaMask()` builds a synthetic `AlphaMask` (Image / Luminance / Stretch) DstIn-composited over the media (still + video), white = opening. Editor Opening section has a mask picker. Shipped 2026-06-20.
+- [x] Video: rescale (not just clip) content to the opening — `videoContentRect` computes against the opening rect via `CanvasNode.Media.contentTargetRect()` (player + poster), so framed video fills the hole. Shipped 2026-06-20.
 - [ ] LOD: skip overlay/filter rendering below a threshold zoom (stub view only); at intermediate zoom the renderer may draw only the first overlay entry or only entries with non-`Normal` blend; frame overlays also drop at low LOD. Today: Full = everything, Simplified = no frame overlays, Stub/Preview = stub paint only.
 - [ ] `FrameContentEffect` rendering — off-screen pass (`GraphicsLayer.record` / `ColorMatrix`); post-MVP.
 
@@ -826,14 +828,15 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 - [x] Frame appearance panel — `background` editor + `overlays` list editor + opacity / cornerRadius / border / shadow sections (`FrameAppearanceBottomSheet`).
 - [x] `BorderStyleEditor` + `ShadowStyleEditor` — reused by both sheets.
 - [x] Crop mode selector (Fit / Fill / Manual / Stretch) + focal-point sliders (Fill) / manual offset+zoom sliders (Manual).
-- [ ] `frameDecoration` picker (browse built-in + user assets — current UI is asset-URI text field + mode dropdown only).
+- [x] `frameDecoration` asset picker — SAF `OpenDocument` (`image/*`) with thumbnail + Pick/Replace/Clear (mirrors mask/overlay pickers), replacing the asset-URI text field. Slice + opening insets are integer-percent fields with per-section asymmetric toggles. Shipped 2026-06-20.
+- [ ] `frameDecoration` library browse — built-in + user assets via the media-library registry (§ 1.4); today it's the SAF picker only.
 - [ ] Color adjustments — sliders exist (`ColorAdjustmentsEditor`) but the renderer doesn't apply them yet; sliders persist values for the future renderer.
 - [x] Manual crop handle in canvas — shipped 2026-06-07 as `EditorTool.CropEdit`. See [editor-tools.md § 4.8](architecture/editor-tools.md#48-cropedit) + § 20.8 for the slice details.
 - [ ] Context menu actions: Copy Appearance, Paste Appearance, Save as Preset, Reset Appearance, Save Edited Image.
 
 ### Implementation priority
 MVP-adjacent: shared `NodeAppearance` base (with unified `overlays: List<OverlayStyle>`) + `OverlayStyle` value type; `MediaAppearance` with opacity, crop (Fit/Fill/Manual), cornerRadius, border, shadow, `overlays` (1–2 entries common), `frameDecoration` (Stretch), copy/paste appearance, save as preset, ResetAppearance; `FrameAppearance` with migrated `background` field plus an empty default `overlays` list and the layered renderer.
-Post-MVP: additional `NodeBlendMode` values, NineSlice decoration, parametric color adjustments, rendered derivatives, `FrameContentEffect`, animated overlays.
+Post-MVP: additional `NodeBlendMode` values, parametric color adjustments, rendered derivatives, `FrameContentEffect`, animated overlays. (NineSlice decoration + rectangular opening crop shipped 2026-06-20; arbitrary `openingMaskUri` openings still pending.)
 
 ### 20.6 Clip + alpha mask (replaces `cornerRadius`)
 
@@ -1550,7 +1553,7 @@ Full-detail videos render through a shared **`VideoSurfaceChrome`** (two-layer: 
 
 ### 27.9 Live appearance on playing video (decided 2026-06-19)
 
-Today `MediaAppearance` renders only on the **poster** (`FullMediaRenderer`); the live `PlayerView` surface applies none of it, so styling snaps off during playback. Decision: make the appearance ops **that already render on the poster** also apply to the live surface. Scope is the 7 rendered ops only — `colorAdjustments` / `frameDecoration` / `caption` render *nowhere* today (model + editor stubs), so they are explicitly **not** part of this slice (separate general-appearance work).
+Today `MediaAppearance` renders only on the **poster** (`FullMediaRenderer`); the live `PlayerView` surface applies none of it, so styling snaps off during playback. Decision: make the appearance ops **that already render on the poster** also apply to the live surface. Scope is the 7 rendered ops only — `colorAdjustments` / `frameDecoration` / `caption` render *nowhere* today (model + editor stubs), so they are explicitly **not** part of this slice (separate general-appearance work). *(Update 2026-06-20: `frameDecoration` — Stretch/NineSlice + rectangular opening crop — now renders on both the poster and the live video via `VideoSurfaceChrome`. See [media-appearance.md](architecture/media-appearance.md).)*
 
 Foundational requirement: switch `PlayerView` from its default `SurfaceView` to **`TextureView`** (`surface_type=texture_view`) — a SurfaceView ignores container alpha / clip / offscreen compositing, which all the ops below need.
 

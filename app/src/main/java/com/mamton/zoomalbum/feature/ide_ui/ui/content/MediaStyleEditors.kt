@@ -309,8 +309,9 @@ fun MediaFrameDecorationEditor(
     var insetBottom by remember { mutableStateOf(initial?.contentInsetBottom ?: 0f) }
     var sliceAsymmetric by remember { mutableStateOf(initial.isSliceAsymmetric()) }
     var openingAsymmetric by remember { mutableStateOf(initial.isOpeningAsymmetric()) }
-    // Preserved as-is — no editor UI yet (arbitrary alpha openings are planned).
-    val openingMaskUri = initial?.openingMaskUri
+    // Arbitrary-shape opening mask (white = opening). When set it overrides the
+    // rectangular insets — see MediaFrameDecoration.openingRect / openingAlphaMask.
+    var openingMaskUri by remember { mutableStateOf(initial?.openingMaskUri.orEmpty()) }
 
     fun emit() {
         onChange(
@@ -326,7 +327,7 @@ fun MediaFrameDecorationEditor(
                 contentInsetTop = insetTop,
                 contentInsetRight = insetRight,
                 contentInsetBottom = insetBottom,
-                openingMaskUri = openingMaskUri,
+                openingMaskUri = openingMaskUri.ifBlank { null },
             ) else null,
         )
     }
@@ -346,6 +347,17 @@ fun MediaFrameDecorationEditor(
         assetUri = uri.toString()
         emit()
     }
+    val maskPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+        openingMaskUri = uri.toString()
+        emit()
+    }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         Checkbox(checked = enabled, onCheckedChange = { enabled = it; emit() })
@@ -356,35 +368,12 @@ fun MediaFrameDecorationEditor(
     }
 
     if (enabled) {
-        SectionLabel("Decoration image")
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFF2A2A2A))
-                    .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(6.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (assetUri.isNotBlank()) {
-                    AsyncImage(
-                        model = assetUri,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                } else {
-                    Text("∅", style = MaterialTheme.typography.titleLarge)
-                }
-            }
-            Spacer(Modifier.width(12.dp))
-            OutlinedButton(onClick = { picker.launch(arrayOf("image/*")) }) {
-                Text(if (assetUri.isBlank()) "Pick image" else "Replace")
-            }
-            if (assetUri.isNotBlank()) {
-                Spacer(Modifier.width(8.dp))
-                TextButton(onClick = { assetUri = ""; emit() }) { Text("Clear") }
-            }
-        }
+        AssetPickerRow(
+            label = "Decoration image",
+            uri = assetUri,
+            onPick = { picker.launch(arrayOf("image/*")) },
+            onClear = { assetUri = ""; emit() },
+        )
         Spacer(Modifier.height(8.dp))
         SectionLabel("Mode")
         Box {
@@ -435,44 +424,58 @@ fun MediaFrameDecorationEditor(
         Spacer(Modifier.height(8.dp))
         SectionLabel("Opening (crops media inside the frame)")
         Text(
-            text = "Inset (% of the node edge) confines the photo/video to the " +
-                "frame's opening so it can't leak past the decoration. Leave at 0 " +
-                "to fill the whole rect.",
+            text = "Confine the photo/video to the frame's opening so it can't leak " +
+                "past the decoration. Use a shape mask (white = opening) for round / " +
+                "arched / torn shapes, or rectangular insets below.",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(vertical = 4.dp),
         )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(
-                checked = openingAsymmetric,
-                onCheckedChange = { openingAsymmetric = it; emit() },
-            )
-            Text("Edit each edge separately")
-        }
-        if (openingAsymmetric) {
-            FourPercentFields(
-                left = insetLeft, top = insetTop, right = insetRight, bottom = insetBottom,
-                onLeft = { insetLeft = it; emit() },
-                onTop = { insetTop = it; emit() },
-                onRight = { insetRight = it; emit() },
-                onBottom = { insetBottom = it; emit() },
+        AssetPickerRow(
+            label = "Opening shape mask (optional)",
+            uri = openingMaskUri,
+            onPick = { maskPicker.launch(arrayOf("image/*")) },
+            onClear = { openingMaskUri = ""; emit() },
+        )
+        if (openingMaskUri.isNotBlank()) {
+            Text(
+                text = "Shape mask in use — rectangular insets are ignored.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(vertical = 4.dp),
             )
         } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                PercentField(
-                    label = "Horizontal",
-                    fraction = insetLeft,
-                    onFraction = { insetLeft = it; insetRight = it; emit() },
-                    modifier = Modifier.weight(1f),
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = openingAsymmetric,
+                    onCheckedChange = { openingAsymmetric = it; emit() },
                 )
-                PercentField(
-                    label = "Vertical",
-                    fraction = insetTop,
-                    onFraction = { insetTop = it; insetBottom = it; emit() },
-                    modifier = Modifier.weight(1f),
+                Text("Edit each edge separately")
+            }
+            if (openingAsymmetric) {
+                FourPercentFields(
+                    left = insetLeft, top = insetTop, right = insetRight, bottom = insetBottom,
+                    onLeft = { insetLeft = it; emit() },
+                    onTop = { insetTop = it; emit() },
+                    onRight = { insetRight = it; emit() },
+                    onBottom = { insetBottom = it; emit() },
                 )
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    PercentField(
+                        label = "Horizontal",
+                        fraction = insetLeft,
+                        onFraction = { insetLeft = it; insetRight = it; emit() },
+                        modifier = Modifier.weight(1f),
+                    )
+                    PercentField(
+                        label = "Vertical",
+                        fraction = insetTop,
+                        onFraction = { insetTop = it; insetBottom = it; emit() },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -482,6 +485,41 @@ fun MediaFrameDecorationEditor(
             onValueChange = { opacity = it; emit() },
             valueRange = 0f..1f,
         )
+    }
+}
+
+/** Thumbnail + Pick/Replace/Clear row over a content-URI string. Shared by the decoration asset + opening-mask pickers. */
+@Composable
+private fun AssetPickerRow(
+    label: String,
+    uri: String,
+    onPick: () -> Unit,
+    onClear: () -> Unit,
+) {
+    SectionLabel(label)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color(0xFF2A2A2A))
+                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(6.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (uri.isNotBlank()) {
+                AsyncImage(model = uri, contentDescription = null, modifier = Modifier.fillMaxWidth())
+            } else {
+                Text("∅", style = MaterialTheme.typography.titleLarge)
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        OutlinedButton(onClick = onPick) {
+            Text(if (uri.isBlank()) "Pick image" else "Replace")
+        }
+        if (uri.isNotBlank()) {
+            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = onClear) { Text("Clear") }
+        }
     }
 }
 

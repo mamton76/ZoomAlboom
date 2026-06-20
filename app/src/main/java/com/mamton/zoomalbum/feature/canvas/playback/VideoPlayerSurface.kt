@@ -42,6 +42,7 @@ import com.mamton.zoomalbum.feature.canvas.view.drawNodeBorder
 import com.mamton.zoomalbum.feature.canvas.view.drawNodeShadow
 import com.mamton.zoomalbum.feature.canvas.view.drawOverlayStack
 import com.mamton.zoomalbum.feature.canvas.view.drawWithAlphaMask
+import com.mamton.zoomalbum.feature.canvas.view.openingAlphaMask
 import com.mamton.zoomalbum.feature.canvas.view.openingRect
 import com.mamton.zoomalbum.feature.canvas.view.rememberAlphaMaskBitmap
 import com.mamton.zoomalbum.feature.canvas.view.rememberDecorationBitmap
@@ -90,6 +91,8 @@ private fun VideoSurfaceChrome(
     val overlayBitmaps = rememberOverlayTextureBitmaps(overlays)
     val frameDecoration = appearance?.frameDecoration
     val decorationBitmap = rememberDecorationBitmap(frameDecoration)
+    val openingMask = frameDecoration?.openingAlphaMask()
+    val openingMaskBitmap = rememberAlphaMaskBitmap(openingMask)
     val alphaMask = appearance?.alphaMask
     val maskBitmap = rememberAlphaMaskBitmap(alphaMask)
 
@@ -125,7 +128,7 @@ private fun VideoSurfaceChrome(
                 .fillMaxSize()
                 .clip(clipShape)
                 .then(
-                    if (alphaMask != null) {
+                    if (alphaMask != null || openingMask != null) {
                         Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                     } else {
                         Modifier
@@ -162,14 +165,15 @@ private fun VideoSurfaceChrome(
                             }
                         }
                     }
+                    // Empty blocks: base + overlays are already in the offscreen
+                    // layer; these just attenuate its alpha. Opening mask (frame
+                    // hole) then node alpha mask (silhouette) — both DstIn.
+                    val maskRect = Rect(0f, 0f, size.width, size.height)
+                    if (openingMask != null) {
+                        drawWithAlphaMask(maskRect, openingMask, openingMaskBitmap) {}
+                    }
                     if (alphaMask != null) {
-                        // Empty block: base + overlays are already painted into the
-                        // offscreen layer above; this just applies the mask.
-                        drawWithAlphaMask(
-                            rect = Rect(0f, 0f, size.width, size.height),
-                            mask = alphaMask,
-                            imageMaskBitmap = maskBitmap,
-                        ) {}
+                        drawWithAlphaMask(maskRect, alphaMask, maskBitmap) {}
                     }
                 },
             content = child,
@@ -223,7 +227,9 @@ fun VideoPlayerSurface(
     val content = remember(
         node.appearance?.crop, t.renderW, t.renderH,
         node.intrinsicPixelWidth, node.intrinsicPixelHeight,
+        node.appearance?.frameDecoration,
     ) {
+        val target = node.contentTargetRect()
         videoContentRect(
             mode = node.appearance?.crop?.mode ?: CropMode.Fill,
             zoom = node.appearance?.crop?.zoom ?: 1f,
@@ -231,8 +237,8 @@ fun VideoPlayerSurface(
             offsetY = node.appearance?.crop?.offsetY ?: 0f,
             srcW = node.intrinsicPixelWidth.toFloat(),
             srcH = node.intrinsicPixelHeight.toFloat(),
-            renderW = t.renderW,
-            renderH = t.renderH,
+            targetLeft = target.left, targetTop = target.top,
+            targetW = target.w, targetH = target.h,
         )
     }
     VideoSurfaceChrome(
@@ -275,7 +281,11 @@ fun VideoPosterSurface(
     bitmap: ImageBitmap,
 ) {
     val t = node.transform
-    val content = remember(node.appearance?.crop, t.renderW, t.renderH, bitmap) {
+    val content = remember(
+        node.appearance?.crop, t.renderW, t.renderH, bitmap,
+        node.appearance?.frameDecoration,
+    ) {
+        val target = node.contentTargetRect()
         videoContentRect(
             mode = node.appearance?.crop?.mode ?: CropMode.Fill,
             zoom = node.appearance?.crop?.zoom ?: 1f,
@@ -283,8 +293,8 @@ fun VideoPosterSurface(
             offsetY = node.appearance?.crop?.offsetY ?: 0f,
             srcW = bitmap.width.toFloat(),
             srcH = bitmap.height.toFloat(),
-            renderW = t.renderW,
-            renderH = t.renderH,
+            targetLeft = target.left, targetTop = target.top,
+            targetW = target.w, targetH = target.h,
         )
     }
     VideoSurfaceChrome(
@@ -326,9 +336,12 @@ private data class VideoContentRect(val w: Float, val h: Float, val left: Float,
 
 /**
  * Mirrors `CanvasRenderer.drawCroppedBitmap`: sizes the content so it shows the
- * source at the right aspect. Fit/Fill preserve aspect (letterbox / cover);
- * Stretch fills the node rect; Manual applies `zoom` + `offset` over the Fill
- * scale. Unknown source dims fall back to filling the rect.
+ * source at the right aspect, scaled into and centred on the **target rect**
+ * (in node-local px). The target is the frame-decoration opening when one is
+ * set, else the whole node rect — so a framed video fills the opening like a
+ * framed photo, rather than just being clipped to it. Fit/Fill preserve aspect
+ * (letterbox / cover); Stretch fills the target; Manual applies `zoom` + `offset`
+ * over the Fill scale. Unknown source dims fall back to filling the target.
  */
 private fun videoContentRect(
     mode: CropMode,
@@ -337,35 +350,49 @@ private fun videoContentRect(
     offsetY: Float,
     srcW: Float,
     srcH: Float,
-    renderW: Float,
-    renderH: Float,
+    targetLeft: Float,
+    targetTop: Float,
+    targetW: Float,
+    targetH: Float,
 ): VideoContentRect {
     if (srcW <= 0f || srcH <= 0f) {
-        return VideoContentRect(renderW, renderH, 0f, 0f)
+        return VideoContentRect(targetW, targetH, targetLeft, targetTop)
     }
     return when (mode) {
-        CropMode.Stretch -> VideoContentRect(renderW, renderH, 0f, 0f)
+        CropMode.Stretch -> VideoContentRect(targetW, targetH, targetLeft, targetTop)
         CropMode.Fit, CropMode.Fill -> {
             val scale = if (mode == CropMode.Fit) {
-                minOf(renderW / srcW, renderH / srcH)
+                minOf(targetW / srcW, targetH / srcH)
             } else {
-                max(renderW / srcW, renderH / srcH)
+                max(targetW / srcW, targetH / srcH)
             }
             val w = srcW * scale
             val h = srcH * scale
-            VideoContentRect(w, h, (renderW - w) / 2f, (renderH - h) / 2f)
+            VideoContentRect(w, h, targetLeft + (targetW - w) / 2f, targetTop + (targetH - h) / 2f)
         }
         CropMode.Manual -> {
-            val fillScale = max(renderW / srcW, renderH / srcH)
+            val fillScale = max(targetW / srcW, targetH / srcH)
             val drawScale = (fillScale * zoom).coerceAtLeast(1e-3f)
             val w = srcW * drawScale
             val h = srcH * drawScale
             VideoContentRect(
                 w, h,
-                (renderW - w) / 2f + offsetX,
-                (renderH - h) / 2f + offsetY,
+                targetLeft + (targetW - w) / 2f + offsetX,
+                targetTop + (targetH - h) / 2f + offsetY,
             )
         }
+    }
+}
+
+/** The opening rect (node-local px, 0-origin) the content should fill, or the full node when none. */
+private fun CanvasNode.Media.contentTargetRect(): VideoContentRect {
+    val renderW = transform.renderW
+    val renderH = transform.renderH
+    val opening = appearance?.frameDecoration?.openingRect(0f, 0f, renderW, renderH)
+    return if (opening == null) {
+        VideoContentRect(renderW, renderH, 0f, 0f)
+    } else {
+        VideoContentRect(opening.right - opening.left, opening.bottom - opening.top, opening.left, opening.top)
     }
 }
 

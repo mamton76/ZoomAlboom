@@ -18,6 +18,10 @@ import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.request.allowHardware
 import coil3.toBitmap
+import com.mamton.zoomalbum.domain.model.AlphaMask
+import com.mamton.zoomalbum.domain.model.AlphaMaskSource
+import com.mamton.zoomalbum.domain.model.MaskChannel
+import com.mamton.zoomalbum.domain.model.MaskFitMode
 import com.mamton.zoomalbum.domain.model.MediaFrameDecoration
 import com.mamton.zoomalbum.domain.model.MediaFrameDecorationMode
 import kotlin.math.roundToInt
@@ -163,6 +167,28 @@ private fun DrawScope.drawNineSlice(
     cell(sx2, sy1, sr, sCenterH, dx2, dy1, dx3, dy2)                 // right
     // Centre — usually the transparent photo opening; drawn for assets that fill it.
     cell(sx1, sy1, sCenterW, sCenterH, dx1, dy1, dx2, dy2)
+}
+
+/**
+ * The arbitrary-shape opening as a synthetic [AlphaMask], or null when no
+ * `openingMaskUri` is set. Reuses the alpha-mask pipeline (DstIn over an
+ * offscreen layer): the mask asset's **luminance** is the opening — white =
+ * media visible, black = hidden — stretched to the full node rect so it aligns
+ * with the decoration drawn on top. When present this OVERRIDES the rectangular
+ * `contentInset*` crop (see [openingRect]).
+ *
+ * Resolve the bitmap with `rememberAlphaMaskBitmap(openingAlphaMask())`.
+ */
+internal fun MediaFrameDecoration.openingAlphaMask(): AlphaMask? {
+    val uri = openingMaskUri?.takeIf { it.isNotBlank() } ?: return null
+    return AlphaMask(
+        source = AlphaMaskSource.Image(
+            maskRefId = uri,
+            channel = MaskChannel.Luminance,
+            fitMode = MaskFitMode.Stretch,
+        ),
+        invert = false,
+    )
 }
 
 /**

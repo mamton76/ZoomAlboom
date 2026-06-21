@@ -809,14 +809,13 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 
 **Design decided 2026-06-21** → [`media-presets.md`](architecture/media-presets.md) (model + UI) + [`media-appearance.md`](architecture/media-appearance.md) content-model refactor. Live-link + per-node overrides, sectioned presets, per-field override *target* (slice-1 UI = whole-section), bake-then-unlink delete, resolution before the render boundary. Two slices, **refactor-first**:
 
-**Slice 0 — content-model refactor (prerequisite, `to_discuss.md § 19`):**
-- [ ] Rename `alphaMask` → `contentMask` on `NodeAppearance` (keep `@SerialName("alphaMask")` → no data migration). Rename `AlphaMask*` editor/renderer symbols accordingly (or keep type name, rename field — TBD in plan).
-- [ ] `MediaFrameDecoration` → `MediaDecoration`: add stable `id`, `placement: Above|Below`; **remove** `contentInset*` + `openingMaskUri`.
-- [ ] `MediaAppearance.frameDecoration: MediaFrameDecoration?` → `decorations: List<MediaDecoration> = emptyList()`.
-- [ ] Add `MediaAppearance.opening: MediaOpening?` (rectangular insets only).
-- [ ] Renderer: loop decorations (Below → content[opening+crop+contentMask] → overlays → Above → border); drop `openingAlphaMask`/`openingRect`-mask path; opening = rectangular resize. Same in `VideoSurfaceChrome`.
-- [ ] Editor: decoration **list** editor (overlay-editor pattern); Opening = rectangular only; arbitrary shapes via the contentMask editor.
-- [ ] Serializer migration: legacy `frameDecoration` → one-item `decorations` (+ `id`, `placement=Above`); `contentInset*` → `opening`; `openingMaskUri` → `contentMask` (Image/Luminance/Stretch) when no contentMask set.
+**Slice 0 — content-model refactor (prerequisite, `to_discuss.md § 19`) — DONE 2026-06-21:**
+- [x] Rename field `alphaMask` → `contentMask` on `NodeAppearance` (**no `@SerialName`, no migration** — no important projects). Value type `AlphaMask` + `AlphaMaskRenderer`/`AlphaMaskEditor` keep their names (field-only rename).
+- [x] `MediaFrameDecoration` → `MediaDecoration`: add stable `id`, `placement: Above|Below`; **removed** `contentInset*` + `openingMaskUri`. `MediaFrameDecorationMode` → `MediaDecorationMode`; new `DecorationPlacement`.
+- [x] `MediaAppearance.frameDecoration` → `decorations: List<MediaDecoration> = emptyList()`; added `opening: MediaOpening?` (rectangular insets only).
+- [x] Renderer (`MediaDecorationRenderer`, renamed): loop decorations (Below → content[opening+crop+contentMask] → overlays → Above → border); dropped `openingAlphaMask`; `openingRect` derives from `MediaOpening`. Same in `VideoSurfaceChrome`. *(Slice-0 limitation: Below cut by contentMask when present.)*
+- [x] Editor: `DecorationListEditor` (add/remove/reorder + per-item `MediaDecorationEditor` with placement) + `MediaOpeningEditor`; context-menu actions Content mask / Opening / Decorations.
+- [x] No serializer migration (old keys ignored via `ignoreUnknownKeys`). Tests updated; build + unit tests green; verified on-device 2026-06-21.
 
 **Slice 1 — static presets:**
 - [ ] App-level `PresetStore` (serialized; Room or JSON in app storage). `MediaStylePreset` gains `sections: Set<AppearanceSection>`.

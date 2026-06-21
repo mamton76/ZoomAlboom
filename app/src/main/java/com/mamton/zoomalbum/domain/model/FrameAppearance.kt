@@ -57,7 +57,7 @@ data class FrameAppearance(
     override val overlays: List<OverlayStyle> = emptyList(),
     override val border: BorderStyle? = null,
     override val shadow: ShadowStyle? = null,
-    override val alphaMask: AlphaMask? = null,
+    override val contentMask: AlphaMask? = null,
     val background: BackgroundData? = null,
     val contentEffect: FrameContentEffect? = null,
     val titleStyle: FrameTitleStyle? = null,

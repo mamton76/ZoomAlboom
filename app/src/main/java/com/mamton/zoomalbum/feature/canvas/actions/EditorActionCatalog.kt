@@ -72,12 +72,12 @@ data object EditOverlaysAction : EditorAction {
     override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenOverlaysEditor
 }
 
-data object EditAlphaMaskAction : EditorAction {
-    override val id = "edit.alphaMask"
+data object EditContentMaskAction : EditorAction {
+    override val id = "edit.contentMask"
     override val icon = "◍"
     override val category = ActionCategory.Edit
     override fun label(ctx: SelectionContext) =
-        labelWithCount("Edit alpha mask", ctx.homogeneousCount)
+        labelWithCount("Edit content mask", ctx.homogeneousCount)
     override fun isVisible(ctx: SelectionContext) = ctx.isAllFrames || ctx.isAllMedia
     override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenAlphaMaskEditor
 }
@@ -121,14 +121,24 @@ data object EditColorAdjustmentsAction : EditorAction {
     override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenColorAdjustmentsEditor
 }
 
-data object EditFrameDecorationAction : EditorAction {
-    override val id = "edit.frameDecoration"
+data object EditOpeningAction : EditorAction {
+    override val id = "edit.opening"
+    override val icon = "▣"
+    override val category = ActionCategory.Edit
+    override fun label(ctx: SelectionContext) =
+        labelWithCount("Edit opening", ctx.selectedMediaInOrder.size)
+    override fun isVisible(ctx: SelectionContext) = ctx.isAllMedia
+    override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenOpeningEditor
+}
+
+data object EditDecorationsAction : EditorAction {
+    override val id = "edit.decorations"
     override val icon = "❖"
     override val category = ActionCategory.Edit
     override fun label(ctx: SelectionContext) =
-        labelWithCount("Edit frame decoration", ctx.selectedMediaInOrder.size)
+        labelWithCount("Edit decorations", ctx.selectedMediaInOrder.size)
     override fun isVisible(ctx: SelectionContext) = ctx.isAllMedia
-    override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenFrameDecorationEditor
+    override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenDecorationsEditor
 }
 
 data object EditCaptionAction : EditorAction {
@@ -311,11 +321,12 @@ object EditorActionCatalog {
         EditBorderAction,
         EditShadowAction,
         EditOverlaysAction,
-        EditAlphaMaskAction,
+        EditContentMaskAction,
         EditBackgroundAction,
         EditCropAction,
         EditColorAdjustmentsAction,
-        EditFrameDecorationAction,
+        EditOpeningAction,
+        EditDecorationsAction,
         EditCaptionAction,
         PlayVideoAction,
         NavigateToFrameAction,

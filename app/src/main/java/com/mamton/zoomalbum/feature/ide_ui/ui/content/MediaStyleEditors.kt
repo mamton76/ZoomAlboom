@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -44,11 +45,14 @@ import coil3.compose.AsyncImage
 import com.mamton.zoomalbum.domain.model.CaptionStyle
 import com.mamton.zoomalbum.domain.model.CropMode
 import com.mamton.zoomalbum.domain.model.CropSettings
+import com.mamton.zoomalbum.domain.model.DecorationPlacement
 import com.mamton.zoomalbum.domain.model.MediaColorAdjustments
-import com.mamton.zoomalbum.domain.model.MediaFrameDecoration
-import com.mamton.zoomalbum.domain.model.MediaFrameDecorationMode
+import com.mamton.zoomalbum.domain.model.MediaDecoration
+import com.mamton.zoomalbum.domain.model.MediaDecorationMode
+import com.mamton.zoomalbum.domain.model.MediaOpening
 import com.mamton.zoomalbum.feature.ide_ui.ui.color.ColorPicker
 import com.mamton.zoomalbum.feature.ide_ui.ui.color.toHex
+import java.util.UUID
 import kotlin.math.roundToInt
 
 /**
@@ -60,10 +64,10 @@ import kotlin.math.roundToInt
  *                                color adjustments yet — see media-appearance.md).
  *  - [CaptionStyleEditor]      — `CaptionStyle?` (text + font + color).
  *                                Persist-only today.
- *  - [MediaFrameDecorationEditor] — `MediaFrameDecoration?` (asset image + mode + insets).
- *                                Asset is chosen via the SAF image picker (same as
- *                                masks/overlays). Rendered (Stretch / NineSlice) by
- *                                `MediaFrameDecorationRenderer`.
+ *  - [MediaOpeningEditor]      — `MediaOpening?` (rectangular content-area insets).
+ *  - [DecorationListEditor]    — `List<MediaDecoration>` (a stack of visual layers,
+ *                                each asset + mode + slice + placement + opacity).
+ *                                Rendered (Stretch / NineSlice) by `MediaDecorationRenderer`.
  *
  * "Persist-only" sections still round-trip through JSON and are visible to
  * future renderer slices; the user just won't see immediate visual change today.
@@ -280,213 +284,241 @@ fun CaptionStyleEditor(
     }
 }
 
-// ── Media frame decoration ────────────────────────────────────────────────────
+// ── Media opening (rectangular content-area slot) ──────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MediaFrameDecorationEditor(
-    initial: MediaFrameDecoration?,
-    onChange: (MediaFrameDecoration?) -> Unit,
+fun MediaOpeningEditor(
+    initial: MediaOpening?,
+    onChange: (MediaOpening?) -> Unit,
 ) {
-    val context = LocalContext.current
-    var enabled by remember { mutableStateOf(initial != null) }
-    var assetUri by remember { mutableStateOf(initial?.assetUri ?: "") }
-    var opacity by remember { mutableStateOf(initial?.opacity ?: 1f) }
-    var mode by remember { mutableStateOf(initial?.mode ?: MediaFrameDecorationMode.Stretch) }
-    var modeOpen by remember { mutableStateOf(false) }
-    // Four canonical slice + four canonical opening insets. The symmetric UI
-    // edits them in lockstep (one slice field, H/V opening fields); the
-    // asymmetric UI edits each edge. Defaulting `asymmetric` to the initial's
-    // actual symmetry means opening an asymmetric frame (e.g. Polaroid) won't
-    // silently flatten it.
-    var sliceLeft by remember { mutableStateOf(initial?.sliceLeft ?: DEFAULT_SLICE_INSET) }
-    var sliceTop by remember { mutableStateOf(initial?.sliceTop ?: DEFAULT_SLICE_INSET) }
-    var sliceRight by remember { mutableStateOf(initial?.sliceRight ?: DEFAULT_SLICE_INSET) }
-    var sliceBottom by remember { mutableStateOf(initial?.sliceBottom ?: DEFAULT_SLICE_INSET) }
-    var insetLeft by remember { mutableStateOf(initial?.contentInsetLeft ?: 0f) }
-    var insetTop by remember { mutableStateOf(initial?.contentInsetTop ?: 0f) }
-    var insetRight by remember { mutableStateOf(initial?.contentInsetRight ?: 0f) }
-    var insetBottom by remember { mutableStateOf(initial?.contentInsetBottom ?: 0f) }
-    var sliceAsymmetric by remember { mutableStateOf(initial.isSliceAsymmetric()) }
-    var openingAsymmetric by remember { mutableStateOf(initial.isOpeningAsymmetric()) }
-    // Arbitrary-shape opening mask (white = opening). When set it overrides the
-    // rectangular insets — see MediaFrameDecoration.openingRect / openingAlphaMask.
-    var openingMaskUri by remember { mutableStateOf(initial?.openingMaskUri.orEmpty()) }
+    var insetLeft by remember { mutableStateOf(initial?.insetLeft ?: 0f) }
+    var insetTop by remember { mutableStateOf(initial?.insetTop ?: 0f) }
+    var insetRight by remember { mutableStateOf(initial?.insetRight ?: 0f) }
+    var insetBottom by remember { mutableStateOf(initial?.insetBottom ?: 0f) }
+    var asymmetric by remember { mutableStateOf(initial.isAsymmetric()) }
 
     fun emit() {
+        val any = insetLeft > 0f || insetTop > 0f || insetRight > 0f || insetBottom > 0f
         onChange(
-            if (enabled && assetUri.isNotBlank()) MediaFrameDecoration(
-                assetUri = assetUri,
-                opacity = opacity,
-                mode = mode,
-                sliceLeft = sliceLeft,
-                sliceTop = sliceTop,
-                sliceRight = sliceRight,
-                sliceBottom = sliceBottom,
-                contentInsetLeft = insetLeft,
-                contentInsetTop = insetTop,
-                contentInsetRight = insetRight,
-                contentInsetBottom = insetBottom,
-                openingMaskUri = openingMaskUri.ifBlank { null },
-            ) else null,
+            if (any) MediaOpening(insetLeft, insetTop, insetRight, insetBottom) else null,
         )
     }
 
-    // SAF document picker rather than PickVisualMedia: decoration PNGs (often
-    // with transparency) are commonly exported to /Downloads or app folders
-    // that MediaStore doesn't index, so the Photo Picker would hide them.
-    // Mirrors the mask/overlay image pickers — see ImageMaskSourceEditor.
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri ?: return@rememberLauncherForActivityResult
-        runCatching {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION,
-            )
-        }
-        assetUri = uri.toString()
-        emit()
-    }
-    val maskPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri ?: return@rememberLauncherForActivityResult
-        runCatching {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION,
-            )
-        }
-        openingMaskUri = uri.toString()
-        emit()
-    }
-
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked = enabled, onCheckedChange = { enabled = it; emit() })
+    Column(Modifier.fillMaxWidth()) {
         Text(
-            text = "Picture-frame decoration",
-            style = MaterialTheme.typography.titleSmall,
-        )
-    }
-
-    if (enabled) {
-        AssetPickerRow(
-            label = "Decoration image",
-            uri = assetUri,
-            onPick = { picker.launch(arrayOf("image/*")) },
-            onClear = { assetUri = ""; emit() },
-        )
-        Spacer(Modifier.height(8.dp))
-        SectionLabel("Mode")
-        Box {
-            OutlinedButton(onClick = { modeOpen = true }) { Text(mode.name) }
-            DropdownMenu(expanded = modeOpen, onDismissRequest = { modeOpen = false }) {
-                MediaFrameDecorationMode.entries.forEach { m ->
-                    DropdownMenuItem(
-                        text = { Text(m.name) },
-                        onClick = { mode = m; modeOpen = false; emit() },
-                    )
-                }
-            }
-        }
-        if (mode == MediaFrameDecorationMode.NineSlice) {
-            Text(
-                text = "Slice border marks the fixed corner zone (% of the asset " +
-                    "edge). Corners keep their shape; the edges between them stretch " +
-                    "to fit any media proportion.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(vertical = 4.dp),
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = sliceAsymmetric,
-                    onCheckedChange = { sliceAsymmetric = it; emit() },
-                )
-                Text("Edit each edge separately")
-            }
-            if (sliceAsymmetric) {
-                FourPercentFields(
-                    left = sliceLeft, top = sliceTop, right = sliceRight, bottom = sliceBottom,
-                    onLeft = { sliceLeft = it; emit() },
-                    onTop = { sliceTop = it; emit() },
-                    onRight = { sliceRight = it; emit() },
-                    onBottom = { sliceBottom = it; emit() },
-                )
-            } else {
-                PercentField(
-                    label = "Slice border",
-                    fraction = sliceLeft,
-                    onFraction = {
-                        sliceLeft = it; sliceTop = it; sliceRight = it; sliceBottom = it; emit()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        SectionLabel("Opening (crops media inside the frame)")
-        Text(
-            text = "Confine the photo/video to the frame's opening so it can't leak " +
-                "past the decoration. Use a shape mask (white = opening) for round / " +
-                "arched / torn shapes, or rectangular insets below.",
+            text = "Insets (% of the node edge) shrink the content area so frame / " +
+                "mat decorations sit in the margin. Crop fits the media inside this " +
+                "area. Arbitrary shapes go through the content mask.",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(vertical = 4.dp),
         )
-        AssetPickerRow(
-            label = "Opening shape mask (optional)",
-            uri = openingMaskUri,
-            onPick = { maskPicker.launch(arrayOf("image/*")) },
-            onClear = { openingMaskUri = ""; emit() },
-        )
-        if (openingMaskUri.isNotBlank()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = asymmetric, onCheckedChange = { asymmetric = it; emit() })
+            Text("Edit each edge separately")
+        }
+        if (asymmetric) {
+            FourPercentFields(
+                left = insetLeft, top = insetTop, right = insetRight, bottom = insetBottom,
+                onLeft = { insetLeft = it; emit() },
+                onTop = { insetTop = it; emit() },
+                onRight = { insetRight = it; emit() },
+                onBottom = { insetBottom = it; emit() },
+            )
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                PercentField(
+                    label = "Horizontal",
+                    fraction = insetLeft,
+                    onFraction = { insetLeft = it; insetRight = it; emit() },
+                    modifier = Modifier.weight(1f),
+                )
+                PercentField(
+                    label = "Vertical",
+                    fraction = insetTop,
+                    onFraction = { insetTop = it; insetBottom = it; emit() },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+// ── Media decorations (visual layer stack) ─────────────────────────────────────
+
+/**
+ * Editor for the ordered [MediaDecoration] stack: add / remove / reorder layers,
+ * each editing its own asset / mode / slice / placement / opacity via
+ * [MediaDecorationEditor]. (Visibility / hide-vs-delete polish is a follow-up.)
+ */
+@Composable
+fun DecorationListEditor(
+    initial: List<MediaDecoration>,
+    onChange: (List<MediaDecoration>) -> Unit,
+) {
+    val context = LocalContext.current
+    var items by remember { mutableStateOf(initial) }
+
+    fun update(newItems: List<MediaDecoration>) {
+        items = newItems
+        onChange(newItems)
+    }
+
+    val addPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+        update(items + MediaDecoration(id = UUID.randomUUID().toString(), assetUri = uri.toString()))
+    }
+
+    Column(Modifier.fillMaxWidth()) {
+        if (items.isEmpty()) {
             Text(
-                text = "Shape mask in use — rectangular insets are ignored.",
+                text = "No decorations. Add a frame, tape, sticker, or label layer.",
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(vertical = 4.dp),
             )
-        } else {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = openingAsymmetric,
-                    onCheckedChange = { openingAsymmetric = it; emit() },
+        }
+        items.forEachIndexed { index, deco ->
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Layer ${index + 1}",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
                 )
-                Text("Edit each edge separately")
+                TextButton(
+                    enabled = index > 0,
+                    onClick = { update(items.swapped(index, index - 1)) },
+                ) { Text("↑") }
+                TextButton(
+                    enabled = index < items.lastIndex,
+                    onClick = { update(items.swapped(index, index + 1)) },
+                ) { Text("↓") }
+                TextButton(
+                    onClick = { update(items.toMutableList().also { it.removeAt(index) }) },
+                ) { Text("Remove") }
             }
-            if (openingAsymmetric) {
-                FourPercentFields(
-                    left = insetLeft, top = insetTop, right = insetRight, bottom = insetBottom,
-                    onLeft = { insetLeft = it; emit() },
-                    onTop = { insetTop = it; emit() },
-                    onRight = { insetRight = it; emit() },
-                    onBottom = { insetBottom = it; emit() },
-                )
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    PercentField(
-                        label = "Horizontal",
-                        fraction = insetLeft,
-                        onFraction = { insetLeft = it; insetRight = it; emit() },
-                        modifier = Modifier.weight(1f),
-                    )
-                    PercentField(
-                        label = "Vertical",
-                        fraction = insetTop,
-                        onFraction = { insetTop = it; insetBottom = it; emit() },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
+            MediaDecorationEditor(
+                decoration = deco,
+                onChange = { updated -> update(items.toMutableList().also { it[index] = updated }) },
+            )
         }
         Spacer(Modifier.height(8.dp))
-        SectionLabel("Opacity: ${"%.2f".format(opacity)}")
-        Slider(
-            value = opacity.coerceIn(0f, 1f),
-            onValueChange = { opacity = it; emit() },
-            valueRange = 0f..1f,
-        )
+        OutlinedButton(onClick = { addPicker.launch(arrayOf("image/*")) }) {
+            Text("+ Add decoration")
+        }
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MediaDecorationEditor(
+    decoration: MediaDecoration,
+    onChange: (MediaDecoration) -> Unit,
+) {
+    val context = LocalContext.current
+    var modeOpen by remember { mutableStateOf(false) }
+    var sliceAsymmetric by remember { mutableStateOf(decoration.isSliceAsymmetric()) }
+
+    val replacePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+        onChange(decoration.copy(assetUri = uri.toString()))
+    }
+
+    AssetPickerRow(
+        label = "Image",
+        uri = decoration.assetUri,
+        onPick = { replacePicker.launch(arrayOf("image/*")) },
+    )
+
+    Spacer(Modifier.height(8.dp))
+    SectionLabel("Placement")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        DecorationPlacement.entries.forEach { p ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(
+                    selected = decoration.placement == p,
+                    onClick = { onChange(decoration.copy(placement = p)) },
+                )
+                Text(text = p.name, modifier = Modifier.padding(end = 8.dp))
+            }
+        }
+    }
+
+    SectionLabel("Mode")
+    Box {
+        OutlinedButton(onClick = { modeOpen = true }) { Text(decoration.mode.name) }
+        DropdownMenu(expanded = modeOpen, onDismissRequest = { modeOpen = false }) {
+            MediaDecorationMode.entries.forEach { m ->
+                DropdownMenuItem(
+                    text = { Text(m.name) },
+                    onClick = { onChange(decoration.copy(mode = m)); modeOpen = false },
+                )
+            }
+        }
+    }
+
+    if (decoration.mode == MediaDecorationMode.NineSlice) {
+        Text(
+            text = "Slice border marks the fixed corner zone (% of the asset edge). " +
+                "Corners keep their shape; the edges between them stretch to fit any " +
+                "media proportion.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(vertical = 4.dp),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = sliceAsymmetric, onCheckedChange = { sliceAsymmetric = it })
+            Text("Edit each edge separately")
+        }
+        if (sliceAsymmetric) {
+            FourPercentFields(
+                left = decoration.sliceLeft, top = decoration.sliceTop,
+                right = decoration.sliceRight, bottom = decoration.sliceBottom,
+                onLeft = { onChange(decoration.copy(sliceLeft = it)) },
+                onTop = { onChange(decoration.copy(sliceTop = it)) },
+                onRight = { onChange(decoration.copy(sliceRight = it)) },
+                onBottom = { onChange(decoration.copy(sliceBottom = it)) },
+            )
+        } else {
+            PercentField(
+                label = "Slice border",
+                fraction = decoration.sliceLeft,
+                onFraction = {
+                    onChange(
+                        decoration.copy(sliceLeft = it, sliceTop = it, sliceRight = it, sliceBottom = it),
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+
+    SectionLabel("Opacity: ${"%.2f".format(decoration.opacity)}")
+    Slider(
+        value = decoration.opacity.coerceIn(0f, 1f),
+        onValueChange = { onChange(decoration.copy(opacity = it)) },
+        valueRange = 0f..1f,
+    )
+}
+
+private fun <T> List<T>.swapped(a: Int, b: Int): List<T> =
+    toMutableList().also { val tmp = it[a]; it[a] = it[b]; it[b] = tmp }
 
 /** Thumbnail + Pick/Replace/Clear row over a content-URI string. Shared by the decoration asset + opening-mask pickers. */
 @Composable
@@ -494,7 +526,7 @@ private fun AssetPickerRow(
     label: String,
     uri: String,
     onPick: () -> Unit,
-    onClear: () -> Unit,
+    onClear: (() -> Unit)? = null,
 ) {
     SectionLabel(label)
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -516,7 +548,7 @@ private fun AssetPickerRow(
         OutlinedButton(onClick = onPick) {
             Text(if (uri.isBlank()) "Pick image" else "Replace")
         }
-        if (uri.isNotBlank()) {
+        if (uri.isNotBlank() && onClear != null) {
             Spacer(Modifier.width(8.dp))
             TextButton(onClick = onClear) { Text("Clear") }
         }
@@ -524,15 +556,13 @@ private fun AssetPickerRow(
 }
 
 /** True when the four slice insets aren't all equal — defaults the slice asymmetric toggle. */
-private fun MediaFrameDecoration?.isSliceAsymmetric(): Boolean {
-    this ?: return false
-    return !(sliceLeft == sliceTop && sliceTop == sliceRight && sliceRight == sliceBottom)
-}
+private fun MediaDecoration.isSliceAsymmetric(): Boolean =
+    !(sliceLeft == sliceTop && sliceTop == sliceRight && sliceRight == sliceBottom)
 
 /** True when opening insets break left==right / top==bottom — defaults the opening asymmetric toggle. */
-private fun MediaFrameDecoration?.isOpeningAsymmetric(): Boolean {
+private fun MediaOpening?.isAsymmetric(): Boolean {
     this ?: return false
-    return !(contentInsetLeft == contentInsetRight && contentInsetTop == contentInsetBottom)
+    return !(insetLeft == insetRight && insetTop == insetBottom)
 }
 
 /** Left/Top over Right/Bottom percent inputs for asymmetric slice or opening insets. */

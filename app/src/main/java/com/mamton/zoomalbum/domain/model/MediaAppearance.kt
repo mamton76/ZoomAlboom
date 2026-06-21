@@ -61,51 +61,70 @@ data class MediaColorAdjustments(
     val vignette: Float = 0f,
 )
 
-// ── Media frame decoration (the Polaroid-style picture-frame around one media) ──
+// ── Media decorations (visual layer stack around one media node) ────────────────
 
 /**
- * How a [MediaFrameDecoration] asset is stretched/laid out over the media's rect.
+ * How a [MediaDecoration] asset is stretched/laid out over the media's rect.
  */
 @Serializable
-enum class MediaFrameDecorationMode {
+enum class MediaDecorationMode {
     /** PNG stretched over entire object — simple, fine for textures/vignettes. */
     Stretch,
     /** Corners unscaled; edges scaled one axis only — required for real photo frames. */
     NineSlice,
 }
 
+/** Where a [MediaDecoration] layer draws relative to the media content. */
+@Serializable
+enum class DecorationPlacement {
+    /** Over the media + overlays (frame, tape, sticker, label…). */
+    Above,
+    /** Under the media (mat, backing paper — shows in the opening margins). */
+    Below,
+}
+
 /**
- * Decorative picture-frame asset around a single media node (Polaroid border,
- * mat, wooden frame, etc.).
+ * One decorative visual layer for a media node — a frame, tape, bow, sticker,
+ * handwritten label, torn/burnt-paper edge, ticket stub, etc. A media node owns
+ * an ordered [MediaAppearance.decorations] stack of these.
  *
- * Despite the word "frame", this is **not** a [CanvasNode.Frame] and **not** a
- * [FrameAppearance]. It's media-local decoration; see
- * `docs/architecture/media-appearance.md § Media frame decoration`.
+ * This is **not** a [CanvasNode.Frame] / [FrameAppearance]: it's a media-local
+ * visual layer that carries **no** clip of its own — the media's shape is owned
+ * by [MediaAppearance.opening] + [NodeAppearance.contentMask]. See
+ * `docs/architecture/media-appearance.md` ("content-model refactor").
  */
 @Serializable
-data class MediaFrameDecoration(
+data class MediaDecoration(
+    /** Stable id — paint/reorder order + future item-level preset overrides. */
+    val id: String,
     val assetUri: String,
     val opacity: Float = 1f,
-    val mode: MediaFrameDecorationMode = MediaFrameDecorationMode.Stretch,
-    // Nine-slice insets — ignored in Stretch mode.
+    val mode: MediaDecorationMode = MediaDecorationMode.Stretch,
+    val placement: DecorationPlacement = DecorationPlacement.Above,
+    // Nine-slice insets (fractions 0..1 of the asset edge) — ignored in Stretch.
     val sliceLeft: Float = 0f,
     val sliceTop: Float = 0f,
     val sliceRight: Float = 0f,
     val sliceBottom: Float = 0f,
-    // The frame's opening: the media is drawn ONLY inside this rectangle (insets
-    // are fractions 0..1 of the node edge), so it never leaks past the frame.
-    // The decoration PNG is then drawn over the full node rect, on top.
-    // All-zero = no opening crop (media fills the whole rect; legacy behaviour).
-    val contentInsetLeft: Float = 0f,
-    val contentInsetTop: Float = 0f,
-    val contentInsetRight: Float = 0f,
-    val contentInsetBottom: Float = 0f,
-    // Arbitrary (non-rectangular) opening. When set it OVERRIDES the rectangular
-    // `contentInset*`: the media is masked by this asset's luminance (white =
-    // opening) — oval, arch, torn paper. Absent (null) = use the rectangular
-    // insets above. See `docs/architecture/media-appearance.md § Media frame
-    // decoration`.
-    val openingMaskUri: String? = null,
+)
+
+// ── Media opening (rectangular content-area slot) ──────────────────────────────
+
+/**
+ * The rectangular content-area slot inside the node rect: the media is drawn
+ * only inside `[insetLeft..1-insetRight] × [insetTop..1-insetBottom]` (fractions
+ * 0..1 of the node edge), so a frame/mat decoration can sit in the margin
+ * around it. A *resize/inset*, distinct from [CropSettings] (which fits the
+ * media **within** this area). All-zero / `null` = media fills the whole rect.
+ *
+ * Rectangular only — arbitrary opening shapes go through [NodeAppearance.contentMask].
+ */
+@Serializable
+data class MediaOpening(
+    val insetLeft: Float = 0f,
+    val insetTop: Float = 0f,
+    val insetRight: Float = 0f,
+    val insetBottom: Float = 0f,
 )
 
 // ── Caption ──────────────────────────────────────────────────────────────────
@@ -129,8 +148,8 @@ data class CaptionStyle(
  *
  * One of the two concrete [NodeAppearance] subclasses (alongside [FrameAppearance]).
  * Owns the shared base fields plus media-specific concerns: crop, color
- * adjustments, an ordered overlay stack, an optional decorative photo-frame, and
- * an optional caption.
+ * adjustments, an ordered overlay stack, a rectangular content opening, an
+ * ordered decoration-layer stack, and an optional caption.
  *
  * `null` on a [CanvasNode.Media] means "default rendering" — the renderer paints
  * the cropped source with no extra layers.
@@ -147,11 +166,13 @@ data class MediaAppearance(
     override val overlays: List<OverlayStyle> = emptyList(),
     override val border: BorderStyle? = null,
     override val shadow: ShadowStyle? = null,
-    override val alphaMask: AlphaMask? = null,
+    override val contentMask: AlphaMask? = null,
     val crop: CropSettings = CropSettings(),
     val colorAdjustments: MediaColorAdjustments? = null,
-    /** Decorative picture-frame around this single media. NOT a [CanvasNode.Frame]. */
-    val frameDecoration: MediaFrameDecoration? = null,
+    /** Rectangular content-area slot — the media is resized into it; decorations fill the margin. */
+    val opening: MediaOpening? = null,
+    /** Ordered stack of decorative visual layers around this media. NOT [CanvasNode.Frame]s. */
+    val decorations: List<MediaDecoration> = emptyList(),
     val caption: CaptionStyle? = null,
 ) : NodeAppearance()
 

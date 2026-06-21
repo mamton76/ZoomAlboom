@@ -37,7 +37,8 @@ import com.mamton.zoomalbum.domain.model.MediaAppearance
 import com.mamton.zoomalbum.domain.model.MediaType
 import com.mamton.zoomalbum.feature.canvas.playback.rememberVideoPlaybackController
 import com.mamton.zoomalbum.domain.model.MediaColorAdjustments
-import com.mamton.zoomalbum.domain.model.MediaFrameDecoration
+import com.mamton.zoomalbum.domain.model.MediaDecoration
+import com.mamton.zoomalbum.domain.model.MediaOpening
 import com.mamton.zoomalbum.domain.model.OverlayStyle
 import com.mamton.zoomalbum.domain.model.RenderDetail
 import com.mamton.zoomalbum.domain.model.ShadowStyle
@@ -60,7 +61,8 @@ import com.mamton.zoomalbum.feature.ide_ui.ui.content.BorderStyleEditor
 import com.mamton.zoomalbum.feature.ide_ui.ui.content.CaptionStyleEditor
 import com.mamton.zoomalbum.feature.ide_ui.ui.content.ColorAdjustmentsEditor
 import com.mamton.zoomalbum.feature.ide_ui.ui.content.CropEditor
-import com.mamton.zoomalbum.feature.ide_ui.ui.content.MediaFrameDecorationEditor
+import com.mamton.zoomalbum.feature.ide_ui.ui.content.DecorationListEditor
+import com.mamton.zoomalbum.feature.ide_ui.ui.content.MediaOpeningEditor
 import com.mamton.zoomalbum.feature.ide_ui.ui.content.MixedAwareCornerRadiusSlider
 import com.mamton.zoomalbum.feature.ide_ui.ui.content.MixedAwareOpacitySlider
 import com.mamton.zoomalbum.feature.ide_ui.ui.content.OverlayListEditor
@@ -122,7 +124,8 @@ fun CanvasScaffold(
     var backgroundEditing by remember { mutableStateOf<List<CanvasNode.Frame>>(emptyList()) }
     var cropEditing by remember { mutableStateOf<List<CanvasNode.Media>>(emptyList()) }
     var colorAdjustmentsEditing by remember { mutableStateOf<List<CanvasNode.Media>>(emptyList()) }
-    var frameDecorationEditing by remember { mutableStateOf<List<CanvasNode.Media>>(emptyList()) }
+    var openingEditing by remember { mutableStateOf<List<CanvasNode.Media>>(emptyList()) }
+    var decorationsEditing by remember { mutableStateOf<List<CanvasNode.Media>>(emptyList()) }
     var captionEditing by remember { mutableStateOf<List<CanvasNode.Media>>(emptyList()) }
     var contextMenuRequest by remember { mutableStateOf<ContextMenuRequest?>(null) }
 
@@ -278,8 +281,11 @@ fun CanvasScaffold(
             EditorActionEffect.OpenColorAdjustmentsEditor -> {
                 if (selectionContext.isAllMedia) colorAdjustmentsEditing = selectedMediaInOrder
             }
-            EditorActionEffect.OpenFrameDecorationEditor -> {
-                if (selectionContext.isAllMedia) frameDecorationEditing = selectedMediaInOrder
+            EditorActionEffect.OpenOpeningEditor -> {
+                if (selectionContext.isAllMedia) openingEditing = selectedMediaInOrder
+            }
+            EditorActionEffect.OpenDecorationsEditor -> {
+                if (selectionContext.isAllMedia) decorationsEditing = selectedMediaInOrder
             }
             EditorActionEffect.OpenCaptionEditor -> {
                 if (selectionContext.isAllMedia) captionEditing = selectedMediaInOrder
@@ -706,11 +712,11 @@ fun CanvasScaffold(
 
     when (val t = alphaMaskEditing) {
         is AppearanceTarget.Frames -> ConceptEditorSheet<AlphaMask?>(
-            title = "Alpha mask",
-            initialById = t.nodes.associate { it.id to it.appearance?.alphaMask },
+            title = "Content mask",
+            initialById = t.nodes.associate { it.id to it.appearance?.contentMask },
             onApply = { perId ->
                 dispatchFrameConcept(t.nodes, perId) { existing, v ->
-                    (existing ?: FrameAppearance()).copy(alphaMask = v)
+                    (existing ?: FrameAppearance()).copy(contentMask = v)
                 }
                 alphaMaskEditing = AppearanceTarget.None
             },
@@ -719,11 +725,11 @@ fun CanvasScaffold(
             AlphaMaskEditor(initial = firstDraft, onChange = onChange)
         }
         is AppearanceTarget.Media -> ConceptEditorSheet<AlphaMask?>(
-            title = "Alpha mask",
-            initialById = t.nodes.associate { it.id to it.appearance?.alphaMask },
+            title = "Content mask",
+            initialById = t.nodes.associate { it.id to it.appearance?.contentMask },
             onApply = { perId ->
                 dispatchMediaConcept(t.nodes, perId) { existing, v ->
-                    (existing ?: MediaAppearance()).copy(alphaMask = v)
+                    (existing ?: MediaAppearance()).copy(contentMask = v)
                 }
                 alphaMaskEditing = AppearanceTarget.None
             },
@@ -789,20 +795,37 @@ fun CanvasScaffold(
         }
     }
 
-    if (frameDecorationEditing.isNotEmpty()) {
-        val nodes = frameDecorationEditing
-        ConceptEditorSheet<MediaFrameDecoration?>(
-            title = "Frame decoration",
-            initialById = nodes.associate { it.id to it.appearance?.frameDecoration },
+    if (openingEditing.isNotEmpty()) {
+        val nodes = openingEditing
+        ConceptEditorSheet<MediaOpening?>(
+            title = "Opening",
+            initialById = nodes.associate { it.id to it.appearance?.opening },
             onApply = { perId ->
                 dispatchMediaConcept(nodes, perId) { existing, v ->
-                    (existing ?: MediaAppearance()).copy(frameDecoration = v)
+                    (existing ?: MediaAppearance()).copy(opening = v)
                 }
-                frameDecorationEditing = emptyList()
+                openingEditing = emptyList()
             },
-            onDismiss = { frameDecorationEditing = emptyList() },
+            onDismiss = { openingEditing = emptyList() },
         ) { _, firstDraft, onChange ->
-            MediaFrameDecorationEditor(initial = firstDraft, onChange = onChange)
+            MediaOpeningEditor(initial = firstDraft, onChange = onChange)
+        }
+    }
+
+    if (decorationsEditing.isNotEmpty()) {
+        val nodes = decorationsEditing
+        ConceptEditorSheet<List<MediaDecoration>>(
+            title = "Decorations",
+            initialById = nodes.associate { it.id to (it.appearance?.decorations ?: emptyList()) },
+            onApply = { perId ->
+                dispatchMediaConcept(nodes, perId) { existing, v ->
+                    (existing ?: MediaAppearance()).copy(decorations = v)
+                }
+                decorationsEditing = emptyList()
+            },
+            onDismiss = { decorationsEditing = emptyList() },
+        ) { _, firstDraft, onChange ->
+            DecorationListEditor(initial = firstDraft, onChange = onChange)
         }
     }
 

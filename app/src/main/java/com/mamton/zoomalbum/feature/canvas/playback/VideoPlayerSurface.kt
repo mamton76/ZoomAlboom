@@ -37,15 +37,15 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.exoplayer.ExoPlayer
 import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.CropMode
-import com.mamton.zoomalbum.feature.canvas.view.drawFrameDecoration
+import com.mamton.zoomalbum.domain.model.DecorationPlacement
+import com.mamton.zoomalbum.feature.canvas.view.drawDecoration
 import com.mamton.zoomalbum.feature.canvas.view.drawNodeBorder
 import com.mamton.zoomalbum.feature.canvas.view.drawNodeShadow
 import com.mamton.zoomalbum.feature.canvas.view.drawOverlayStack
 import com.mamton.zoomalbum.feature.canvas.view.drawWithAlphaMask
-import com.mamton.zoomalbum.feature.canvas.view.openingAlphaMask
 import com.mamton.zoomalbum.feature.canvas.view.openingRect
 import com.mamton.zoomalbum.feature.canvas.view.rememberAlphaMaskBitmap
-import com.mamton.zoomalbum.feature.canvas.view.rememberDecorationBitmap
+import com.mamton.zoomalbum.feature.canvas.view.rememberDecorationBitmaps
 import com.mamton.zoomalbum.feature.canvas.view.rememberOverlayTextureBitmaps
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -68,9 +68,9 @@ import kotlin.math.roundToInt
  *   (`drawContent()` over a TextureView child) or the poster bitmap. Overlays
  *   paint above it, still inside the mask; border + shadow stay outside it.
  *
- * Honours opacity, corner radius, border, shadow, crop, overlays, frame
- * decoration, and alpha mask. `colorAdjustments` / `caption` are excluded — they
- * render nowhere yet (§ 27.9).
+ * Honours opacity, corner radius, border, shadow, crop, overlays, decorations
+ * (Above/Below), opening, and content mask. `colorAdjustments` / `caption` are
+ * excluded — they render nowhere yet (§ 27.9).
  */
 @Composable
 private fun VideoSurfaceChrome(
@@ -89,12 +89,10 @@ private fun VideoSurfaceChrome(
     val clipShape = remember(cornerRadius) { roundedPxShape(cornerRadius) }
     val overlays = appearance?.overlays.orEmpty()
     val overlayBitmaps = rememberOverlayTextureBitmaps(overlays)
-    val frameDecoration = appearance?.frameDecoration
-    val decorationBitmap = rememberDecorationBitmap(frameDecoration)
-    val openingMask = frameDecoration?.openingAlphaMask()
-    val openingMaskBitmap = rememberAlphaMaskBitmap(openingMask)
-    val alphaMask = appearance?.alphaMask
-    val maskBitmap = rememberAlphaMaskBitmap(alphaMask)
+    val decorations = appearance?.decorations.orEmpty()
+    val decorationBitmaps = rememberDecorationBitmaps(decorations)
+    val contentMask = appearance?.contentMask
+    val maskBitmap = rememberAlphaMaskBitmap(contentMask)
 
     Box(
         modifier = Modifier
@@ -128,18 +126,21 @@ private fun VideoSurfaceChrome(
                 .fillMaxSize()
                 .clip(clipShape)
                 .then(
-                    if (alphaMask != null || openingMask != null) {
+                    if (contentMask != null) {
                         Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                     } else {
                         Modifier
                     },
                 )
                 .drawWithContent {
-                    // The frame opening confines the video so it can't leak past
-                    // the decoration. Clipping (not rescaling) the content keeps
-                    // the existing crop pipeline untouched — documented limitation.
-                    val opening = frameDecoration?.openingRect(0f, 0f, size.width, size.height)
+                    val opening = appearance?.opening?.openingRect(0f, 0f, size.width, size.height)
                     val content = this
+                    // Below decorations under the content (slice-0: also cut by a
+                    // contentMask when present; correct with no mask).
+                    decorations.filter { it.placement == DecorationPlacement.Below }.forEach {
+                        drawDecoration(it, decorationBitmaps[it.assetUri], 0f, 0f, size.width, size.height)
+                    }
+                    // The opening confines the video to the content area.
                     if (opening == null) {
                         drawBase()
                         if (overlays.isNotEmpty()) {
@@ -165,31 +166,24 @@ private fun VideoSurfaceChrome(
                             }
                         }
                     }
-                    // Empty blocks: base + overlays are already in the offscreen
-                    // layer; these just attenuate its alpha. Opening mask (frame
-                    // hole) then node alpha mask (silhouette) — both DstIn.
-                    val maskRect = Rect(0f, 0f, size.width, size.height)
-                    if (openingMask != null) {
-                        drawWithAlphaMask(maskRect, openingMask, openingMaskBitmap) {}
-                    }
-                    if (alphaMask != null) {
-                        drawWithAlphaMask(maskRect, alphaMask, maskBitmap) {}
+                    // Content mask (DstIn) — base + overlays are already in the
+                    // offscreen layer; empty block just attenuates its alpha.
+                    if (contentMask != null) {
+                        drawWithAlphaMask(Rect(0f, 0f, size.width, size.height), contentMask, maskBitmap) {}
                     }
                 },
             content = child,
         )
 
-        // Frame decoration over the FULL node rect, on top of the (opening-clipped,
-        // mask-cut) content and below the border — composited AFTER the offscreen
-        // mask layer so the frame is never cut by the alpha mask.
-        if (frameDecoration != null) {
+        // Above decorations over the FULL node rect, on top of the (masked)
+        // content and below the border — composited AFTER the offscreen mask
+        // layer so they're never cut by the content mask.
+        val aboveDecorations = decorations.filter { it.placement == DecorationPlacement.Above }
+        if (aboveDecorations.isNotEmpty()) {
             Canvas(modifier = Modifier.fillMaxSize().clip(clipShape)) {
-                drawFrameDecoration(
-                    decoration = frameDecoration,
-                    bitmap = decorationBitmap,
-                    left = 0f, top = 0f,
-                    right = renderW, bottom = renderH,
-                )
+                aboveDecorations.forEach {
+                    drawDecoration(it, decorationBitmaps[it.assetUri], 0f, 0f, renderW, renderH)
+                }
             }
         }
 
@@ -227,7 +221,7 @@ fun VideoPlayerSurface(
     val content = remember(
         node.appearance?.crop, t.renderW, t.renderH,
         node.intrinsicPixelWidth, node.intrinsicPixelHeight,
-        node.appearance?.frameDecoration,
+        node.appearance?.opening,
     ) {
         val target = node.contentTargetRect()
         videoContentRect(
@@ -283,7 +277,7 @@ fun VideoPosterSurface(
     val t = node.transform
     val content = remember(
         node.appearance?.crop, t.renderW, t.renderH, bitmap,
-        node.appearance?.frameDecoration,
+        node.appearance?.opening,
     ) {
         val target = node.contentTargetRect()
         videoContentRect(
@@ -388,7 +382,7 @@ private fun videoContentRect(
 private fun CanvasNode.Media.contentTargetRect(): VideoContentRect {
     val renderW = transform.renderW
     val renderH = transform.renderH
-    val opening = appearance?.frameDecoration?.openingRect(0f, 0f, renderW, renderH)
+    val opening = appearance?.opening?.openingRect(0f, 0f, renderW, renderH)
     return if (opening == null) {
         VideoContentRect(renderW, renderH, 0f, 0f)
     } else {

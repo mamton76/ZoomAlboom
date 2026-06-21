@@ -7,8 +7,10 @@ import com.mamton.zoomalbum.domain.model.CanvasNode
 import com.mamton.zoomalbum.domain.model.FrameAppearance
 import com.mamton.zoomalbum.domain.model.FrameMembershipOverride
 import com.mamton.zoomalbum.domain.model.MediaAppearance
-import com.mamton.zoomalbum.domain.model.MediaFrameDecoration
-import com.mamton.zoomalbum.domain.model.MediaFrameDecorationMode
+import com.mamton.zoomalbum.domain.model.DecorationPlacement
+import com.mamton.zoomalbum.domain.model.MediaDecoration
+import com.mamton.zoomalbum.domain.model.MediaDecorationMode
+import com.mamton.zoomalbum.domain.model.MediaOpening
 import com.mamton.zoomalbum.domain.model.MembershipOrigin
 import com.mamton.zoomalbum.domain.model.MembershipState
 import com.mamton.zoomalbum.domain.model.NodeBlendMode
@@ -203,7 +205,7 @@ class SceneGraphSerializerTest {
     }
 
     @Test
-    fun `round-trip preserves MediaAppearance with overlays border shadow and decoration`() {
+    fun `round-trip preserves MediaAppearance with overlays opening and decoration stack`() {
         val media = CanvasNode.Media(
             id = "m1",
             transform = Transform(cx = 0f, cy = 0f, w = 200f, h = 200f),
@@ -228,10 +230,23 @@ class SceneGraphSerializerTest {
                         blendMode = NodeBlendMode.Screen,
                     ),
                 ),
-                frameDecoration = MediaFrameDecoration(
-                    assetUri = "polaroid.png",
-                    mode = MediaFrameDecorationMode.NineSlice,
-                    sliceLeft = 12f, sliceTop = 12f, sliceRight = 12f, sliceBottom = 80f,
+                opening = MediaOpening(
+                    insetLeft = 0.1f, insetTop = 0.1f, insetRight = 0.1f, insetBottom = 0.25f,
+                ),
+                decorations = listOf(
+                    MediaDecoration(
+                        id = "dec-frame",
+                        assetUri = "polaroid.png",
+                        mode = MediaDecorationMode.NineSlice,
+                        placement = DecorationPlacement.Above,
+                        sliceLeft = 0.12f, sliceTop = 0.12f, sliceRight = 0.12f, sliceBottom = 0.4f,
+                    ),
+                    MediaDecoration(
+                        id = "dec-mat",
+                        assetUri = "mat.png",
+                        mode = MediaDecorationMode.Stretch,
+                        placement = DecorationPlacement.Below,
+                    ),
                 ),
             ),
         )

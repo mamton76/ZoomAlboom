@@ -132,9 +132,9 @@ class AlphaMaskSerializationTest {
     // ── Embedded in MediaAppearance / FrameAppearance ──────────────────────
 
     @Test
-    fun `MediaAppearance round-trips with alphaMask present`() {
+    fun `MediaAppearance round-trips with contentMask present`() {
         val appearance = MediaAppearance(
-            alphaMask = AlphaMask(
+            contentMask = AlphaMask(
                 source = AlphaMaskSource.Image(maskRefId = "mref"),
             ),
         )
@@ -143,9 +143,9 @@ class AlphaMaskSerializationTest {
     }
 
     @Test
-    fun `FrameAppearance round-trips with alphaMask present`() {
+    fun `FrameAppearance round-trips with contentMask present`() {
         val appearance = FrameAppearance(
-            alphaMask = AlphaMask(
+            contentMask = AlphaMask(
                 source = AlphaMaskSource.RadialGradient(
                     stops = listOf(AlphaStop(0f, 1f), AlphaStop(1f, 0f)),
                 ),
@@ -156,30 +156,30 @@ class AlphaMaskSerializationTest {
     }
 
     @Test
-    fun `default null alphaMask is omitted from MediaAppearance JSON`() {
+    fun `default null contentMask is omitted from MediaAppearance JSON`() {
         val encoded = json.encodeToString(MediaAppearance.serializer(), MediaAppearance())
         assertFalse(
-            "Default-null alphaMask should not appear in MediaAppearance output",
-            encoded.contains("alphaMask"),
+            "Default-null contentMask should not appear in MediaAppearance output",
+            encoded.contains("contentMask"),
         )
     }
 
     @Test
-    fun `default null alphaMask is omitted from FrameAppearance JSON`() {
+    fun `default null contentMask is omitted from FrameAppearance JSON`() {
         val encoded = json.encodeToString(FrameAppearance.serializer(), FrameAppearance())
         assertFalse(
-            "Default-null alphaMask should not appear in FrameAppearance output",
-            encoded.contains("alphaMask"),
+            "Default-null contentMask should not appear in FrameAppearance output",
+            encoded.contains("contentMask"),
         )
     }
 
     @Test
-    fun `legacy JSON without alphaMask still deserializes`() {
-        // No `alphaMask` key — exercises the new optional field on existing
+    fun `legacy JSON without contentMask still deserializes`() {
+        // No `contentMask` key — exercises the new optional field on existing
         // round-trips (defensive: the default `null` must apply on read).
         val raw = """{"opacity":0.8,"cornerRadius":4.0}"""
         val restored = json.decodeFromString(MediaAppearance.serializer(), raw)
-        assertNull(restored.alphaMask)
+        assertNull(restored.contentMask)
         assertEquals(0.8f, restored.opacity, 1e-6f)
         assertEquals(4f, restored.cornerRadius, 1e-6f)
     }

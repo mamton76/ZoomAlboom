@@ -80,7 +80,8 @@ sealed interface EditorActionEffect {
     data object OpenBackgroundEditor : EditorActionEffect
     data object OpenCropEditor : EditorActionEffect
     data object OpenColorAdjustmentsEditor : EditorActionEffect
-    data object OpenFrameDecorationEditor : EditorActionEffect
+    data object OpenOpeningEditor : EditorActionEffect
+    data object OpenDecorationsEditor : EditorActionEffect
     data object OpenCaptionEditor : EditorActionEffect
 }
 

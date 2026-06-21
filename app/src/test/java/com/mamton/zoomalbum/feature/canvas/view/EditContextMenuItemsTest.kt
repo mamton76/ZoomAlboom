@@ -112,8 +112,9 @@ class EditContextMenuItemsTest {
         val m = media("m1")
         val (items, sink) = build(req(selection = setOf("m1")), nodes = listOf(m))
 
-        // 5 universal concepts (opacity / corner radius / border / shadow / overlays)
-        // + 4 media-only (crop / color adj / decoration / caption) + Duplicate + Delete.
+        // 6 universal concepts (opacity / corner radius / border / shadow / overlays /
+        // content mask) + 5 media-only (crop / color adj / opening / decorations /
+        // caption) + Duplicate + Delete.
         assertEquals(
             listOf(
                 "Edit opacity",
@@ -121,10 +122,11 @@ class EditContextMenuItemsTest {
                 "Edit border",
                 "Edit shadow",
                 "Edit overlays",
-                "Edit alpha mask",
+                "Edit content mask",
                 "Edit crop",
                 "Edit color adjustments",
-                "Edit frame decoration",
+                "Edit opening",
+                "Edit decorations",
                 "Edit caption",
                 "Duplicate",
                 "Delete",
@@ -163,7 +165,7 @@ class EditContextMenuItemsTest {
         val f = frame("f1")
         val (items, sink) = build(req(selection = setOf("f1")), nodes = listOf(f))
 
-        // 5 universal concepts + Background (frame-only) + Navigate + Duplicate + Delete.
+        // 6 universal concepts + Background (frame-only) + Navigate + Duplicate + Delete.
         assertEquals(
             listOf(
                 "Edit opacity",
@@ -171,7 +173,7 @@ class EditContextMenuItemsTest {
                 "Edit border",
                 "Edit shadow",
                 "Edit overlays",
-                "Edit alpha mask",
+                "Edit content mask",
                 "Edit background",
                 "Navigate to frame",
                 "Duplicate",
@@ -254,11 +256,12 @@ class EditContextMenuItemsTest {
                 "Edit border (2)",
                 "Edit shadow (2)",
                 "Edit overlays (2)",
-                "Edit alpha mask (2)",
+                "Edit content mask (2)",
                 // "Edit crop" hidden for multi-media — `CropEdit` is single-
                 // media only per editor-tools.md § 4.8.
                 "Edit color adjustments (2)",
-                "Edit frame decoration (2)",
+                "Edit opening (2)",
+                "Edit decorations (2)",
                 "Edit caption (2)",
                 "Duplicate selection",
                 "Delete selection",
@@ -289,11 +292,12 @@ class EditContextMenuItemsTest {
                 "Edit border (2)",
                 "Edit shadow (2)",
                 "Edit overlays (2)",
-                "Edit alpha mask (2)",
+                "Edit content mask (2)",
                 // "Edit crop" hidden for multi-media — `CropEdit` is single-
                 // media only per editor-tools.md § 4.8.
                 "Edit color adjustments (2)",
-                "Edit frame decoration (2)",
+                "Edit opening (2)",
+                "Edit decorations (2)",
                 "Edit caption (2)",
                 "Duplicate selection",
                 "Delete selection",
@@ -319,11 +323,12 @@ class EditContextMenuItemsTest {
                 "Edit border (2)",
                 "Edit shadow (2)",
                 "Edit overlays (2)",
-                "Edit alpha mask (2)",
+                "Edit content mask (2)",
                 // "Edit crop" hidden for multi-media — `CropEdit` is single-
                 // media only per editor-tools.md § 4.8.
                 "Edit color adjustments (2)",
-                "Edit frame decoration (2)",
+                "Edit opening (2)",
+                "Edit decorations (2)",
                 "Edit caption (2)",
                 "Duplicate selection",
                 "Delete selection",
@@ -391,16 +396,16 @@ class EditContextMenuItemsTest {
     @Test
     fun `dividers separate sections in the single-media menu`() {
         val (items, _) = build(req(selection = setOf("m")), nodes = listOf(media("m")))
-        // 10 per-concept edits (6 universal incl. alpha mask + 4 media-only) +
+        // 11 per-concept edits (6 universal incl. content mask + 5 media-only) +
         // Duplicate, divider, [z-order row], divider, Delete.
-        assertEquals(15, items.size)
+        assertEquals(16, items.size)
         assertEquals("Edit opacity", items[0].label)
-        assertEquals("Edit caption", items[9].label)
-        assertEquals("Duplicate", items[10].label)
-        assertTrue(items[11].isDivider)
-        assertNotNull(items[12].inlineRow)
-        assertTrue(items[13].isDivider)
-        assertEquals("Delete", items[14].label)
+        assertEquals("Edit caption", items[10].label)
+        assertEquals("Duplicate", items[11].label)
+        assertTrue(items[12].isDivider)
+        assertNotNull(items[13].inlineRow)
+        assertTrue(items[14].isDivider)
+        assertEquals("Delete", items[15].label)
     }
 
     @Test

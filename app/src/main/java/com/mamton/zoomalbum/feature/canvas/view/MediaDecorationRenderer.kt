@@ -18,32 +18,30 @@ import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.request.allowHardware
 import coil3.toBitmap
-import com.mamton.zoomalbum.domain.model.AlphaMask
-import com.mamton.zoomalbum.domain.model.AlphaMaskSource
-import com.mamton.zoomalbum.domain.model.MaskChannel
-import com.mamton.zoomalbum.domain.model.MaskFitMode
-import com.mamton.zoomalbum.domain.model.MediaFrameDecoration
-import com.mamton.zoomalbum.domain.model.MediaFrameDecorationMode
+import com.mamton.zoomalbum.domain.model.MediaDecoration
+import com.mamton.zoomalbum.domain.model.MediaDecorationMode
 import kotlin.math.roundToInt
 
 /**
- * Draws a [MediaFrameDecoration] asset over a media node's rect — step 4 of the
- * media render pipeline (`docs/architecture/media-appearance.md § Rendering
- * Pipeline`): on top of the bitmap + overlays, below cornerRadius / border.
+ * Draws one [MediaDecoration] visual layer over a media node's rect. Decorations
+ * are a *stack* ([com.mamton.zoomalbum.domain.model.MediaAppearance.decorations]):
+ * `Below` layers paint under the content, `Above` layers over the content +
+ * overlays. A decoration carries no clip — the media's shape is owned by
+ * `opening` + `contentMask`. See `docs/architecture/media-appearance.md`.
  *
  * Two modes:
- *  - [MediaFrameDecorationMode.Stretch]  — the whole asset scaled to the rect.
- *  - [MediaFrameDecorationMode.NineSlice] — corners drawn unscaled-relative-to
- *    each other, the four edges stretched along one axis only, the centre
- *    (transparent photo opening) stretched both axes. Lets one frame asset fit
- *    media of any aspect ratio without distorting the corner artwork.
+ *  - [MediaDecorationMode.Stretch]  — the whole asset scaled to the rect.
+ *  - [MediaDecorationMode.NineSlice] — corners drawn uniform-scaled (keeping
+ *    their source aspect ratio), the four edges stretched along one axis only,
+ *    the centre stretched both axes — so one frame asset fits any media aspect
+ *    ratio without distorting the corner artwork.
  *
  * `slice*` insets are fractions (0..1) of the asset's own width/height — they
- * split both the source bitmap and the destination rect. Destination insets are
- * clamped so opposite corners never overlap on small / extreme-aspect nodes.
+ * split both the source bitmap and the destination rect. Destination corners are
+ * clamped so they never overlap on small / extreme-aspect nodes.
  */
-internal fun DrawScope.drawFrameDecoration(
-    decoration: MediaFrameDecoration,
+internal fun DrawScope.drawDecoration(
+    decoration: MediaDecoration,
     bitmap: ImageBitmap?,
     left: Float,
     top: Float,
@@ -58,7 +56,7 @@ internal fun DrawScope.drawFrameDecoration(
     if (alpha <= 0f) return
 
     when (decoration.mode) {
-        MediaFrameDecorationMode.Stretch -> drawImage(
+        MediaDecorationMode.Stretch -> drawImage(
             image = bmp,
             srcOffset = IntOffset.Zero,
             srcSize = IntSize(bmp.width, bmp.height),
@@ -66,14 +64,14 @@ internal fun DrawScope.drawFrameDecoration(
             dstSize = IntSize(w.roundToInt(), h.roundToInt()),
             alpha = alpha,
         )
-        MediaFrameDecorationMode.NineSlice ->
+        MediaDecorationMode.NineSlice ->
             drawNineSlice(bmp, decoration, left, top, w, h, alpha)
     }
 }
 
 private fun DrawScope.drawNineSlice(
     bmp: ImageBitmap,
-    d: MediaFrameDecoration,
+    d: MediaDecoration,
     left: Float,
     top: Float,
     w: Float,
@@ -170,53 +168,45 @@ private fun DrawScope.drawNineSlice(
 }
 
 /**
- * The arbitrary-shape opening as a synthetic [AlphaMask], or null when no
- * `openingMaskUri` is set. Reuses the alpha-mask pipeline (DstIn over an
- * offscreen layer): the mask asset's **luminance** is the opening — white =
- * media visible, black = hidden — stretched to the full node rect so it aligns
- * with the decoration drawn on top. When present this OVERRIDES the rectangular
- * `contentInset*` crop (see [openingRect]).
- *
- * Resolve the bitmap with `rememberAlphaMaskBitmap(openingAlphaMask())`.
- */
-internal fun MediaFrameDecoration.openingAlphaMask(): AlphaMask? {
-    val uri = openingMaskUri?.takeIf { it.isNotBlank() } ?: return null
-    return AlphaMask(
-        source = AlphaMaskSource.Image(
-            maskRefId = uri,
-            channel = MaskChannel.Luminance,
-            fitMode = MaskFitMode.Stretch,
-        ),
-        invert = false,
-    )
-}
-
-/**
- * Resolves a [MediaFrameDecoration]'s `assetUri` into a stable [ImageBitmap].
- * Mirrors [rememberOverlayTextureBitmaps] (single asset): Coil with
- * `allowHardware(false)` + an explicit ARGB_8888 copy so the bitmap keeps its
- * alpha channel (decoration PNGs are transparent). Returns null until decoded /
- * for a blank URI; the renderer simply skips drawing until it arrives.
+ * Resolves the [ImageBitmap]s for a decoration stack into a map keyed by
+ * `assetUri`. Mirrors [rememberOverlayTextureBitmaps]: Coil's
+ * [SingletonImageLoader] with `allowHardware(false)` + an explicit ARGB_8888
+ * copy so each bitmap keeps its alpha channel (decoration PNGs are transparent),
+ * decoded in a [LaunchedEffect] keyed on the distinct URI set. Missing entries
+ * stay absent — the renderer skips a decoration whose bitmap hasn't arrived yet.
  */
 @Composable
-internal fun rememberDecorationBitmap(decoration: MediaFrameDecoration?): ImageBitmap? {
-    val uri = decoration?.assetUri?.takeIf { it.isNotBlank() } ?: return null
-    val context = LocalContext.current
-    var bitmap by remember(uri) { mutableStateOf<ImageBitmap?>(null) }
+internal fun rememberDecorationBitmaps(
+    decorations: List<MediaDecoration>,
+): Map<String, ImageBitmap> {
+    val uris: List<String> = decorations
+        .map { it.assetUri }
+        .filter { it.isNotBlank() }
+        .distinct()
+    if (uris.isEmpty()) return emptyMap()
 
-    LaunchedEffect(uri) {
-        bitmap = runCatching {
-            val request = ImageRequest.Builder(context)
-                .data(uri)
-                .allowHardware(false)
-                .build()
-            val image = (SingletonImageLoader.get(context).execute(request) as? SuccessResult)?.image
-                ?: return@runCatching null
-            val raw = image.toBitmap()
-            val safe = if (raw.config == Bitmap.Config.ARGB_8888) raw
-            else raw.copy(Bitmap.Config.ARGB_8888, false) ?: raw
-            safe.asImageBitmap()
-        }.getOrNull()
+    val context = LocalContext.current
+    val key = uris.joinToString("|")
+    var bitmaps by remember(key) { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
+
+    LaunchedEffect(key) {
+        val loaded = mutableMapOf<String, ImageBitmap>()
+        for (uri in uris) {
+            runCatching {
+                val request = ImageRequest.Builder(context)
+                    .data(uri)
+                    .allowHardware(false)
+                    .build()
+                val image = (SingletonImageLoader.get(context).execute(request) as? SuccessResult)?.image
+                if (image != null) {
+                    val raw = image.toBitmap()
+                    val safe = if (raw.config == Bitmap.Config.ARGB_8888) raw
+                    else raw.copy(Bitmap.Config.ARGB_8888, false) ?: raw
+                    loaded[uri] = safe.asImageBitmap()
+                }
+            }
+        }
+        bitmaps = loaded
     }
-    return bitmap
+    return bitmaps
 }

@@ -26,12 +26,15 @@ sealed class NodeAppearance {
     abstract val shadow: ShadowStyle?
 
     /**
-     * Soft per-pixel alpha mask applied inside the node's clip shape — the
-     * renderer wraps the node draw in an offscreen layer and composites the
-     * mask via `BlendMode.DstIn` (`docs/architecture/appearance.md § 12.4`).
-     * `null` = no mask, fast path with no offscreen layer.
+     * Soft per-pixel mask applied to the node's **content** (a media node's
+     * photo/video pixels + overlays) — the renderer composites it via
+     * `BlendMode.DstIn` inside a content-scoped offscreen layer. `null` = no
+     * mask, fast path with no offscreen layer.
      *
-     * Border and shadow follow the clip rect, not the mask silhouette (§ 12.5).
+     * Clips content **only** — decoration layers
+     * ([MediaAppearance.decorations]) are independent and never cut by it; there
+     * is no whole-node mask. Border and shadow follow the clip rect, not the
+     * mask silhouette (`docs/architecture/appearance.md § 12.5`).
      */
-    abstract val alphaMask: AlphaMask?
+    abstract val contentMask: AlphaMask?
 }

@@ -806,12 +806,29 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 - [ ] `FrameContentEffect` rendering — off-screen pass (`GraphicsLayer.record` / `ColorMatrix`); post-MVP.
 
 ### 20.3 Style presets
-- [ ] `MediaStylePreset` storage — per-album (scene graph) and/or global (app prefs)
-- [ ] `CanvasAction.SaveAppearanceAsPreset(name: String)`
-- [ ] `CanvasAction.ApplyPreset(presetId: String)` — applies to current selection
-- [ ] `CanvasAction.CopyAppearance` / `PasteAppearance` — clipboard for `MediaAppearance` value
-- [ ] `CanvasAction.ResetAppearance` — sets appearance to null (default rendering)
-- [ ] All appearance mutations are undoable via existing snapshot undo
+
+**Design decided 2026-06-21** → [`media-presets.md`](architecture/media-presets.md) (model + UI) + [`media-appearance.md`](architecture/media-appearance.md) content-model refactor. Live-link + per-node overrides, sectioned presets, per-field override *target* (slice-1 UI = whole-section), bake-then-unlink delete, resolution before the render boundary. Two slices, **refactor-first**:
+
+**Slice 0 — content-model refactor (prerequisite, `to_discuss.md § 19`):**
+- [ ] Rename `alphaMask` → `contentMask` on `NodeAppearance` (keep `@SerialName("alphaMask")` → no data migration). Rename `AlphaMask*` editor/renderer symbols accordingly (or keep type name, rename field — TBD in plan).
+- [ ] `MediaFrameDecoration` → `MediaDecoration`: add stable `id`, `placement: Above|Below`; **remove** `contentInset*` + `openingMaskUri`.
+- [ ] `MediaAppearance.frameDecoration: MediaFrameDecoration?` → `decorations: List<MediaDecoration> = emptyList()`.
+- [ ] Add `MediaAppearance.opening: MediaOpening?` (rectangular insets only).
+- [ ] Renderer: loop decorations (Below → content[opening+crop+contentMask] → overlays → Above → border); drop `openingAlphaMask`/`openingRect`-mask path; opening = rectangular resize. Same in `VideoSurfaceChrome`.
+- [ ] Editor: decoration **list** editor (overlay-editor pattern); Opening = rectangular only; arbitrary shapes via the contentMask editor.
+- [ ] Serializer migration: legacy `frameDecoration` → one-item `decorations` (+ `id`, `placement=Above`); `contentInset*` → `opening`; `openingMaskUri` → `contentMask` (Image/Luminance/Stretch) when no contentMask set.
+
+**Slice 1 — static presets:**
+- [ ] App-level `PresetStore` (serialized; Room or JSON in app storage). `MediaStylePreset` gains `sections: Set<AppearanceSection>`.
+- [ ] `PresetBinding(presetId, overridden)` nullable field on `CanvasNode.Media`; serializer back-compat (absent = today's behavior).
+- [ ] Eager resolution `resolve(node, presetStore): MediaAppearance` before the render boundary; renderers/video/export keep taking a concrete `MediaAppearance`; editors read binding/override metadata.
+- [ ] Library + actions: apply / save-as / duplicate / edit / delete. **Delete = bake-then-unlink** (stamp resolved values into bound nodes, clear binding).
+- [ ] Apply-over-overrides prompt (`Replace look` / `Keep my changes`); fresh apply no prompt.
+- [ ] **Override granularity = whole-section** in slice-1 UI; per-field (`AppearancePath`) added section-by-section later (ColorAdjustments first).
+- [ ] Undo: canvas snapshot stack covers `presetBinding` + node override changes; preset *definition* edits stay off the canvas stack (PresetStore own undo later / none for slice 1).
+- [ ] UI surfaces per `media-presets.md § 10`: object editing = preset-aware per-concept sheets; preset editing = aggregate preset-editor sheet (sections + governs checkbox, reuses concept composables); `Apply Preset` + `Preset: <name>` context-menu entries.
+- [ ] `CanvasAction.ResetAppearance` — clears appearance/binding to default rendering.
+- (Later, separate) `CopyAppearance` / `PasteAppearance`.
 
 ### 20.4 Rendered derivatives
 - [ ] `CanvasAction.SaveRenderedDerivative` — flatten source + appearance into a new image file

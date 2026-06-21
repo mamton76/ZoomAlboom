@@ -2,7 +2,9 @@
 
 > This file is for **unresolved** design questions only. Reconciled topics live in `docs/architecture/`.
 >
-> **Numbering:** section numbers are never reused. Graduated topics keep their original `§` number in the "Recently graduated" trailer (currently `§ 1`–`§ 11`, `§ 13`, `§ 15`), so the remaining open topics are `§ 12`, `§ 14`, `§ 16`; new open topics start above `§ 16`.
+> **Numbering:** section numbers are never reused. Graduated topics keep their original `§` number in the "Recently graduated" trailer (currently `§ 1`–`§ 11`, `§ 13`, `§ 15`, `§ 17`–`§ 19`), so the remaining open topics are `§ 12`, `§ 14`, `§ 16`, and the **Media Appearance Presets cluster `§ 20`–`§ 27`** (added 2026-06-21). New open topics start above `§ 27`.
+>
+> **The `§ 17`–`§ 27` cluster** captures the post-video / post-frame-decoration product direction: getting to a usable personal-album tool fast. **Decided 2026-06-21:** `§ 17` preset model + `§ 18` preset UI → `docs/architecture/media-presets.md`; `§ 19` content-model refactor (contentMask / rectangular opening / decorations list / drop openingMaskUri) → `docs/architecture/media-appearance.md` — all implementation pending. The rest are preserved so the near-term work is designed in the right direction. Suggested sequencing is in `§ 27`.
 
 ---
 
@@ -67,7 +69,113 @@ Nested frames are a core storytelling model (parent = broad scene, children = de
 
 ---
 
+## § 20 Overlay editor improvements
+
+**Status:** open — overlay-editing UX (renderer already supports the overlay stack).
+
+**List redesign:** overlay editor as a list of layers; per overlay: thumbnail, **visibility toggle**, opacity, blend mode, delete, reorder (later).
+
+**Hide vs. delete:** removing an overlay shouldn't immediately destroy it — a visibility checkbox lets the user compare an overlay's contribution without losing it. Explicit delete still exists.
+
+**Combined preview (open):** show each overlay separately, the combined stack, or both? Likely both eventually — small per-overlay preview + combined-stack preview at the top. Shares the preview infrastructure with the preset previews (`media-presets.md § 10`).
+
+Also relevant to decorations: the decoration-list editor (`media-appearance.md` content-model refactor) should follow this same list pattern (thumbnail, visibility toggle, reorder, hide-vs-delete).
+
+---
+
+## § 21 Animated media appearance presets
+
+**Status:** open — **next** after static presets; the emotional differentiator. Do **not** build a timeline editor early.
+
+**Core idea:** a preset can be static or animated. Animated = a transition between two appearance states (A → B), e.g. "Memory → Now", "Film → Reality", "Vintage → Alive": an object starts as a faded memory and, on interaction, becomes vivid/alive.
+
+**Model (simplest):** Start appearance + End appearance + transition settings. Two states only; interpolate between them. Same `MediaAppearance` applies to images and videos.
+
+**Triggering (key product call):** animation is a **reaction, not permanent motion**. Avoid constant autoplay on the canvas. Candidate triggers: tap / focus / entering viewport / explicit replay. Looping is fine in the preset preview/editor, not on the canvas.
+
+**Transition design:** naive simultaneous crossfade produces a "naked image" moment mid-transition (all effects weak at 50%). Overlap is better — effects appear/disappear at different timing ranges (blur clears early, grain a bit later, colour returns later, frame fades with overlap).
+
+**Transition UI — two approaches debated:**
+- *A — intermediate states*: user defines mid "states" with sections on/off. Risk: drifts into a timeline editor; accidental overlap.
+- *B — per-effect timing* (preferred): Start on the left, End on the right; below, each changed section gets timing (when it starts / finishes changing). First version may use coarse presets (Early / Middle / Late) instead of full sliders.
+
+**Video + animated appearance (conflict):** video already moves; animated appearance adds a second motion layer, and playback gestures vs. animation gestures could collide. **MVP rule:** images first; video + animated appearance is a later topic.
+
+**User awareness (unresolved):** does an animated appearance need a visible affordance? A video-style play icon may confuse (it isn't video); subtle hints may be better. Needs design.
+
+**Candidate first presets** (first one should be emotionally strong + technically simple):
+- **Memory → Now / Film → Reality** (most promising): sepia + low saturation + grain + slight blur + old frame → clean colour, sharper, grain/frame reduced.
+- Color Bloom (B&W → vivid), Dust Off (dust fades, image cleans), Light Leak Reveal, Frame Break (photo escapes its frame), Soft Memory (blurred glow → sharp).
+
+---
+
+## § 22 Video poster / preview frame
+
+**Status:** open — small but high-value for video polish.
+
+Today the poster is a fixed/first frame (zero-storage Coil extraction per `video.md`). Desired: the user **picks** which frame is the poster — shown when idle, styled through the same `MediaAppearance` pipeline, and used as the playback starting point.
+
+**Key insight:** if poster time ≠ playback-start time, play visibly jumps. Current leaning: **poster frame time = playback start time** (or at least an explicit distinction between the two).
+
+**Smooth poster → video:** start the player at the poster/start time, keep the poster visible until the first decoded frame is ready, then short fade poster → live video (no jump). Connects to the player-pool work in `video.md`.
+
+---
+
+## § 23 Video scrub / rewind
+
+**Status:** open — **preserve, not a priority.** Enables `§ 22` (pick poster/start frame) and lightweight playback control without becoming a video editor. Possible UI: a thin scrub bar in video settings; drag to choose a frame; current frame becomes poster/start. Explicitly not for the immediate preset work.
+
+---
+
+## § 24 Batch media operations
+
+**Status:** open — needed soon for practical album building.
+
+**Batch import:** select multiple photos/videos and add together; if a frame is selected, distribute inside it; otherwise place in the current viewport.
+
+**Auto-layout:** don't stack at one point — grid placement, preserve aspect ratios, padding/gap, optionally fit inside the selected frame.
+
+**Multi-select operations:** align left/center/right, top/middle/bottom; distribute horizontally/vertically; match size/spacing later.
+
+**Appearance on multiple objects:** verify preset apply to one vs. several; object-level overrides under multi-selection; mixed-value display (ties to `§ 17` overrides + `appearance.md § 14` "Mixed").
+
+---
+
+## § 25 Android share intents
+
+**Status:** open — practical on-ramp for getting media in.
+
+Share photos/videos from Gallery / Google Photos / other apps into ZoomAlboom. Flows: new album/project from shared media · add to existing project · add to the currently open project. Support `ACTION_SEND` + `ACTION_SEND_MULTIPLE`, content URIs, persistable permissions where possible, copy/import into app storage when needed.
+
+**Google Photos caveat:** may hand back content URIs that are remote-backed or temporary — the import path must robustly **copy media into app-controlled storage** rather than assume a stable local URI. Connects to `§ 14` Media Library but can start without it.
+
+---
+
+## § 26 Editor / View / preset-preview modes — animation behavior per mode
+
+**Status:** open — extends the Edit-vs-View thinking in `§ 16` to animated appearance (`§ 21`).
+
+Keep three contexts distinct: **Edit** (canvas authoring), **View / Present**, **Preset preview**. Proposed animation behavior: preset editor loops or replays on demand; Edit canvas previews explicitly; View/Present triggers on interaction/focus/viewport, never constant autoplay. Needs more UX design.
+
+---
+
+## § 27 Scope guardrails + suggested sequencing (cross-cutting)
+
+**Status:** meta — shared decision context for the `§ 17`–`§ 26` cluster.
+
+**Avoid right now:** full timeline editor · complex keyframes · full video editor · multiple masks per decoration (decided against — `media-appearance.md` content-model refactor) · whole-node masking · persistent animation state on every object unless needed · heavy Media Library before basic presets work · constant autoplay on the canvas.
+
+**Suggested sequencing:**
+- *Near-term:* **slice 0 — content-model refactor** (`§ 19` → [`media-appearance.md`](architecture/media-appearance.md): contentMask rename, rectangular `opening`, `decorations` list + placement, drop `openingMaskUri`; **refactor-first**) → **slice 1 — static appearance presets** (model + UI decided, `§ 17` + `§ 18` → [`media-presets.md`](architecture/media-presets.md)): resolution + binding + library + apply/save/duplicate/delete (bake-then-unlink), whole-section overrides → then per-field overrides section-by-section → per-section preview polish (with `§ 20`).
+- *Next:* animated preset MVP Start→End (`§ 21`) → one strong preset ("Memory → Now") → basic trigger/preview behavior (`§ 26`) → video poster-time = start-time model (`§ 22`).
+- *Later:* video scrub (`§ 23`) → share intents (`§ 25`) → batch import + grid placement (`§ 24`) → multi-select align/distribute (`§ 24`) → Media Library (`§ 14`) → advanced animated-timing UI (`§ 21`).
+
+---
+
 > Recently graduated out of this file:
+> - **§ 19 Content-model refactor (decoration stack + mask/opening dedup)** **decided 2026-06-21** → `docs/architecture/media-appearance.md` ("content-model refactor" block); implementation pending, **refactor-first (before preset slice 1)**. Resolutions: five stages — node rect → **`opening`** (rectangular content-area slot / resize, no mask) → **`crop`** (fit media in the area) → **`contentMask`** (arbitrary-shape clip of *content only*) → **`decorations`** (visual layers around/above/below, not clipped). Model: `alphaMask` → **`contentMask`** (rename, keep `@SerialName("alphaMask")` → no data migration; clips content not node); `frameDecoration: MediaFrameDecoration?` → **`decorations: List<MediaDecoration>`** (pure visual layer: `id` + `assetUri` + `opacity` + `mode` + `slice*` + `placement: Above|Below`); new rectangular **`opening: MediaOpening?`**; **remove `openingMaskUri`** (redundant with `contentMask`). **No whole-node mask** (clip content, keep decorations whole — scrapbook behavior). **Single** contentMask + opening; decorations carry neither. Render order: Below → content(opening+crop+contentMask) → overlays → Above → border. Migration: legacy `frameDecoration` → one-item list + `opening`; `openingMaskUri` → `contentMask`. Item-level stack overrides deferred (stable `id`s make them feasible later; a *local additive layer* ≠ a scalar override — `media-presets.md § 6`). Decoration-list editor tracks the overlay editor (§ 20).
+> - **§ 18 Preset library + detail/editor UI** **decided 2026-06-21** → `docs/architecture/media-presets.md § 10` (implementation pending). UI companion to § 17. Resolution: **three surfaces reusing the existing per-concept `ConceptEditorSheet` composables** — (1) object editing stays the per-concept sheets, made preset-aware (inherited/overridden + reset per concept; editing creates the override); (2) preset editing = a new **aggregate preset-editor sheet** (sections + governs-checkbox + expandable concept editors), entered explicitly from a library card so edit-preset and edit-object are **separate surfaces** (kills the apply-vs-edit ambiguity); (3) **library** = card sheet from a new `Apply Preset` context-menu entry. A bound object surfaces its link via a context-menu **`Preset: <name>` section** (Apply other · Edit · Unlink · Reset all); `Save as preset` opens the preset editor pre-checked with the object's non-default sections. **Apply over existing overrides prompts** `Replace look` (clear) vs `Keep my changes`; fresh apply doesn't prompt. **Preview subject:** single → that media; multi → first selected; bundled **sample only when nothing selected**; cards use the same subject. Inherited = muted + preset chip, overridden = active + reset ↺, mixed = "Mixed" (`appearance.md § 14`); slice-1 whole-section, per-field later. Remaining (card layout, per-section preview rendering, empty-state) is implementation detail.
+> - **§ 17 Media Appearance Presets** **design decided 2026-06-21** → `docs/architecture/media-presets.md` (new source of truth); implementation pending. Resolution: **live link + overrides** (a node binds to a preset via `PresetBinding(presetId, overridden)`; effective appearance resolves preset ∪ per-node overrides; editing a preset updates linked nodes unless overridden) — chosen over the simpler stamp/copy model. Presets are **sectioned/partial** (`MediaStylePreset.sections` governs whole sections; Apply overwrites only those). Override **target is per-field/leaf-path** (`AppearancePath`), with a staged **hybrid boundary**: per-field for Opacity/CornerRadius/ColorAdjustments/Border/Shadow, whole-unit for Crop/AlphaMask, **whole-stack** for Overlays + FrameDecoration (both are layer stacks; item-level overrides deferred until layer items have stable IDs — § 19). **Slice 1 ships whole-section override UI only**; per-field UI added section-by-section (ColorAdjustments first). **Deletion = bake-then-unlink** (stamp resolved values into bound nodes, clear binding; no visual break). **Undo:** canvas stack covers binding + node overrides; preset *definition* edits are app-global and stay off the canvas undo stack. **Renderer** receives a resolved concrete `MediaAppearance` (resolution happens before the render boundary; editors additionally read binding/override metadata). **Single appearance-level media mask** — decoration layers don't each clip the media (§ 5 of the doc, § 19 here). App-level storage first; asset-ref portability ties to § 14. UI decided in § 18 (→ `media-presets.md § 10`); related open topics: § 19 (decoration stack), § 20 (overlay editor). Implementation staging in `media-presets.md § 7`; actions tracked in `todo.md § 20.3`.
 > - **§ 13 Video MVP — Edit-vs-View playback** **design decided 2026-06-17** → `docs/architecture/video.md` (new source of truth); implementation pending. Resolution: video is **playable "living media" on the canvas, not a video editor**; a video node behaves exactly like an image node for transform/selection. Specific resolutions: (Model bridge) **no migration** — `CanvasNode.Media` already carries `mediaRefId` (a raw URI today) + `mediaType` (with `VIDEO` already in the enum); MVP activates the `VIDEO` path and keeps `mediaRefId` a raw URI, no `MediaAsset` indirection, no new field — pointed toward the future Media Library (§ 14) without building it. (Poster) **zero-storage** — lazy frame extraction via Coil's `coil-video` decoder on the existing Coil path; no import step, no stored poster, no model field; custom poster deferred. (Edit vs. View) View/Present taps anywhere → play/pause; **Edit taps select**, playback comes from a **node-local play button on the selected node's poster** that yields to transform handles and never extends selection. (Concurrency) **simultaneous playback via a bounded player pool** built now — LOD bounds candidates to `RenderDetail.Full`, a pool of *K* players (K from a device decoder-capability probe, since hardware `MediaCodec` decoders are capped ~4–8) with an eviction policy and poster fallback when exhausted; a deliberate scope expansion past "keep the first slice small." (Playback host) `AndroidView`-hosted Media3 `ExoPlayer`, mounted only at `RenderDetail.Full` for pool-assigned playing nodes; playback + pool state in a `CanvasScaffold`-level holder keyed by `nodeId`, never in domain models (per § 11). New deps: Media3 ExoPlayer + `coil-video`. Deferred (not first slice): loop/mute/start-position, custom poster, inline controls, autoplay-on-frame-entry, pause-on-leave, `AlbumVideoDefaults`. Next deliverable is the implementation plan; slices in `todo.md § 27`.
 > - **§ 15 CropEdit stabilization — invariant + cancel/undo** **decided 2026-06-17** → `docs/architecture/editor-tools.md § 4.8` (**Persistence + invariant**, **Undo granularity**, **Cancel**); implementation pending. Grounding pass against `CanvasViewModel.kt` found the invariant guard partially wired and a live cancel↔undo inconsistency (each crop gesture pushed its own `Compound` entry while `CancelCropEdit` restored out-of-band, leaving orphan entries on the undo stack). Resolutions: (Invariant) strengthened from "exactly one media selected" to **"the selection is exactly the node in `entrySnapshot`"**; `enforceCropEditInvariant()` must also fire on **View/Present switch** (`SetMode`), on **selection → a different single media** (`selectedMediaId != entrySnapshot.nodeId`), and after **Undo/Redo** — three gaps to fix (the already-wired cases: empty/multi/frame-selected, delete, tool-switch). Re-anchoring to a newly-selected node is a deferred future UX, not part of stabilization. (Undo) **session-compound** — per-gesture history is suppressed while `CropEdit` is active; the whole session is **one `Compound` entry pushed on Apply/exit**; **Cancel pushes nothing** and leaves the stack clean; in-session ops are not individually undoable. Consistent with the per-popup-session compound-undo convention. Implementation slice in `todo.md § 20.9`.
 > - **§ 5 Album storage & cloud sync** **fully decided 2026-06-03** → `docs/architecture/cloud-sync.md` (new source of truth). Resolution: **local-first automatic snapshot sync with conflict-safe editing** — not manual-only backup, not real-time collaboration. Specific resolutions: (Open flow) cloud-connected albums open the local copy immediately in View mode but keep Edit mode disabled until the remote head-revision check completes; offline editing requires an explicit `Edit offline anyway` confirmation. (Conflict policy) divergence preserves the local branch as a separate conflict-copy album (`"Italy Trip" / "Italy Trip — local conflict copy"`) and restores the primary album from the remote head — never overwrite, never auto-merge. (Sync triggers) open-time revision check + post-commit automatic sync at the `FinishInteraction` boundary + retry on network return + manual `Sync now`; debounced/coalesced, background lifecycle is best-effort only. (Model direction) **rejected `storageMode = Local | GoogleDrive`** on `Album`; cloud connection is a separate optional `RemoteBinding` (sealed, per-provider) keyed by stable `AlbumId`. Conflict detection uses **revision lineage**, not timestamps — `(headRevisionId, parentRevisionId)` on each stable commit, with the local `FinishInteraction` boundary as the commit boundary. Per-album = per-Drive-folder. (Future encryption) architecture must remain compatible with end-to-end / zero-knowledge encryption: remote stores opaque blobs only; sync MUST NOT depend on the provider inspecting or merging plaintext — which is exactly why conflict-copy preservation is chosen over auto-merge. Deferred to the implementation slice (not blocking this decision): OAuth flow, concrete `RemoteBinding` field set, debounce window, conflict-copy naming beyond the suffix example, quota/chunking, multi-device advisory hints, encryption key management UX. Documentation-only change; no Google Drive code lands in the current `EditorState` / `ActiveTool` / `Eraser` work. Implementation slices listed (deferred) in `todo.md § 26`.

@@ -249,6 +249,30 @@ Stored in `filesDir/media/<albumId>/rendered/`.
 - **Opening crop** — `contentInset*` is consumed: the media is scaled into + clipped to the opening rect (`MediaFrameDecoration.openingRect`), the decoration draws over the full rect on top, composited **after** the `alphaMask` layer so the frame isn't cut by the mask. Video rescales into the opening too — `videoContentRect` computes against the opening rect (`CanvasNode.Media.contentTargetRect`), so a framed video fills the hole like a framed photo.
 - **Arbitrary-shape opening** — `openingMaskUri` is consumed: `MediaFrameDecoration.openingAlphaMask()` builds a synthetic `AlphaMask` (Image source, Luminance, Stretch) that the renderer DstIn-composites over the media in the offscreen layer (alongside any node `alphaMask`), overriding the rectangular `contentInset*`. White = opening. Works on both still media and video; the editor's Opening section has a mask picker that hides the rectangular inset fields when a mask is set.
 
+**Decided 2026-06-21 — content-model refactor (implementation pending; supersedes parts of the 2026-06-20 block; "refactor-first", before preset slice 1):**
+
+Locks the appearance model so presets (`media-presets.md`) and a future decoration *stack* aren't blocked. Graduated from `to_discuss.md § 19`. Five conceptual stages per media node, in order:
+
+1. **canvas rect** — the full decorated node.
+2. **`opening: MediaOpening?`** — a **rectangular** content-area slot inside the node rect (a *resize/inset* — e.g. the inner window of a Polaroid; the white margins stay outside the content area). Rectangular **only**; no mask URI.
+3. **`crop`** — how the photo/video is fitted/cropped *inside* that content area (mode/focal/offset/zoom). Distinct from `opening`: opening = where/how big the content area is; crop = how media fills it. Not duplicates.
+4. **`contentMask: ContentMask?`** — arbitrary-shape alpha/luminance/procedural clip of the **content only** (renamed from `alphaMask`; see below). Composes with `opening` (resize into the area, then cut to shape).
+5. **`decorations: List<MediaDecoration>`** — visual layers drawn **around / above / below** the content, **not** clipped by `contentMask`. Render order: `Below` decorations → content (opening+crop+contentMask) → overlays → `Above` decorations → border.
+
+**Model changes (target):**
+- `alphaMask` → **`contentMask`** (rename on the base `NodeAppearance`; clips the object's *content*, not the whole node — decorations are independent). Semantic name; keep `@SerialName("alphaMask")` so existing data needs **no migration**. The same concept applies to future frame-like content.
+- `MediaAppearance.frameDecoration: MediaFrameDecoration?` → **`decorations: List<MediaDecoration>`** (renamed type — not just "frames": tape, bow, sticker, label, torn/burnt edge, ticket stub…). Each `MediaDecoration` is a **pure visual layer**: `id` (stable — reorder + future item-level overrides), `assetUri`, `opacity`, `mode`, `slice*`, `placement: Above|Below` (default `Above`). **No opening/mask fields on a decoration.**
+- New **`opening: MediaOpening?`** on `MediaAppearance` — rectangular insets only (`insetLeft/Top/Right/Bottom`).
+- **Remove `openingMaskUri`** (redundant with `contentMask`). Arbitrary opening shapes route through `contentMask`.
+
+**No whole-node mask** — current scrapbook/framed scenarios want to clip the *content* while keeping frame/tape/sticker/label decorations whole. Do not introduce node-wide masking until a use case requires it.
+
+**Single mask/opening** — exactly one `contentMask` + one rectangular `opening` per node; decorations carry neither. (Satisfies the `to_discuss.md § 19` single-mask constraint by construction.)
+
+**Migration (serializer):** legacy `frameDecoration` → one-item `decorations` list (generated `id`, `placement = Above`, opening fields stripped); its `contentInset*` → `opening`; its `openingMaskUri` → `contentMask` (`Image`/`Luminance`/`Stretch`) when no `contentMask` already set. `alphaMask` JSON keeps reading via the retained `@SerialName`.
+
+**Deferred (do not build now):** item-level stack overrides (add a local layer over an inherited stack, hide/show/reorder/opacity one inherited layer) — feasible later because decorations now have stable `id`s; a *local additive layer* is a distinct override kind from a scalar override (see `media-presets.md § 6`). Decoration-list editor tracks the overlay-editor pattern (`to_discuss.md § 20`).
+
 **Landed 2026-06-07 (CropEdit slice — see [editor-tools.md § 4.8](editor-tools.md#48-cropedit) and [todo.md § 20.8](../todo.md#208-cropedit-slice--manual-renderer--in-canvas-handles)):**
 - `CropMode.Manual` rendering — `FullMediaRenderer.drawCroppedBitmap` reads `crop.{offsetX, offsetY, zoom}` directly; composes with rounded corners, `alphaMask`, `overlays`, border, and shadow per the pipeline above. `zoom = 1` is the Fill scale.
 - In-canvas crop handle — `EditorTool.CropEdit` ships with four corner + four edge handles, drag-inside-rect pans the source under the viewport, two-finger pinch zooms source around the centroid, topbar slider provides slider-driven zoom, Cancel reverts the session. Model A — no source-space `cropRect` field; `CropSettings` is unchanged.

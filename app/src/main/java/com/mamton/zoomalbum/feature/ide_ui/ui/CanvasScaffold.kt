@@ -36,6 +36,7 @@ import com.mamton.zoomalbum.domain.model.FrameAppearance
 import com.mamton.zoomalbum.domain.model.MediaAppearance
 import com.mamton.zoomalbum.domain.model.MediaType
 import com.mamton.zoomalbum.feature.canvas.playback.rememberVideoPlaybackController
+import com.mamton.zoomalbum.domain.model.AppearanceSection
 import com.mamton.zoomalbum.domain.model.MediaColorAdjustments
 import com.mamton.zoomalbum.domain.model.MediaDecoration
 import com.mamton.zoomalbum.domain.model.MediaOpening
@@ -54,6 +55,7 @@ import com.mamton.zoomalbum.feature.canvas.view.SelectionDebugPanel
 import com.mamton.zoomalbum.feature.canvas.view.buildEditContextMenuItems
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
+import com.mamton.zoomalbum.feature.canvas.viewmodel.MediaNodePatch
 import com.mamton.zoomalbum.domain.undo.InteractionKind
 import com.mamton.zoomalbum.feature.ide_ui.ui.content.AlphaMaskEditor
 import com.mamton.zoomalbum.feature.ide_ui.ui.content.BackgroundEditor
@@ -70,6 +72,7 @@ import com.mamton.zoomalbum.feature.ide_ui.ui.content.ShadowStyleEditor
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.AddContentBottomSheet
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.AlbumSettingsBottomSheet
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.ConceptEditorSheet
+import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.PresetLibrarySheet
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.FrameListBottomSheet
 import com.mamton.zoomalbum.feature.ide_ui.viewmodel.IdeViewModel
 
@@ -127,6 +130,7 @@ fun CanvasScaffold(
     var openingEditing by remember { mutableStateOf<List<CanvasNode.Media>>(emptyList()) }
     var decorationsEditing by remember { mutableStateOf<List<CanvasNode.Media>>(emptyList()) }
     var captionEditing by remember { mutableStateOf<List<CanvasNode.Media>>(emptyList()) }
+    var presetLibraryEditing by remember { mutableStateOf<List<CanvasNode.Media>>(emptyList()) }
     var contextMenuRequest by remember { mutableStateOf<ContextMenuRequest?>(null) }
 
     // Top-level chrome controls (top bar, FAB) treat their tap as an outside-tap
@@ -290,6 +294,9 @@ fun CanvasScaffold(
             EditorActionEffect.OpenCaptionEditor -> {
                 if (selectionContext.isAllMedia) captionEditing = selectedMediaInOrder
             }
+            EditorActionEffect.OpenPresetLibrary -> {
+                if (selectionContext.isAllMedia) presetLibraryEditing = selectedMediaInOrder
+            }
         }
     }
 
@@ -311,13 +318,28 @@ fun CanvasScaffold(
     fun <T> dispatchMediaConcept(
         nodes: List<CanvasNode.Media>,
         perId: Map<String, T>,
+        section: AppearanceSection,
         merge: (existing: MediaAppearance?, value: T) -> MediaAppearance,
     ) {
         val byId = nodes.associateBy { it.id }
-        val appearancesById: Map<String, MediaAppearance?> = perId.mapValues { (id, value) ->
-            merge(byId[id]?.appearance, value)
+        val patches: Map<String, MediaNodePatch> = perId.mapValues { (id, value) ->
+            val node = byId[id]
+            val appearance = merge(node?.appearance, value)
+            val binding = node?.presetBinding
+            // Editing a concept on a bound node detaches that section from the preset.
+            MediaNodePatch(
+                appearance = appearance,
+                binding = binding?.copy(overridden = binding.overridden + section),
+            )
         }
-        canvasViewModel.onAction(CanvasAction.SetMediaAppearance(appearancesById = appearancesById))
+        // No bound node → a plain appearance update (identical history to before).
+        if (patches.values.all { it.binding == null }) {
+            canvasViewModel.onAction(
+                CanvasAction.SetMediaAppearance(patches.mapValues { it.value.appearance }),
+            )
+        } else {
+            canvasViewModel.onAction(CanvasAction.UpdateMediaNodes(patches))
+        }
     }
 
     Scaffold(
@@ -576,7 +598,7 @@ fun CanvasScaffold(
             title = "Opacity",
             initialById = t.nodes.associate { it.id to (it.appearance?.opacity ?: 1f) },
             onApply = { perId ->
-                dispatchMediaConcept(t.nodes, perId) { existing, v ->
+                dispatchMediaConcept(t.nodes, perId, AppearanceSection.Opacity) { existing, v ->
                     (existing ?: MediaAppearance()).copy(opacity = v)
                 }
                 opacityEditing = AppearanceTarget.None
@@ -602,7 +624,7 @@ fun CanvasScaffold(
             title = "Corner radius",
             initialById = t.nodes.associate { it.id to (it.appearance?.cornerRadius ?: 0f) },
             onApply = { perId ->
-                dispatchMediaConcept(t.nodes, perId) { existing, v ->
+                dispatchMediaConcept(t.nodes, perId, AppearanceSection.CornerRadius) { existing, v ->
                     (existing ?: MediaAppearance()).copy(cornerRadius = v)
                 }
                 cornerRadiusEditing = AppearanceTarget.None
@@ -630,7 +652,7 @@ fun CanvasScaffold(
             title = "Border",
             initialById = t.nodes.associate { it.id to it.appearance?.border },
             onApply = { perId ->
-                dispatchMediaConcept(t.nodes, perId) { existing, v ->
+                dispatchMediaConcept(t.nodes, perId, AppearanceSection.Border) { existing, v ->
                     (existing ?: MediaAppearance()).copy(border = v)
                 }
                 borderEditing = AppearanceTarget.None
@@ -660,7 +682,7 @@ fun CanvasScaffold(
             title = "Shadow",
             initialById = t.nodes.associate { it.id to it.appearance?.shadow },
             onApply = { perId ->
-                dispatchMediaConcept(t.nodes, perId) { existing, v ->
+                dispatchMediaConcept(t.nodes, perId, AppearanceSection.Shadow) { existing, v ->
                     (existing ?: MediaAppearance()).copy(shadow = v)
                 }
                 shadowEditing = AppearanceTarget.None
@@ -694,7 +716,7 @@ fun CanvasScaffold(
             title = "Overlays",
             initialById = t.nodes.associate { it.id to (it.appearance?.overlays ?: emptyList()) },
             onApply = { perId ->
-                dispatchMediaConcept(t.nodes, perId) { existing, v ->
+                dispatchMediaConcept(t.nodes, perId, AppearanceSection.Overlays) { existing, v ->
                     (existing ?: MediaAppearance()).copy(overlays = v)
                 }
                 overlaysEditing = AppearanceTarget.None
@@ -728,7 +750,7 @@ fun CanvasScaffold(
             title = "Content mask",
             initialById = t.nodes.associate { it.id to it.appearance?.contentMask },
             onApply = { perId ->
-                dispatchMediaConcept(t.nodes, perId) { existing, v ->
+                dispatchMediaConcept(t.nodes, perId, AppearanceSection.ContentMask) { existing, v ->
                     (existing ?: MediaAppearance()).copy(contentMask = v)
                 }
                 alphaMaskEditing = AppearanceTarget.None
@@ -767,7 +789,7 @@ fun CanvasScaffold(
             title = "Crop",
             initialById = nodes.associate { it.id to (it.appearance?.crop ?: CropSettings()) },
             onApply = { perId ->
-                dispatchMediaConcept(nodes, perId) { existing, v ->
+                dispatchMediaConcept(nodes, perId, AppearanceSection.Crop) { existing, v ->
                     (existing ?: MediaAppearance()).copy(crop = v)
                 }
                 cropEditing = emptyList()
@@ -784,7 +806,7 @@ fun CanvasScaffold(
             title = "Color adjustments",
             initialById = nodes.associate { it.id to it.appearance?.colorAdjustments },
             onApply = { perId ->
-                dispatchMediaConcept(nodes, perId) { existing, v ->
+                dispatchMediaConcept(nodes, perId, AppearanceSection.ColorAdjustments) { existing, v ->
                     (existing ?: MediaAppearance()).copy(colorAdjustments = v)
                 }
                 colorAdjustmentsEditing = emptyList()
@@ -801,7 +823,7 @@ fun CanvasScaffold(
             title = "Opening",
             initialById = nodes.associate { it.id to it.appearance?.opening },
             onApply = { perId ->
-                dispatchMediaConcept(nodes, perId) { existing, v ->
+                dispatchMediaConcept(nodes, perId, AppearanceSection.Opening) { existing, v ->
                     (existing ?: MediaAppearance()).copy(opening = v)
                 }
                 openingEditing = emptyList()
@@ -818,7 +840,7 @@ fun CanvasScaffold(
             title = "Decorations",
             initialById = nodes.associate { it.id to (it.appearance?.decorations ?: emptyList()) },
             onApply = { perId ->
-                dispatchMediaConcept(nodes, perId) { existing, v ->
+                dispatchMediaConcept(nodes, perId, AppearanceSection.Decorations) { existing, v ->
                     (existing ?: MediaAppearance()).copy(decorations = v)
                 }
                 decorationsEditing = emptyList()
@@ -835,7 +857,7 @@ fun CanvasScaffold(
             title = "Caption",
             initialById = nodes.associate { it.id to it.appearance?.caption },
             onApply = { perId ->
-                dispatchMediaConcept(nodes, perId) { existing, v ->
+                dispatchMediaConcept(nodes, perId, AppearanceSection.Caption) { existing, v ->
                     (existing ?: MediaAppearance()).copy(caption = v)
                 }
                 captionEditing = emptyList()
@@ -844,6 +866,26 @@ fun CanvasScaffold(
         ) { _, firstDraft, onChange ->
             CaptionStyleEditor(initial = firstDraft, onChange = onChange)
         }
+    }
+
+    if (presetLibraryEditing.isNotEmpty()) {
+        val nodes = presetLibraryEditing
+        val ids = remember(nodes) { nodes.map { it.id }.toSet() }
+        val presets by canvasViewModel.presets.collectAsStateWithLifecycle()
+        PresetLibrarySheet(
+            presets = presets,
+            targetCount = nodes.size,
+            targetBound = nodes.any { it.presetBinding != null },
+            hasOverrides = nodes.any { it.presetBinding?.overridden?.isNotEmpty() == true },
+            previewUri = nodes.firstOrNull()?.mediaRefId,
+            onApply = { presetId, keep -> canvasViewModel.applyPreset(presetId, ids, keep) },
+            onSaveAs = { name -> nodes.firstOrNull()?.let { canvasViewModel.saveSelectionAsPreset(name, it.id) } },
+            onDuplicate = { canvasViewModel.duplicatePreset(it) },
+            onDelete = { canvasViewModel.deletePreset(it) },
+            onEdit = { canvasViewModel.updatePreset(it) },
+            onUnlink = { canvasViewModel.unlinkPreset(ids) },
+            onDismiss = { presetLibraryEditing = emptyList() },
+        )
     }
 
     // Panel config dialog

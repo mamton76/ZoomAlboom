@@ -33,6 +33,12 @@ sealed class CanvasNode {
          * `null` = renderer defaults (cropped source only).
          */
         val appearance: MediaAppearance? = null,
+        /**
+         * Link to an app-level [MediaStylePreset]. `null` = unbound (the node's
+         * own [appearance] is used as-is). When set, the effective appearance is
+         * `resolveMediaAppearance(...)` = preset ∪ per-node section overrides.
+         */
+        val presetBinding: PresetBinding? = null,
         override val visibilityPolicy: VisibilityPolicy? = null,
     ) : CanvasNode()
 

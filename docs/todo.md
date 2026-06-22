@@ -817,17 +817,25 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 - [x] Editor: `DecorationListEditor` (add/remove/reorder + per-item `MediaDecorationEditor` with placement) + `MediaOpeningEditor`; context-menu actions Content mask / Opening / Decorations.
 - [x] No serializer migration (old keys ignored via `ignoreUnknownKeys`). Tests updated; build + unit tests green; verified on-device 2026-06-21.
 
-**Slice 1 — static presets:**
-- [ ] App-level `PresetStore` (serialized; Room or JSON in app storage). `MediaStylePreset` gains `sections: Set<AppearanceSection>`.
-- [ ] `PresetBinding(presetId, overridden)` nullable field on `CanvasNode.Media`; serializer back-compat (absent = today's behavior).
-- [ ] Eager resolution `resolve(node, presetStore): MediaAppearance` before the render boundary; renderers/video/export keep taking a concrete `MediaAppearance`; editors read binding/override metadata.
-- [ ] Library + actions: apply / save-as / duplicate / edit / delete. **Delete = bake-then-unlink** (stamp resolved values into bound nodes, clear binding).
-- [ ] Apply-over-overrides prompt (`Replace look` / `Keep my changes`); fresh apply no prompt.
-- [ ] **Override granularity = whole-section** in slice-1 UI; per-field (`AppearancePath`) added section-by-section later (ColorAdjustments first).
-- [ ] Undo: canvas snapshot stack covers `presetBinding` + node override changes; preset *definition* edits stay off the canvas stack (PresetStore own undo later / none for slice 1).
-- [ ] UI surfaces per `media-presets.md § 10`: object editing = preset-aware per-concept sheets; preset editing = aggregate preset-editor sheet (sections + governs checkbox, reuses concept composables); `Apply Preset` + `Preset: <name>` context-menu entries.
-- [ ] `CanvasAction.ResetAppearance` — clears appearance/binding to default rendering.
-- (Later, separate) `CopyAppearance` / `PasteAppearance`.
+**Slice 1 (core) — static presets — build + unit tests green 2026-06-21 (on-device pending):**
+- [x] App-level `MediaPresetStore` (SharedPreferences + kotlinx JSON, Hilt `@Singleton`, mirrors `InteractionSettingsRepository`). `MediaStylePreset` gains `sections: Set<AppearanceSection>`; new `AppearanceSection` enum + `PresetBinding(presetId, overridden)`.
+- [x] `presetBinding: PresetBinding?` field on `CanvasNode.Media` (serializer back-compat; absent = today's behavior).
+- [x] Pure `resolveMediaAppearance(node, presetsById)` (`MediaAppearanceResolver.kt`) + `withSection(s)` / `nonDefaultSections` / `resolvedForRender`. Resolution applied in `CanvasViewModel.recalculateVisibleNodes` (render boundary); `_allNodes` stays raw for editors; renderers/video/export unchanged.
+- [x] New `CanvasAction.UpdateMediaNodes(perId: MediaNodePatch)` (appearance + binding in one undoable snapshot). VM `applyPreset` (stamp + bind), `unlinkPreset` / `deletePreset` (**bake-then-unlink**), `saveSelectionAsPreset`, `duplicatePreset`.
+- [x] `dispatchMediaConcept` gains an `AppearanceSection` arg — editing a concept on a bound node marks that section **overridden** (whole-section granularity).
+- [x] `PresetLibrarySheet` + `Presets…` context-menu action: Save selection / Apply / Duplicate / Delete / Unlink, with the apply-over-overrides prompt (`Replace look` / `Keep my changes`).
+- [x] Undo: `presetBinding` + node override changes ride the canvas snapshot stack; preset *definition* edits (store) stay off it.
+
+**Slice 1b:**
+- [x] Aggregate **preset-definition editor** (`PresetDefinitionEditor` — name + per-section governs-checkbox + expandable concept editor, reusing the existing concept composables) opened from a per-card **Edit** in `PresetLibrarySheet`; `CanvasViewModel.updatePreset` passthrough. Build + unit tests green 2026-06-21.
+
+**Slice 1c:**
+- [x] Rich card previews — `MediaPresetPreview` renders a synthetic card-sized node through the existing public `CanvasNodeRenderer` (full media pipeline, zero renderer changes), wired into `PresetLibrarySheet` cards (preview on the selection's first media; falls back to name+count if no uri). Build + unit tests green 2026-06-21.
+
+**Slice 1c — remaining:**
+- [ ] Inherited / overridden visual language (muted/active + per-section reset) on the per-concept node sheets.
+- [ ] Per-field (`AppearancePath`) overrides, section-by-section (ColorAdjustments first).
+- [ ] `CanvasAction.ResetAppearance`; `CopyAppearance` / `PasteAppearance`.
 
 ### 20.4 Rendered derivatives
 - [ ] `CanvasAction.SaveRenderedDerivative` — flatten source + appearance into a new image file

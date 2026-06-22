@@ -26,7 +26,14 @@ import com.mamton.zoomalbum.domain.model.CropMode
 import com.mamton.zoomalbum.domain.model.EasingType
 import com.mamton.zoomalbum.domain.model.FrameAppearance
 import com.mamton.zoomalbum.domain.model.FrameEditOptions
+import com.mamton.zoomalbum.data.settings.MediaPresetStore
 import com.mamton.zoomalbum.domain.model.MediaAppearance
+import com.mamton.zoomalbum.domain.model.MediaStylePreset
+import com.mamton.zoomalbum.domain.model.PresetBinding
+import com.mamton.zoomalbum.domain.model.nonDefaultSections
+import com.mamton.zoomalbum.domain.model.resolveMediaAppearance
+import com.mamton.zoomalbum.domain.model.resolvedForRender
+import com.mamton.zoomalbum.domain.model.withSections
 import com.mamton.zoomalbum.domain.model.MediaType
 import com.mamton.zoomalbum.feature.canvas.editor.EditorState
 import com.mamton.zoomalbum.feature.canvas.editor.EditorTool
@@ -55,6 +62,7 @@ import com.mamton.zoomalbum.feature.canvas.editor.CropEditEntrySnapshot
 import com.mamton.zoomalbum.feature.canvas.editor.cropEditInvariantBroken
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -107,6 +115,12 @@ data class CanvasState(
 )
 
 // ── Actions ───────────────────────────────────────────────────────────
+
+/** Per-node appearance + preset-binding change carried by [CanvasAction.UpdateMediaNodes]. */
+data class MediaNodePatch(
+    val appearance: MediaAppearance?,
+    val binding: PresetBinding?,
+)
 
 sealed interface CanvasAction : Intent {
     // Selection
@@ -229,6 +243,15 @@ sealed interface CanvasAction : Intent {
         val appearancesById: Map<String, MediaAppearance?>,
     ) : CanvasAction
 
+    /**
+     * Updates a media node's [MediaAppearance] **and** its [PresetBinding] in one
+     * undoable command — used by apply-preset, unlink/reset, and concept edits on
+     * a bound node (which mark the edited section overridden). See media-presets.md.
+     */
+    data class UpdateMediaNodes(
+        val perId: Map<String, MediaNodePatch>,
+    ) : CanvasAction
+
     // Frame membership — explicit pin / detach / clear overrides. See frame-membership.md.
     data class PinToFrame(val frameId: String, val nodeIds: Set<String>) : CanvasAction
     data class DetachFromFrame(val frameId: String, val nodeIds: Set<String>) : CanvasAction
@@ -344,8 +367,12 @@ class CanvasViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val mediaRepository: MediaRepository,
     private val historyRepository: HistoryRepository,
+    private val mediaPresetStore: MediaPresetStore,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
+
+    /** App-level preset library (cross-album); see media-presets.md. */
+    val presets: StateFlow<List<MediaStylePreset>> = mediaPresetStore.presets
 
     private val albumId: Long = savedStateHandle.get<Long>("albumId") ?: 0L
 
@@ -389,6 +416,11 @@ class CanvasViewModel @Inject constructor(
 
     init {
         loadAlbum()
+        // Re-resolve rendered appearance when the preset library changes (a preset
+        // edit/delete updates every bound node's effective look).
+        viewModelScope.launch {
+            mediaPresetStore.presets.collect { recalculateVisibleNodes() }
+        }
     }
 
     /** Called once from Compose when the canvas size is known. */
@@ -935,6 +967,23 @@ class CanvasViewModel @Inject constructor(
                     kind = CommandKind.SET_MEDIA_APPEARANCE,
                     timestampMs = System.currentTimeMillis(),
                 ) { media -> media.copy(appearance = normalized[media.id]) }
+                val command = result.command ?: return
+                applyAppearanceResult(result, command)
+            }
+
+            is CanvasAction.UpdateMediaNodes -> {
+                val perId = action.perId.mapValues { (_, patch) ->
+                    patch.copy(appearance = patch.appearance?.takeUnless { it == MediaAppearance() })
+                }
+                val result = computeAppearanceUpdate<CanvasNode.Media>(
+                    currentNodes = _allNodes.value,
+                    ids = perId.keys,
+                    kind = CommandKind.SET_MEDIA_APPEARANCE,
+                    timestampMs = System.currentTimeMillis(),
+                ) { media ->
+                    val patch = perId.getValue(media.id)
+                    media.copy(appearance = patch.appearance, presetBinding = patch.binding)
+                }
                 val command = result.command ?: return
                 applyAppearanceResult(result, command)
             }
@@ -1789,6 +1838,9 @@ class CanvasViewModel @Inject constructor(
                 screenHeight = screenHeight,
             )
             val geometryVisible = ViewportCuller.visibleNodes(_allNodes.value, viewport)
+            // Resolve each bound media node's effective appearance (preset ∪ overrides)
+            // for rendering — editors still read the raw nodes from `_allNodes`.
+            val presetsById = mediaPresetStore.presetsById
             // Sort by zIndex (ascending — Compose draws in iteration order, so
             // lowest first means highest ends up on top). Render correctness
             // now depends only on Transform.zIndex, not _allNodes insertion
@@ -1796,11 +1848,71 @@ class CanvasViewModel @Inject constructor(
             val resolved = geometryVisible
                 .mapNotNull { node ->
                     val detail = LodResolver.resolveRenderDetail(node, cam)
-                    if (detail == RenderDetail.Hidden) null else VisibleNode(node, detail)
+                    if (detail == RenderDetail.Hidden) null
+                    else VisibleNode(node.resolvedForRender(presetsById), detail)
                 }
                 .sortedBy { it.node.transform.zIndex }
             _state.update { it.copy(visibleNodes = resolved) }
         }
+    }
+
+    // ── Media appearance presets (app-level; see media-presets.md) ─────────────
+
+    /** Saves the node's current resolved appearance as a new preset governing its non-default sections. */
+    fun saveSelectionAsPreset(name: String, nodeId: String) {
+        val media = _allNodes.value.firstOrNull { it.id == nodeId } as? CanvasNode.Media ?: return
+        val resolved = resolveMediaAppearance(media, mediaPresetStore.presetsById) ?: MediaAppearance()
+        mediaPresetStore.add(
+            MediaStylePreset(
+                id = UUID.randomUUID().toString(),
+                name = name.ifBlank { "Preset" },
+                appearance = resolved,
+                sections = resolved.nonDefaultSections(),
+            ),
+        )
+    }
+
+    fun duplicatePreset(presetId: String) {
+        mediaPresetStore.duplicate(presetId)
+    }
+
+    /** Edits a preset's definition (name / values / governed sections); not on the canvas undo stack. */
+    fun updatePreset(preset: MediaStylePreset) {
+        mediaPresetStore.update(preset)
+    }
+
+    /** Bakes the resolved look into every bound node in the open album, then removes the preset. */
+    fun deletePreset(presetId: String) {
+        bakeUnlink { it.presetBinding?.presetId == presetId }
+        mediaPresetStore.delete(presetId)
+    }
+
+    /** Binds [nodeIds] to [presetId]; [keepOverrides] retains existing per-section overrides. */
+    fun applyPreset(presetId: String, nodeIds: Set<String>, keepOverrides: Boolean) {
+        val preset = mediaPresetStore.presetsById[presetId] ?: return
+        val patches = _allNodes.value.asSequence()
+            .filterIsInstance<CanvasNode.Media>()
+            .filter { it.id in nodeIds }
+            .associate { media ->
+                val kept = if (keepOverrides) media.presetBinding?.overridden.orEmpty() else emptySet()
+                val own = media.appearance ?: MediaAppearance()
+                // Stamp resolved governed values as the dangling-binding fallback.
+                val stamped = own.withSections(preset.sections - kept, preset.appearance)
+                media.id to MediaNodePatch(stamped, PresetBinding(presetId, kept))
+            }
+        if (patches.isNotEmpty()) onAction(CanvasAction.UpdateMediaNodes(patches))
+    }
+
+    /** Unlinks [nodeIds] from their preset, baking the resolved look into their appearance. */
+    fun unlinkPreset(nodeIds: Set<String>) = bakeUnlink { it.id in nodeIds && it.presetBinding != null }
+
+    private fun bakeUnlink(predicate: (CanvasNode.Media) -> Boolean) {
+        val presetsById = mediaPresetStore.presetsById
+        val patches = _allNodes.value.asSequence()
+            .filterIsInstance<CanvasNode.Media>()
+            .filter(predicate)
+            .associate { it.id to MediaNodePatch(resolveMediaAppearance(it, presetsById), null) }
+        if (patches.isNotEmpty()) onAction(CanvasAction.UpdateMediaNodes(patches))
     }
 
     // ── Camera focus animation ────────────────────────────────────────

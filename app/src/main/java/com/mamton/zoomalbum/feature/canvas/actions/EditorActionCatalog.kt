@@ -151,6 +151,15 @@ data object EditCaptionAction : EditorAction {
     override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenCaptionEditor
 }
 
+data object PresetsAction : EditorAction {
+    override val id = "preset.library"
+    override val icon = "✦"
+    override val category = ActionCategory.Edit
+    override fun label(ctx: SelectionContext) = "Presets…"
+    override fun isVisible(ctx: SelectionContext) = ctx.isAllMedia
+    override fun effect(ctx: SelectionContext) = EditorActionEffect.OpenPresetLibrary
+}
+
 // ── Navigation ───────────────────────────────────────────────────────────────
 
 /**
@@ -328,6 +337,7 @@ object EditorActionCatalog {
         EditOpeningAction,
         EditDecorationsAction,
         EditCaptionAction,
+        PresetsAction,
         PlayVideoAction,
         NavigateToFrameAction,
         BringToFrontAction,

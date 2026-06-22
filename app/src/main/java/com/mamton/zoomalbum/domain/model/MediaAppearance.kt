@@ -179,14 +179,35 @@ data class MediaAppearance(
 // ── Style presets ────────────────────────────────────────────────────────────
 
 /**
- * A saved [MediaAppearance] recipe with a user-facing name.
- *
- * Persisted per-album (scene graph) or globally (app-level preferences) — the
- * preset library UI lands in a later slice.
+ * A section of [MediaAppearance] — the unit a preset *governs* and a bound node
+ * *overrides*. See `docs/architecture/media-presets.md`. (`Caption` is added once
+ * captions render.)
+ */
+@Serializable
+enum class AppearanceSection {
+    Opacity, CornerRadius, Crop, ColorAdjustments, Overlays, ContentMask, Opening, Decorations, Border, Shadow, Caption,
+}
+
+/**
+ * A saved [MediaAppearance] recipe with a user-facing name. [sections] is the set
+ * of sections this preset governs — Apply overwrites only those, leaving the rest
+ * of a target node untouched. Stored app-level in `MediaPresetStore`.
  */
 @Serializable
 data class MediaStylePreset(
     val id: String,
     val name: String,
     val appearance: MediaAppearance,
+    val sections: Set<AppearanceSection> = emptySet(),
+)
+
+/**
+ * Links a [CanvasNode.Media] to a [MediaStylePreset]. [overridden] is the set of
+ * sections the node has detached from the preset (its own [MediaAppearance] value
+ * wins for those). Effective appearance = `resolveMediaAppearance(...)`.
+ */
+@Serializable
+data class PresetBinding(
+    val presetId: String,
+    val overridden: Set<AppearanceSection> = emptySet(),
 )

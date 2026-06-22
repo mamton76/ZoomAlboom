@@ -128,6 +128,7 @@ class EditContextMenuItemsTest {
                 "Edit opening",
                 "Edit decorations",
                 "Edit caption",
+                "Presets…",
                 "Duplicate",
                 "Delete",
             ),
@@ -263,6 +264,7 @@ class EditContextMenuItemsTest {
                 "Edit opening (2)",
                 "Edit decorations (2)",
                 "Edit caption (2)",
+                "Presets…",
                 "Duplicate selection",
                 "Delete selection",
                 "Clear selection",
@@ -299,6 +301,7 @@ class EditContextMenuItemsTest {
                 "Edit opening (2)",
                 "Edit decorations (2)",
                 "Edit caption (2)",
+                "Presets…",
                 "Duplicate selection",
                 "Delete selection",
                 "Clear selection",
@@ -330,6 +333,7 @@ class EditContextMenuItemsTest {
                 "Edit opening (2)",
                 "Edit decorations (2)",
                 "Edit caption (2)",
+                "Presets…",
                 "Duplicate selection",
                 "Delete selection",
                 "Edit this only",
@@ -396,16 +400,17 @@ class EditContextMenuItemsTest {
     @Test
     fun `dividers separate sections in the single-media menu`() {
         val (items, _) = build(req(selection = setOf("m")), nodes = listOf(media("m")))
-        // 11 per-concept edits (6 universal incl. content mask + 5 media-only) +
+        // 12 Edit items (6 universal incl. content mask + 6 media-only incl. Presets…) +
         // Duplicate, divider, [z-order row], divider, Delete.
-        assertEquals(16, items.size)
+        assertEquals(17, items.size)
         assertEquals("Edit opacity", items[0].label)
         assertEquals("Edit caption", items[10].label)
-        assertEquals("Duplicate", items[11].label)
-        assertTrue(items[12].isDivider)
-        assertNotNull(items[13].inlineRow)
-        assertTrue(items[14].isDivider)
-        assertEquals("Delete", items[15].label)
+        assertEquals("Presets…", items[11].label)
+        assertEquals("Duplicate", items[12].label)
+        assertTrue(items[13].isDivider)
+        assertNotNull(items[14].inlineRow)
+        assertTrue(items[15].isDivider)
+        assertEquals("Delete", items[16].label)
     }
 
     @Test

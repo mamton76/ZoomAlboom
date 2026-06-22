@@ -113,8 +113,8 @@ Item-level examples (later): add a local layer above the inherited stack; hide/s
 
 Build the per-field architecture but ship in slices so first usable presets aren't blocked on the full override UI.
 
-1. **Resolution + binding + library (independently shippable).** `PresetStore` (app-level, serialized), `MediaStylePreset.sections`, `PresetBinding`, eager resolution at the render boundary, library actions: apply / save-as / duplicate / edit / delete (bake-then-unlink, § 8). **Override granularity = whole-section** at this stage. This alone is a usable preset feature.
-2. **Per-field overrides, section by section** — start with **ColorAdjustments** (highest-value per-field case), then Border, then Shadow. Each adds the tri-state (inherited / overridden) UI + per-leaf reset + detach-on-edit for that section.
+1. **Resolution + binding + library — Slice 1 core, implemented (build + unit tests green 2026-06-21).** `MediaPresetStore` (SharedPreferences + JSON, Hilt `@Singleton`), `MediaStylePreset.sections`, `PresetBinding`, resolution at the render boundary (`CanvasViewModel.recalculateVisibleNodes` → `resolvedForRender`), library actions apply / save-as / duplicate / delete (bake-then-unlink). **Override granularity = whole-section**; editing a concept on a bound node marks the section overridden (`dispatchMediaConcept` section arg). All preset UI is folded into one `PresetLibrarySheet` (a new `Presets…` context-menu action) — card previews + inherited/overridden styling + the dedicated preset-definition editor are **Slice 1b** (§ 10 describes the target UI).
+2. **Per-field overrides, section by section** — start with **ColorAdjustments**, then Border, then Shadow. Each adds the tri-state (inherited / overridden) UI + per-leaf reset + detach-on-edit for that section.
 3. **Multi-select "Mixed"** tri-state polish across the override UI (per `appearance.md § 14`).
 
 ---

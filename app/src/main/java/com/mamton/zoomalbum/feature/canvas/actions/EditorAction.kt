@@ -83,6 +83,9 @@ sealed interface EditorActionEffect {
     data object OpenOpeningEditor : EditorActionEffect
     data object OpenDecorationsEditor : EditorActionEffect
     data object OpenCaptionEditor : EditorActionEffect
+
+    /** Opens the app-level media preset library for the current media selection. */
+    data object OpenPresetLibrary : EditorActionEffect
 }
 
 /**

@@ -2,7 +2,7 @@
 
 > This file is for **unresolved** design questions only. Reconciled topics live in `docs/architecture/`.
 >
-> **Numbering:** section numbers are never reused. Graduated topics keep their original `§` number in the "Recently graduated" trailer (currently `§ 1`–`§ 11`, `§ 13`, `§ 15`, `§ 17`–`§ 19`), so the remaining open topics are `§ 12`, `§ 14`, `§ 16`, and the **Media Appearance Presets cluster `§ 20`–`§ 27`** (added 2026-06-21). New open topics start above `§ 27`.
+> **Numbering:** section numbers are never reused. Graduated topics keep their original `§` number in the "Recently graduated" trailer (currently `§ 1`–`§ 11`, `§ 13`, `§ 15`, `§ 17`–`§ 19`), so the remaining open topics are `§ 12`, `§ 14`, `§ 16`, the **Media Appearance Presets cluster `§ 20`–`§ 27`** (added 2026-06-21), and `§ 28`–`§ 31` (added 2026-06-28: decoration-flicker, editor audit, stickers, groups). New open topics start above `§ 31`.
 >
 > **The `§ 17`–`§ 27` cluster** captures the post-video / post-frame-decoration product direction: getting to a usable personal-album tool fast. **Decided 2026-06-21:** `§ 17` preset model + `§ 18` preset UI → `docs/architecture/media-presets.md`; `§ 19` content-model refactor (contentMask / rectangular opening / decorations list / drop openingMaskUri) → `docs/architecture/media-appearance.md` — all implementation pending. The rest are preserved so the near-term work is designed in the right direction. Suggested sequencing is in `§ 27`.
 
@@ -169,6 +169,74 @@ Keep three contexts distinct: **Edit** (canvas authoring), **View / Present**, *
 - *Near-term:* **slice 0 — content-model refactor** (`§ 19` → [`media-appearance.md`](architecture/media-appearance.md): contentMask rename, rectangular `opening`, `decorations` list + placement, drop `openingMaskUri`; **refactor-first**) → **slice 1 — static appearance presets** (model + UI decided, `§ 17` + `§ 18` → [`media-presets.md`](architecture/media-presets.md)): resolution + binding + library + apply/save/duplicate/delete (bake-then-unlink), whole-section overrides → then per-field overrides section-by-section → per-section preview polish (with `§ 20`).
 - *Next:* animated preset MVP Start→End (`§ 21`) → one strong preset ("Memory → Now") → basic trigger/preview behavior (`§ 26`) → video poster-time = start-time model (`§ 22`).
 - *Later:* video scrub (`§ 23`) → share intents (`§ 25`) → batch import + grid placement (`§ 24`) → multi-select align/distribute (`§ 24`) → Media Library (`§ 14`) → advanced animated-timing UI (`§ 21`).
+
+---
+
+## § 28 URGENT — Decorated media flickers while zooming (content paints first, frame later)
+
+**Status:** open, **urgent** — a perceived-quality bug, not a far-future feature. Surfaced 2026-06-28 on a tablet.
+
+**Symptom:** when zooming/panning the canvas, media nodes with frame decorations flicker — the photo/video content paints first and the decoration layer pops in a beat later. Media + decoration are not perceived as one atomic composed object, which is exactly what the preset/scrapbook look depends on.
+
+**Root-cause findings (grounding pass, 2026-06-28):**
+1. **Decoration bitmaps load on a slower, separate path than content.** Content is painted by `rememberAsyncImagePainter` (Coil draws the moment its bitmap — usually memory-cached — is ready). Decoration bitmaps go through `rememberDecorationBitmaps` (`MediaDecorationRenderer.kt § 178`): a suspending `SingletonImageLoader.execute(...)` inside a `LaunchedEffect`, plus an explicit `ARGB_8888` copy. Even on a cache hit this resolves a frame or more *after* the content painter. → "photo first, frame later." The same async pattern (`rememberAlphaMaskBitmap`, `rememberOverlayTextureBitmaps`) makes masks and overlays equally late.
+2. **LOD remounts reset the decoration cache.** `FullMediaRenderer` (`CanvasRenderer.kt § 522`) mounts only at `RenderDetail.Full`. `rememberDecorationBitmaps` keys its `remember`/`LaunchedEffect` on the URI set, so every time a node re-crosses the Full LOD boundary during a zoom the composable remounts, `bitmaps` resets to `emptyMap`, and decorations reload from scratch (async) while the content painter reuses Coil's memory cache. Zoom crosses these boundaries repeatedly → repeated reload → repeated flicker.
+3. **Decorated-but-unmasked media takes the non-atomic draw path.** `needsLayer = contentMask != null` (`CanvasRenderer.kt § 540`) — the offscreen `CompositingStrategy.Offscreen` layer is used **only** when a `contentMask` is present. Media with decorations / opening / overlays but no mask composites its phases (Below → content → overlays → Above) straight to the canvas, so a late-arriving decoration is visible as a separate paint rather than part of one buffer.
+4. **Video uses a different path.** Video poster/playback route through `VideoPosterSurface` / `VideoPlayerSurface`, not `FullMediaRenderer` — decoration atomicity for video must be verified separately, not assumed.
+
+**Important nuance:** an offscreen layer alone does **not** fix this. It prevents intra-frame phase desync, but the dominant cause is *async bitmap arrival + LOD remount* — the decoration simply isn't ready when content is. The highest-leverage fixes target bitmap **residency and readiness**, not just compositing.
+
+**Direction to evaluate (in rough priority):**
+1. **Make decorations as ready as content.** Either load decoration/mask/overlay bitmaps through the same Coil painter/memory-cache mechanism the content uses (ready in the same frame on cache hit), or pre-warm them so the offscreen composite has all layers on first paint.
+2. **Survive LOD remounts.** Hoist decoration-bitmap residency above the LOD switch (e.g. cache keyed by node id / URI at a `CanvasScaffold`-level holder, mirroring the video player pool in `video.md`) so re-entering Full detail doesn't re-fetch from zero.
+3. **Atomic composite for decorated media.** Extend `needsLayer` to also fire when `decorations`/`opening`/`overlays` are present, so content + decorations land as one offscreen buffer — *after* (1)/(2) make all layers ready, otherwise it just buffers an incomplete frame.
+4. **Gate the swap.** Optionally hold the Simplified/poster frame until decoration bitmaps resolve, then swap — avoids ever showing raw content without its frame.
+
+**Trade-offs to weigh:** offscreen buffers cost memory + GPU and get large at high zoom / big nodes. Decide whether the offscreen path is *always on for decorated media*, *gated on decorations/contentMask/opening/overlays present*, *bounded by node screen size / LOD*, and *fallback-safe for very large nodes* (drop to the direct path rather than allocate a huge buffer).
+
+---
+
+## § 29 Audit all `MediaAppearance` editors
+
+**Status:** open — a structured audit, not a design change. Goal: a single source of truth for what actually works end-to-end.
+
+**Ask:** classify each `MediaAppearance` editor as one of — *fully implemented* · *UI exists but doesn't apply correctly* · *renderer support exists, editor missing* · *editor exists, preview missing* · *pure stub* · *planned, not started*.
+
+**Sections to inspect:** opacity · cornerRadius · border · shadow · overlays · contentMask · crop · colorAdjustments · opening · decorations · caption · presets / preset binding / overridden sections.
+
+**Suspected gaps to verify:**
+- Overlay editor may be missing/incomplete (ties to `§ 20`).
+- Mask editor likely needs a real preview.
+- Color adjustments may exist in model+editor but **not actually affect rendering** — verify the renderer applies `colorAdjustments`.
+- Decorations editor likely needs a better preview (and relates to `§ 28`).
+- Preset editor needs cleanup, especially section-override marking.
+- **Multi-edit / `MixedValue`** handling per section (`appearance.md § 14`).
+- **Undo/redo** for every editor action.
+- Bound-preset editing must mark edited sections as **overridden** (`media-presets.md`).
+
+**Desired output:** a concrete checklist per editor — editor name · model field · UI status · renderer status · undo/redo status · preset-override behavior · missing work · recommended next step. Captured as a working doc (likely `todo.md` once the audit runs).
+
+---
+
+## § 30 Sticker representation + implementation
+
+**Status:** open — needs a model decision before building.
+
+**Open question:** is a sticker a `CanvasNode.Media` with `MediaType.STICKER` · a separate `CanvasNode.Sticker` · a preset/decoration type · or a vector/image asset that behaves like media but with different default appearance + library handling?
+
+**Considerations:** stickers should be independently movable/scalable/rotatable; need transparent PNG / SVG support; typically no crop/opening by default; may still want opacity/shadow/border and maybe presets; participate in z-order + selection like other nodes; frame-membership participation TBD; may later ship as themed sticker packs.
+
+**Suggested MVP:** start with `CanvasNode.Media` + `MediaType.STICKER` to reuse transform, z-order, selection, rendering, undo/redo, media import/storage, and appearance basics — with explicit defaults: transparent-image support · no default crop · no opening · no photo-style frame decoration by default · object-level appearance still allowed. (Note: per `video.md`, `MediaType` already carries `VIDEO` with no migration; a `STICKER` variant follows the same no-migration bridge pattern.)
+
+---
+
+## § 31 Object groups (real groups, not just multi-selection)
+
+**Status:** open — distinct from transient multi-selection; needs a scene-graph decision.
+
+**Questions:** persistent `Group` object in the scene graph at all? `CanvasNode.Group` vs. metadata/relation between nodes? How do group transforms work — do children keep **absolute world transforms** or become **relative** to the group? Undo/redo for group/ungroup? Nested groups? How does a frame transforming its members (temporary group) relate to real groups — same mechanism or separate? Interaction with frame membership; with z-order; selection (group-as-whole vs. child-inside-group); does a group carry its own appearance? Exportable/reusable as components later?
+
+**Suggested MVP:** persistent group **metadata with a stable group id**; child nodes keep **absolute world transforms**; group operations apply transforms to all children; the group itself renders nothing initially; **no nested groups** v1; selection can target group-as-whole or individual nodes (refined later). Relationship to frame "temporary group" behavior should be reconciled with `frame-membership.md`.
 
 ---
 

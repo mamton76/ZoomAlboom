@@ -2,10 +2,7 @@ package com.mamton.zoomalbum.feature.canvas.view
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -19,7 +16,6 @@ import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.scale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import com.mamton.zoomalbum.domain.model.AlphaMask
@@ -27,7 +23,9 @@ import com.mamton.zoomalbum.domain.model.AlphaMaskSource
 import com.mamton.zoomalbum.domain.model.AlphaStop
 import com.mamton.zoomalbum.domain.model.MaskChannel
 import com.mamton.zoomalbum.domain.model.MaskFitMode
+import kotlin.math.ceil
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
@@ -120,12 +118,24 @@ private fun DrawScope.drawImageMask(
         dstRect = rect,
         mode = src.fitMode,
     )
+    // Round the destination OUTWARD (floor the min edge, ceil the max edge) so the
+    // stretched mask fully covers the float content rect. Plain `.toInt()` truncates
+    // toward zero, leaving the mask up to ~1px short on each edge — and since DstIn
+    // only attenuates where the mask is drawn, that gap shows a 1px ring of uncut
+    // media around the masked shape. See `appearance.md § 12.4`.
+    val dstLeft = floor(dstRect.left).toInt()
+    val dstTop = floor(dstRect.top).toInt()
+    val dstRight = ceil(dstRect.right).toInt()
+    val dstBottom = ceil(dstRect.bottom).toInt()
     drawImage(
         image = bitmap,
         srcOffset = IntOffset(srcRect.left.toInt(), srcRect.top.toInt()),
         srcSize = IntSize(srcRect.width.toInt(), srcRect.height.toInt()),
-        dstOffset = IntOffset(dstRect.left.toInt(), dstRect.top.toInt()),
-        dstSize = IntSize(dstRect.width.toInt(), dstRect.height.toInt()),
+        dstOffset = IntOffset(dstLeft, dstTop),
+        dstSize = IntSize(
+            (dstRight - dstLeft).coerceAtLeast(1),
+            (dstBottom - dstTop).coerceAtLeast(1),
+        ),
         colorFilter = channelColorFilter(src.channel, invert),
         blendMode = BlendMode.DstIn,
     )
@@ -328,11 +338,13 @@ private fun DrawScope.drawProceduralMask(
 // ── Image-source bitmap resolution ──────────────────────────────────────────
 
 /**
- * Resolves the bitmap referenced by an [AlphaMaskSource.Image]'s [maskRefId] via
- * the shared [loadAppearanceBitmap] (ARGB_8888, so the mask keeps the alpha
- * channel its `DstIn` composite needs; stable memory-cache key). Decode runs in a
- * [LaunchedEffect] keyed on the refId (loads survive recomposition), and a missing
- * entry returns `null` (the renderer falls back to "no mask" until it arrives).
+ * Resolves the bitmap referenced by an [AlphaMaskSource.Image]'s [maskRefId] from
+ * the session-level [AppearanceAssetCache] (provided via [LocalAppearanceAssetCache]).
+ * The cache survives `Full ↔ Simplified` LOD remounts during zoom, so a resident
+ * mask returns synchronously with no flash (`docs/todo.md § 28.2`); decode keeps
+ * the ARGB_8888 alpha channel the `DstIn` composite needs (§ 28.1). Falls back to a
+ * local cache outside the canvas. A missing entry returns `null` (the renderer
+ * falls back to "no mask" until it arrives).
  *
  * Returns `null` if [mask] is `null`, the source isn't [AlphaMaskSource.Image],
  * or the refId is blank.
@@ -342,13 +354,8 @@ internal fun rememberAlphaMaskBitmap(mask: AlphaMask?): ImageBitmap? {
     val refId = (mask?.source as? AlphaMaskSource.Image)?.maskRefId?.takeIf { it.isNotBlank() }
         ?: return null
 
-    val context = LocalContext.current
-    var bitmap by remember(refId) { mutableStateOf<ImageBitmap?>(null) }
-
-    LaunchedEffect(refId) {
-        runCatching {
-            loadAppearanceBitmap(context, refId)?.let { bitmap = it }
-        }
-    }
-    return bitmap
+    val cache = LocalAppearanceAssetCache.current ?: rememberAppearanceAssetCache()
+    val key = remember(refId) { AppearanceAssetKey(refId, AppearanceAssetKind.ContentMask) }
+    LaunchedEffect(cache, key) { cache.ensure(listOf(key)) }
+    return cache.get(key)
 }

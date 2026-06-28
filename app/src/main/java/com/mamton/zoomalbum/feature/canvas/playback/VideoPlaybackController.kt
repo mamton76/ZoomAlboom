@@ -70,6 +70,30 @@ class VideoPlaybackController(
         private set
 
     /**
+     * While true (a camera gesture is active), playback is **frozen**: every
+     * assigned player is paused and [reconcile] won't start/resume any player.
+     * This makes the gesture pause authoritative. Without it, a `reconcile` that
+     * re-acquires or newly assigns a player mid-gesture (a slight pan, an
+     * evict→reacquire) would set `playWhenReady = true` and the video would advance
+     * *under* the offscreen gesture freeze — the "timing shifts during camera
+     * transform" bug. See `todo.md § 27.11`.
+     */
+    private var frozen = false
+
+    /**
+     * Freeze (true) / unfreeze (false) all playback for the duration of a camera
+     * gesture. Freeze pauses every assigned player; unfreeze restores each to its
+     * normal state (playing unless the user paused it in place). Idempotent.
+     */
+    fun setFrozen(value: Boolean) {
+        if (value == frozen) return
+        frozen = value
+        for ((id, player) in _assignments) {
+            player.playWhenReady = shouldVideoPlay(id, pausedNodeIds, frozen)
+        }
+    }
+
+    /**
      * Double-tap / menu toggle:
      * - has a player & **playing** → **pause** in place (keep position + frame);
      * - has a player & **paused**  → **resume** from where it left off;
@@ -128,8 +152,9 @@ class VideoPlaybackController(
             player.setMediaItem(MediaItem.fromUri(mediaRefToUri(uri)))
             player.prepare()
             // Honor a pre-existing pause so a paused node reacquiring a player
-            // (e.g. after returning on-screen) doesn't auto-resume.
-            player.playWhenReady = id !in pausedNodeIds
+            // (e.g. after returning on-screen) doesn't auto-resume; and never
+            // start playback while frozen by an active camera gesture.
+            player.playWhenReady = shouldVideoPlay(id, pausedNodeIds, frozen)
             _assignments[id] = player
         }
     }
@@ -165,6 +190,19 @@ class VideoPlaybackController(
  * off-screen / low-LOD nodes are excluded outright. Among candidates the most
  * recently started win the [poolSize] slots; the rest fall back to poster.
  */
+/**
+ * Whether a pooled video should be playing: not user-paused **in place**, and not
+ * [frozen] by an active camera gesture. The single source of truth for the
+ * `playWhenReady` decision, shared by [VideoPlaybackController.setFrozen] and
+ * [VideoPlaybackController.reconcile] so it stays consistent and unit-testable
+ * (`todo.md § 27.11`).
+ */
+internal fun shouldVideoPlay(
+    nodeId: String,
+    pausedNodeIds: Set<String>,
+    frozen: Boolean,
+): Boolean = nodeId !in pausedNodeIds && !frozen
+
 internal fun selectPlaybackKeepSet(
     playingNodeIds: Set<String>,
     fullVisibleIds: Set<String>,

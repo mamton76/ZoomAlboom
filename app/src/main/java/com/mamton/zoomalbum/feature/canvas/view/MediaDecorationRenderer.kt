@@ -2,13 +2,9 @@ package com.mamton.zoomalbum.feature.canvas.view
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import com.mamton.zoomalbum.domain.model.MediaDecoration
@@ -162,10 +158,12 @@ private fun DrawScope.drawNineSlice(
 
 /**
  * Resolves the [ImageBitmap]s for a decoration stack into a map keyed by
- * `assetUri`. Decoded via the shared [loadAppearanceBitmap] (ARGB_8888, so the
- * transparent decoration PNGs keep their alpha channel; stable memory-cache key)
- * in a [LaunchedEffect] keyed on the distinct URI set. Missing entries stay
- * absent — the renderer skips a decoration whose bitmap hasn't arrived yet.
+ * `assetUri`. Reads from the session-level [AppearanceAssetCache] (provided via
+ * [LocalAppearanceAssetCache]) so the bitmaps survive `Full ↔ Simplified` LOD
+ * remounts during zoom — the resident bitmap is returned synchronously, no empty
+ * flash (`docs/todo.md § 28.2`). Falls back to a local cache outside the canvas
+ * (e.g. preset-preview sheets). Missing entries stay absent — the renderer skips
+ * a decoration whose bitmap hasn't arrived yet.
  */
 @Composable
 internal fun rememberDecorationBitmaps(
@@ -177,18 +175,12 @@ internal fun rememberDecorationBitmaps(
         .distinct()
     if (uris.isEmpty()) return emptyMap()
 
-    val context = LocalContext.current
-    val key = uris.joinToString("|")
-    var bitmaps by remember(key) { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
-
-    LaunchedEffect(key) {
-        val loaded = mutableMapOf<String, ImageBitmap>()
-        for (uri in uris) {
-            runCatching {
-                loadAppearanceBitmap(context, uri)?.let { loaded[uri] = it }
-            }
-        }
-        bitmaps = loaded
+    val cache = LocalAppearanceAssetCache.current ?: rememberAppearanceAssetCache()
+    val keys = remember(uris) {
+        uris.map { AppearanceAssetKey(it, AppearanceAssetKind.Decoration) }
     }
-    return bitmaps
+    LaunchedEffect(cache, keys) { cache.ensure(keys) }
+    return uris.mapNotNull { uri ->
+        cache.get(AppearanceAssetKey(uri, AppearanceAssetKind.Decoration))?.let { uri to it }
+    }.toMap()
 }

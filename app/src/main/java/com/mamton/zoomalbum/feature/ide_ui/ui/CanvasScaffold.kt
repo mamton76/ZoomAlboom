@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,8 +52,10 @@ import com.mamton.zoomalbum.feature.canvas.editor.EditorTool
 import com.mamton.zoomalbum.feature.canvas.view.CanvasScreen
 import com.mamton.zoomalbum.feature.canvas.view.ContextMenuPopup
 import com.mamton.zoomalbum.feature.canvas.view.ContextMenuRequest
+import com.mamton.zoomalbum.feature.canvas.view.LocalAppearanceAssetCache
 import com.mamton.zoomalbum.feature.canvas.view.SelectionDebugPanel
 import com.mamton.zoomalbum.feature.canvas.view.buildEditContextMenuItems
+import com.mamton.zoomalbum.feature.canvas.view.rememberAppearanceAssetCache
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
 import com.mamton.zoomalbum.feature.canvas.viewmodel.MediaNodePatch
@@ -108,6 +111,12 @@ fun CanvasScaffold(
     // (released on dispose). Shared with CanvasScreen for tap-to-play + the
     // ExoPlayer render surface — `video.md § 6`.
     val playbackController = rememberVideoPlaybackController()
+
+    // Appearance-asset residency cache (decorations / masks / overlay textures),
+    // hoisted above the per-node LOD switch so bitmaps survive Full↔Simplified
+    // remounts during zoom — the decorated-media flicker fix (`todo.md § 28.2`).
+    // Provided down to the per-node loaders via LocalAppearanceAssetCache.
+    val appearanceAssetCache = rememberAppearanceAssetCache()
 
     var showAddSheet by remember { mutableStateOf(false) }
     var showFrameList by remember { mutableStateOf(false) }
@@ -471,17 +480,19 @@ fun CanvasScaffold(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            CanvasScreen(
-                playbackController = playbackController,
-                onShowContextMenu = { request -> contextMenuRequest = request },
-                // Tap / double-tap / drag-start dismisses an open context menu
-                // *without* running its normal canvas action — outside-tap of
-                // the popup is "close only", selection untouched. Long-press is
-                // handled separately: it produces a new request which replaces
-                // the popup in place (zero-flicker swap).
-                onCanvasGesture = { contextMenuRequest = null },
-                isContextMenuOpen = contextMenuRequest != null,
-            )
+            CompositionLocalProvider(LocalAppearanceAssetCache provides appearanceAssetCache) {
+                CanvasScreen(
+                    playbackController = playbackController,
+                    onShowContextMenu = { request -> contextMenuRequest = request },
+                    // Tap / double-tap / drag-start dismisses an open context menu
+                    // *without* running its normal canvas action — outside-tap of
+                    // the popup is "close only", selection untouched. Long-press is
+                    // handled separately: it produces a new request which replaces
+                    // the popup in place (zero-flicker swap).
+                    onCanvasGesture = { contextMenuRequest = null },
+                    isContextMenuOpen = contextMenuRequest != null,
+                )
+            }
             IdeOverlayScreen()
 
             // Debug panel — shows info about selected nodes

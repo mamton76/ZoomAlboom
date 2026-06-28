@@ -2,17 +2,13 @@ package com.mamton.zoomalbum.feature.canvas.view
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.platform.LocalContext
 import com.mamton.zoomalbum.domain.model.BackgroundData
 import com.mamton.zoomalbum.domain.model.NodeBlendMode
 import com.mamton.zoomalbum.domain.model.OverlayStyle
@@ -88,11 +84,13 @@ private fun NodeBlendMode.toComposeBlendMode(): BlendMode = when (this) {
  * Resolves the [ImageBitmap]s referenced by `Texture` entries in [overlays]
  * into a stable map keyed by `textureRefId`.
  *
- * Decoded via the shared [loadAppearanceBitmap] (ARGB_8888 software bitmap, so it
- * can back a [android.graphics.BitmapShader] for Repeat tile modes; stable
- * memory-cache key). The decode runs in a `LaunchedEffect` keyed on the set of
- * refIds; loads survive recomposition and missing entries simply remain absent
- * (the renderer skips a texture overlay whose bitmap hasn't arrived yet).
+ * Reads from the session-level [AppearanceAssetCache] (provided via
+ * [LocalAppearanceAssetCache]) so textures survive `Full ↔ Simplified` LOD
+ * remounts during zoom — a resident bitmap returns synchronously, no flash
+ * (`docs/todo.md § 28.2`). The ARGB_8888 software bitmap can back a
+ * [android.graphics.BitmapShader] for Repeat tile modes (§ 28.1). Falls back to a
+ * local cache outside the canvas; missing entries simply remain absent (the
+ * renderer skips a texture overlay whose bitmap hasn't arrived yet).
  */
 @Composable
 internal fun rememberOverlayTextureBitmaps(
@@ -104,18 +102,12 @@ internal fun rememberOverlayTextureBitmaps(
         .distinct()
     if (refIds.isEmpty()) return emptyMap()
 
-    val context = LocalContext.current
-    val refIdsKey = refIds.joinToString("|")
-    var bitmaps by remember(refIdsKey) { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
-
-    LaunchedEffect(refIdsKey) {
-        val loaded = mutableMapOf<String, ImageBitmap>()
-        for (refId in refIds) {
-            runCatching {
-                loadAppearanceBitmap(context, refId)?.let { loaded[refId] = it }
-            }
-        }
-        bitmaps = loaded
+    val cache = LocalAppearanceAssetCache.current ?: rememberAppearanceAssetCache()
+    val keys = remember(refIds) {
+        refIds.map { AppearanceAssetKey(it, AppearanceAssetKind.OverlayTexture) }
     }
-    return bitmaps
+    LaunchedEffect(cache, keys) { cache.ensure(keys) }
+    return refIds.mapNotNull { refId ->
+        cache.get(AppearanceAssetKey(refId, AppearanceAssetKind.OverlayTexture))?.let { refId to it }
+    }.toMap()
 }

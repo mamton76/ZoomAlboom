@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +58,9 @@ import com.mamton.zoomalbum.feature.canvas.gestures.tapAndLongPressGestures
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasAction
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasState
 import com.mamton.zoomalbum.feature.canvas.viewmodel.CanvasViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.atan2
 
 /**
@@ -74,6 +78,14 @@ import kotlin.math.atan2
  * See `docs/architecture/video.md § 6` and `todo.md § 27.6 / § 27.11`.
  */
 private const val PLAYER_SURFACE_INLINE = true
+
+/**
+ * Delay before a settled camera gesture unfreezes video (resume playback + restore
+ * the live surface). Bridges the brief begin/end churn when the finger count
+ * crosses 2 during a continuous manipulation, so it stays frozen until the fingers
+ * actually leave.
+ */
+private const val NAV_SETTLE_MS = 250L
 
 @Composable
 fun CanvasScreen(
@@ -180,6 +192,25 @@ fun CanvasScreen(
     // compute the visible world rect. Updated synchronously with the viewmodel's
     // own screen-size cache.
     var screenSize by remember { mutableStateOf(IntSize.Zero) }
+
+    // True while the user is manipulating the camera (two-finger gesture). Turning
+    // OFF is debounced (NAV_SETTLE_MS): the two-finger detector fires begin/end each
+    // time the finger count crosses 2, so a continuous manipulation (re-grip,
+    // pinch↔pan) would otherwise toggle off→on mid-gesture. The debounce keeps it
+    // frozen until the fingers truly settle; a new gesture cancels the pending off.
+    var isNavigating by remember { mutableStateOf(false) }
+    val navScope = rememberCoroutineScope()
+    var navEndJob by remember { mutableStateOf<Job?>(null) }
+
+    // Per-gesture video freeze. While the camera is being manipulated, freeze ALL
+    // playback authoritatively in the controller (pauses every assigned player AND
+    // stops `reconcile` from starting/resuming any mid-gesture), so the frame
+    // doesn't advance. The video surface always offscreen-composites
+    // (VideoSurfaceChrome) so that frozen frame rides the camera transform exactly,
+    // with no desync from its decoration frame. Unfreezes on settle. See § 27.11.
+    LaunchedEffect(isNavigating) {
+        playbackController.setFrozen(isNavigating)
+    }
 
     Box(
         modifier = Modifier
@@ -594,6 +625,12 @@ fun CanvasScreen(
             // is the route.)
             .infiniteCanvasGestures(
                 onGestureBegin = {
+                    // Freeze video playback for the whole interaction (see the
+                    // setFrozen effect above). Cancel any pending unfreeze so a
+                    // re-grip within the settle window stays frozen.
+                    navEndJob?.cancel()
+                    navEndJob = null
+                    isNavigating = true
                     // CropEdit captures pinch + two-finger pan as source-edit
                     // gestures; wrap the whole pinch session in one undo entry.
                     if (viewModel.state.value.editor.activeTool ===
@@ -607,6 +644,14 @@ fun CanvasScreen(
                     }
                 },
                 onGestureEnd = {
+                    // Debounced unfreeze: only resume playback once the fingers have
+                    // settled, so a continuous manipulation that briefly drops below
+                    // 2 fingers doesn't re-resume playback mid-interaction.
+                    navEndJob?.cancel()
+                    navEndJob = navScope.launch {
+                        delay(NAV_SETTLE_MS)
+                        isNavigating = false
+                    }
                     if (viewModel.state.value.editor.activeTool ===
                         EditorTool.CropEdit
                     ) {
@@ -754,6 +799,27 @@ fun CanvasScreen(
             }
             LaunchedEffect(fullVideoIds, playbackController.playingNodeIds) {
                 playbackController.reconcile(fullVideoIds)
+            }
+
+            // Appearance-asset residency (decorations / masks / overlay textures):
+            // prewarm bitmaps for visible + near-visible nodes (detail ≥ Preview, so
+            // they're resident *before* the node reaches Full) and retain only that
+            // set. Keyed on the asset-key *set*, so it fires on visibility changes —
+            // not every zoom frame — avoiding churn (`todo.md § 28.2`).
+            val appearanceAssetCache = LocalAppearanceAssetCache.current
+            val nearVisibleAssetKeys = remember(state.visibleNodes) {
+                state.visibleNodes.asSequence()
+                    .filter {
+                        it.detail == RenderDetail.Preview ||
+                            it.detail == RenderDetail.Simplified ||
+                            it.detail == RenderDetail.Full
+                    }
+                    .flatMap { appearanceAssetKeys(it.node).asSequence() }
+                    .toSet()
+            }
+            LaunchedEffect(appearanceAssetCache, nearVisibleAssetKeys) {
+                appearanceAssetCache?.ensure(nearVisibleAssetKeys)
+                appearanceAssetCache?.retainOnly(nearVisibleAssetKeys)
             }
 
             // Fallback z-order path: when inline emission is disabled, mount the

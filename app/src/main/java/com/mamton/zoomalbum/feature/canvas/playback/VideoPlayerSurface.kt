@@ -77,6 +77,11 @@ private fun VideoSurfaceChrome(
     node: CanvasNode.Media,
     drawBase: ContentDrawScope.() -> Unit,
     child: @Composable BoxScope.() -> Unit,
+    // The live player passes `true`: its base draw is a real TextureView that must
+    // be rasterized into an atomic offscreen buffer to track the camera transform.
+    // The poster passes `false`: it's a Compose-drawn bitmap that already tracks the
+    // transform, so it only needs the offscreen layer when a contentMask is present.
+    forceOffscreen: Boolean = false,
 ) {
     val t = node.transform
     val renderW = t.renderW
@@ -125,8 +130,17 @@ private fun VideoSurfaceChrome(
             modifier = Modifier
                 .fillMaxSize()
                 .clip(clipShape)
+                // Offscreen-composite the content (live TextureView + base draw)
+                // into one atomic buffer the camera transform applies to as a unit —
+                // so a live video tracks its Compose-drawn decoration frame instead
+                // of desyncing, with no blink and no off→on toggle mid-gesture (which
+                // itself shifted the frame). The live player forces this always (its
+                // TextureView needs it); a contentMask also needs it for its DstIn
+                // cut. The static poster opts out unless masked — it's a Compose
+                // bitmap that already tracks the transform, so an offscreen pass per
+                // idle video would be wasted. See `todo.md § 27.11`.
                 .then(
-                    if (contentMask != null) {
+                    if (contentMask != null || forceOffscreen) {
                         Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                     } else {
                         Modifier
@@ -235,15 +249,31 @@ fun VideoPlayerSurface(
             targetW = target.w, targetH = target.h,
         )
     }
+    // Camera-gesture handling: the content Box is ALWAYS offscreen-composited (see
+    // VideoSurfaceChrome), which rasterizes the live TextureView into one buffer the
+    // camera transform applies to as a unit — so the frame stays glued to the
+    // Compose-drawn decoration frame with no desync/blink, and there's no off→on
+    // toggle to shift it. During a camera gesture `CanvasScreen` freezes playback
+    // (VideoPlaybackController.setFrozen) so the frame doesn't advance. We rely on
+    // that real frame — no extracted snapshot (an `MMR.getFrameAtTime` proxy was
+    // only ~±1 frame accurate and shifted the paused frame). See `todo.md § 27.11`.
     VideoSurfaceChrome(
         node = node,
+        forceOffscreen = true, // the live TextureView must be rasterized to track the transform
         drawBase = {
-            drawContent() // renders the TextureView child
+            drawContent() // live TextureView child (paused + offscreen → exact, tracking)
             // Paused-in-place: badge over the frozen frame so it reads as paused
             // (not a still). Inside the chrome's draw so it's masked/clipped too.
             if (paused) drawPlayBadge()
         },
         child = {
+            // Bind the player to the TextureView only when the binding actually
+            // changes — NOT on every recomposition. `AndroidView`'s update block
+            // runs on each recomposition, and a zoom recomposes this node every
+            // frame (its world transform is stable, but the node param is unstable).
+            // Calling `setVideoTextureView` repeatedly re-attaches ExoPlayer's
+            // output surface to the same view each frame → a black blip.
+            val bound = remember { arrayOfNulls<ExoPlayer>(1) }
             AndroidView(
                 factory = { ctx ->
                     TextureView(ctx).apply {
@@ -254,8 +284,17 @@ fun VideoPlayerSurface(
                         isOpaque = false
                     }
                 },
-                update = { view -> player.setVideoTextureView(view) },
-                onRelease = { view -> player.clearVideoTextureView(view) },
+                update = { view ->
+                    if (bound[0] !== player) {
+                        bound[0]?.clearVideoTextureView(view)
+                        player.setVideoTextureView(view)
+                        bound[0] = player
+                    }
+                },
+                onRelease = { view ->
+                    bound[0]?.clearVideoTextureView(view)
+                    bound[0] = null
+                },
                 modifier = Modifier.cropPlaced(content),
             )
         },

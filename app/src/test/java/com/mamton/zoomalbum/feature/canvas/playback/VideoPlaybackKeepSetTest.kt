@@ -1,6 +1,8 @@
 package com.mamton.zoomalbum.feature.canvas.playback
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -56,5 +58,23 @@ class VideoPlaybackKeepSetTest {
             emptySet<String>(),
             selectPlaybackKeepSet(setOf("a"), setOf("a"), mapOf("a" to 0L), 0),
         )
+    }
+
+    // ── shouldVideoPlay: the playWhenReady rule shared by setFrozen + reconcile ──
+
+    @Test
+    fun `a normal video plays when not paused and not frozen`() {
+        assertTrue(shouldVideoPlay("a", pausedNodeIds = emptySet(), frozen = false))
+    }
+
+    @Test
+    fun `a camera gesture freeze stops playback`() {
+        assertFalse(shouldVideoPlay("a", pausedNodeIds = emptySet(), frozen = true))
+    }
+
+    @Test
+    fun `a user-paused video never plays, frozen or not`() {
+        assertFalse(shouldVideoPlay("a", pausedNodeIds = setOf("a"), frozen = false))
+        assertFalse(shouldVideoPlay("a", pausedNodeIds = setOf("a"), frozen = true))
     }
 }

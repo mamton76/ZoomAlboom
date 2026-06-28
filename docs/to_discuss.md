@@ -194,6 +194,8 @@ Keep three contexts distinct: **Edit** (canvas authoring), **View / Present**, *
 
 **Trade-offs to weigh:** offscreen buffers cost memory + GPU and get large at high zoom / big nodes. Decide whether the offscreen path is *always on for decorated media*, *gated on decorations/contentMask/opening/overlays present*, *bounded by node screen size / LOD*, and *fallback-safe for very large nodes* (drop to the direct path rather than allocate a huge buffer).
 
+**Tracking:** implementation slices in [`todo.md § 28`](todo.md) — **28.1** cache-warm/copy-free loading (cause #1) → **28.2** hoist asset residency above the LOD boundary (cause #2) → **28.3** atomic offscreen composite for decorated media (cause #3, with large-node fallback) → **28.4** real-device verification. Build order is residency-first; the flicker should be largely gone after 28.2, before any offscreen-compositing change.
+
 ---
 
 ## § 29 Audit all `MediaAppearance` editors

@@ -16,18 +16,12 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Paint
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
-import coil3.SingletonImageLoader
-import coil3.request.ImageRequest
-import coil3.request.SuccessResult
-import coil3.request.allowHardware
-import coil3.toBitmap
 import com.mamton.zoomalbum.domain.model.AlphaMask
 import com.mamton.zoomalbum.domain.model.AlphaMaskSource
 import com.mamton.zoomalbum.domain.model.AlphaStop
@@ -334,12 +328,11 @@ private fun DrawScope.drawProceduralMask(
 // ── Image-source bitmap resolution ──────────────────────────────────────────
 
 /**
- * Resolves the bitmap referenced by an [AlphaMaskSource.Image]'s [maskRefId]
- * via Coil. Mirrors [rememberOverlayTextureBitmaps] and
- * [rememberBackgroundBitmap]: `allowHardware(false)` so the bitmap can back
- * `drawImageRect` reads, decode runs in [LaunchedEffect] keyed on the refId
- * (loads survive recomposition), and a missing entry returns `null` (the
- * renderer falls back to "no mask" until the bitmap arrives).
+ * Resolves the bitmap referenced by an [AlphaMaskSource.Image]'s [maskRefId] via
+ * the shared [loadAppearanceBitmap] (ARGB_8888, so the mask keeps the alpha
+ * channel its `DstIn` composite needs; stable memory-cache key). Decode runs in a
+ * [LaunchedEffect] keyed on the refId (loads survive recomposition), and a missing
+ * entry returns `null` (the renderer falls back to "no mask" until it arrives).
  *
  * Returns `null` if [mask] is `null`, the source isn't [AlphaMaskSource.Image],
  * or the refId is blank.
@@ -354,18 +347,7 @@ internal fun rememberAlphaMaskBitmap(mask: AlphaMask?): ImageBitmap? {
 
     LaunchedEffect(refId) {
         runCatching {
-            val request = ImageRequest.Builder(context)
-                .data(refId)
-                .allowHardware(false)
-                .build()
-            val result = SingletonImageLoader.get(context).execute(request)
-            val image = (result as? SuccessResult)?.image
-            if (image != null) {
-                val raw = image.toBitmap()
-                val safe = if (raw.config == android.graphics.Bitmap.Config.ARGB_8888) raw
-                else raw.copy(android.graphics.Bitmap.Config.ARGB_8888, false) ?: raw
-                bitmap = safe.asImageBitmap()
-            }
+            loadAppearanceBitmap(context, refId)?.let { bitmap = it }
         }
     }
     return bitmap

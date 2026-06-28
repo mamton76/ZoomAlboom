@@ -1626,6 +1626,61 @@ Unit tests can't cover ExoPlayer + TextureView + Compose lifecycle, the `Uri` ro
 
 ---
 
+## 28. Decorated-Media Render Atomicity (zoom flicker)
+
+Open topic `to_discuss.md § 28` (urgent, surfaced 2026-06-28). Symptom: zooming/panning a tablet canvas makes decorated media flicker — content paints first, the frame decoration pops in a beat later, so media + decoration aren't perceived as one object. Grounding pass found the dominant cause is **async bitmap arrival + LOD remount**, not intra-frame phase desync — so fix bitmap *residency + readiness* first (§ 28.1–28.2), and only then extend offscreen compositing (§ 28.3). An offscreen layer alone will not fix it.
+
+Affected loaders, all the same `LaunchedEffect { SingletonImageLoader.execute(allowHardware(false)) }` + post-`copy(ARGB_8888)` shape, all keyed *inside* the `RenderDetail.Full` composable that remounts on every LOD cross:
+- `rememberDecorationBitmaps` — `MediaDecorationRenderer.kt § 178`
+- `rememberAlphaMaskBitmap` — `AlphaMaskRenderer.kt § 348`
+- `rememberOverlayTextureBitmaps` — `OverlayRenderer.kt § 104`
+- `rememberVideoPosterBitmap` — `CanvasRenderer.kt § 648`
+
+Build order: **28.1 → 28.2 → 28.3 → 28.4** (each ships independently; the flicker should be largely gone after 28.2).
+
+### 28.1 Slice A — Cache-warm, copy-free appearance-asset loading (cause #1) — DONE 2026-06-28
+Make decoration / mask / overlay bitmaps resolve on the same memory-cached path as media content, without a per-load re-decode + ARGB_8888 copy. Implemented in `AppearanceAssetLoading.kt` (`loadAppearanceBitmap`); decoration/mask/overlay loaders repointed. Builds clean. (Video poster `rememberVideoPosterBitmap` deliberately left on its own path — its two-layer chrome is `§ 27.6`; folding it in is a § 28.2 concern.)
+- [x] Add one shared loader helper (`loadAppearanceBitmap(context, assetUri): ImageBitmap?`) that the `remember*Bitmap` functions delegate to — single place for the Coil request config + copy policy.
+- [x] Request the right config from Coil directly (`bitmapConfig(ARGB_8888)` + `allowHardware(false)`) so the **cached** bitmap is already alpha-capable software. The per-load `.copy(ARGB_8888)` is gone from the common path; one centralized defensive copy remains in the helper for the rare decoder downgrade (the "unavoidable case").
+- [x] Set an explicit, stable `memoryCacheKey` (`"appearance-asset:" + uri`) so repeated loads of the same asset hit Coil's memory cache instead of re-decoding; the prefix avoids colliding with the content painter's default size-suffixed key for the same URI.
+- [x] Behavior identical otherwise (nine-slice still gets a raw `ImageBitmap`; overlays still back a `BitmapShader`; callers keep their own `runCatching` + LOD/keying). No renderer or LOD logic changed in this slice.
+
+### 28.2 Slice B — Hoist appearance-asset residency above the LOD boundary (cause #2)
+Decorations/masks/overlays must survive `Full ↔ Simplified` remounts during zoom instead of resetting to `emptyMap` and reloading. Mirror the `CanvasScaffold`-level video player pool (`editor-tools.md § 7.1` / `video.md § 6`): a holder lives *above* the per-node LOD switch, so remounting reads resident bitmaps synchronously.
+
+**Design — mini-note (proposed 2026-06-28; awaiting sign-off before implementing).** Storage is keyed by **asset identity, not node identity** (per user direction 2026-06-28), so one decoration/mask/overlay reused by many nodes decodes + stores **once**.
+
+- **Holder home:** `AppearanceAssetCache` instance `remember`-ed at **`CanvasScaffold`** (same level as the video playback holder), exposed downward via a `LocalAppearanceAssetCache` CompositionLocal so it threads through `CanvasNodeRenderer → MediaRenderer → FullMediaRenderer` without a param chain. Lifetime = the canvas session (one album open); a `DisposableEffect` releases bitmaps on dispose. Not in domain models (`editor-tools.md § 7.1`).
+- **Storage key:** `AppearanceAssetKey(assetUri: String, kind: AppearanceAssetKind)` where `kind ∈ {Decoration, ContentMask, OverlayTexture}`. **No `nodeId`** in the key. **No `sizeBucket`** in this slice (the key may grow a `sizeBucket: Int?` later if size-aware loading is needed — deferred). `kind` is for retain bookkeeping + future per-kind decode divergence; the same URI used as two kinds is a rare, accepted duplicate.
+- **API:** `get(key): ImageBitmap?` (synchronous, resident-or-null) · `ensure(keys: Set<AppearanceAssetKey>)` (launches loads via the § 28.1 `loadAppearanceBitmap` only for not-yet-resident keys) · `retainOnly(retained: Set<AppearanceAssetKey>)`. Backed by a `SnapshotStateMap<AppearanceAssetKey, ImageBitmap>`.
+- **Loader wrappers stay:** `rememberDecorationBitmaps` / `rememberAlphaMaskBitmap` / `rememberOverlayTextureBitmaps` keep their current signatures + return types but become thin adapters — `ensure(...)` their keys and read resident bitmaps from the cache (`get`) synchronously, instead of owning a `remember(key)` `LaunchedEffect`. The per-node composable no longer owns cache lifetime → LOD remounts don't clear it.
+- **Retain/prewarm source:** `CanvasScreen` already computes each node's `RenderDetail`. Gather the `AppearanceAssetKey`s of every node at detail **≥ Simplified/Preview** (visible + near-viewport), `ensure(...)` them (this is the prewarm — assets load while the node is still Simplified, resident *before* it reaches `Full`), and `retainOnly(thatSet ∪ recentTail)`.
+- **Eviction (anti-thrash):** `retainOnly` does **not** evict immediately. Not-retained entries move to a bounded **LRU "cold" tail**; eviction happens only when the cold tail exceeds a cap (count cap, e.g. ~64, as the MVP safety ceiling; rough memory budget later). A node that briefly drops below threshold mid-zoom and re-enters keeps its bitmap → no re-flicker. Solves the unbounded-growth pitfall of `§ 27.11`.
+- **Big-bitmap risk (acknowledged, not fixed here):** loads stay original-size for MVP (decorations/masks/overlays are modest PNGs; matches today's behavior). A huge source PNG → large ARGB_8888 is the known risk; the deferred fix is the `sizeBucket` key extension, intentionally out of this slice.
+- **Out of scope here:** `rememberVideoPosterBitmap` (own two-layer chrome path, `§ 27.6`) and sticker *content* (would render via the content painter, not this cache; a sticker used as an appearance layer would add a `kind` later, `to_discuss.md § 30`).
+
+Checklist:
+- [ ] `AppearanceAssetKey` + `AppearanceAssetKind` + `AppearanceAssetCache` (in `feature/canvas/view/`), `LocalAppearanceAssetCache`, `rememberAppearanceAssetCache()` at `CanvasScaffold`.
+- [ ] `ensure` / `get` / `retainOnly` with the LRU cold-tail cap; loads via § 28.1 `loadAppearanceBitmap`.
+- [ ] Repoint the three loader wrappers to the cache (signatures unchanged).
+- [ ] Wire retain/prewarm from `CanvasScreen`'s per-node `RenderDetail` (≥ Simplified) → `ensure` + `retainOnly`.
+- [ ] Verify same decoration on many nodes = one stored bitmap; LOD remount keeps it resident.
+
+### 28.3 Slice C — Atomic offscreen composite for decorated media (cause #3)
+With assets resident (28.2), make content + decorations land as one buffer so nothing paints in a partial state.
+- [ ] Extend `needsLayer` in `FullMediaRenderer` (`CanvasRenderer.kt § 540`) from `contentMask != null` to also fire when `decorations.isNotEmpty()` || `overlays.isNotEmpty()` || `opening != null`. Route through the existing `withOptionalMaskOriginShift` / `CompositingStrategy.Offscreen` branch; keep the `DstIn` mask draw gated on `contentMask != null` only.
+- [ ] Verify the offscreen geometry (center transform origin + origin shift) is correct for the now-larger set of layered-but-unmasked nodes (previously only the masked path exercised it).
+- [ ] **Guardrails (per `to_discuss.md § 28`):** decide the gate — always-on for decorated media vs. bounded by node screen size / LOD; make it **fallback-safe for very large nodes** (drop to the direct, non-offscreen path rather than allocate a huge buffer at high zoom). Pick a max offscreen dimension threshold.
+- [ ] Confirm video parity: video already offscreen-composites via `VideoSurfaceChrome` (`§ 27.6` / `§ 27.9c`) — ensure the image-path change stays consistent and doesn't double-buffer.
+
+### 28.4 Slice D — Verification
+- [ ] Real-device (tablet): zoom in/out repeatedly across the `Full ↔ Simplified` boundary over scrapbook-preset media — **no content-then-frame flicker**; decoration is present on the first painted frame.
+- [ ] Same check for masked media and overlay-heavy media (the other late-async loaders).
+- [ ] Memory/perf sanity: appearance-asset cache size stays bounded as nodes scroll off-screen; offscreen buffers don't blow up at high zoom on large nodes (28.3 fallback engages).
+- [ ] No regression in `MediaAppearance` rendering output (decorations, opening, mask, overlays still composite identically — this is a *timing/atomicity* fix, not a visual change).
+
+---
+
 ## 18. Future (Post-MVP)
 
 See [future-ideas.md](product/future-ideas.md) for the full list.

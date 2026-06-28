@@ -1,6 +1,5 @@
 package com.mamton.zoomalbum.feature.canvas.view
 
-import android.graphics.Bitmap
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -8,16 +7,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
-import coil3.SingletonImageLoader
-import coil3.request.ImageRequest
-import coil3.request.SuccessResult
-import coil3.request.allowHardware
-import coil3.toBitmap
 import com.mamton.zoomalbum.domain.model.MediaDecoration
 import com.mamton.zoomalbum.domain.model.MediaDecorationMode
 import kotlin.math.roundToInt
@@ -169,11 +162,10 @@ private fun DrawScope.drawNineSlice(
 
 /**
  * Resolves the [ImageBitmap]s for a decoration stack into a map keyed by
- * `assetUri`. Mirrors [rememberOverlayTextureBitmaps]: Coil's
- * [SingletonImageLoader] with `allowHardware(false)` + an explicit ARGB_8888
- * copy so each bitmap keeps its alpha channel (decoration PNGs are transparent),
- * decoded in a [LaunchedEffect] keyed on the distinct URI set. Missing entries
- * stay absent — the renderer skips a decoration whose bitmap hasn't arrived yet.
+ * `assetUri`. Decoded via the shared [loadAppearanceBitmap] (ARGB_8888, so the
+ * transparent decoration PNGs keep their alpha channel; stable memory-cache key)
+ * in a [LaunchedEffect] keyed on the distinct URI set. Missing entries stay
+ * absent — the renderer skips a decoration whose bitmap hasn't arrived yet.
  */
 @Composable
 internal fun rememberDecorationBitmaps(
@@ -193,17 +185,7 @@ internal fun rememberDecorationBitmaps(
         val loaded = mutableMapOf<String, ImageBitmap>()
         for (uri in uris) {
             runCatching {
-                val request = ImageRequest.Builder(context)
-                    .data(uri)
-                    .allowHardware(false)
-                    .build()
-                val image = (SingletonImageLoader.get(context).execute(request) as? SuccessResult)?.image
-                if (image != null) {
-                    val raw = image.toBitmap()
-                    val safe = if (raw.config == Bitmap.Config.ARGB_8888) raw
-                    else raw.copy(Bitmap.Config.ARGB_8888, false) ?: raw
-                    loaded[uri] = safe.asImageBitmap()
-                }
+                loadAppearanceBitmap(context, uri)?.let { loaded[uri] = it }
             }
         }
         bitmaps = loaded

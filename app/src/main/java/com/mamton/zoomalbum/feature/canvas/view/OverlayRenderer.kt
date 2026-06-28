@@ -10,15 +10,9 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Paint
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.platform.LocalContext
-import coil3.SingletonImageLoader
-import coil3.request.ImageRequest
-import coil3.request.SuccessResult
-import coil3.request.allowHardware
-import coil3.toBitmap
 import com.mamton.zoomalbum.domain.model.BackgroundData
 import com.mamton.zoomalbum.domain.model.NodeBlendMode
 import com.mamton.zoomalbum.domain.model.OverlayStyle
@@ -94,11 +88,11 @@ private fun NodeBlendMode.toComposeBlendMode(): BlendMode = when (this) {
  * Resolves the [ImageBitmap]s referenced by `Texture` entries in [overlays]
  * into a stable map keyed by `textureRefId`.
  *
- * Mirrors `rememberBackgroundBitmap`: Coil's [SingletonImageLoader] with
- * `allowHardware(false)` so the bitmap can back a [android.graphics.BitmapShader]
- * for Repeat tile modes. The decode runs in a `LaunchedEffect` keyed on the set
- * of refIds; loads survive recomposition and missing entries simply remain
- * absent (the renderer skips a texture overlay whose bitmap hasn't arrived yet).
+ * Decoded via the shared [loadAppearanceBitmap] (ARGB_8888 software bitmap, so it
+ * can back a [android.graphics.BitmapShader] for Repeat tile modes; stable
+ * memory-cache key). The decode runs in a `LaunchedEffect` keyed on the set of
+ * refIds; loads survive recomposition and missing entries simply remain absent
+ * (the renderer skips a texture overlay whose bitmap hasn't arrived yet).
  */
 @Composable
 internal fun rememberOverlayTextureBitmaps(
@@ -118,18 +112,7 @@ internal fun rememberOverlayTextureBitmaps(
         val loaded = mutableMapOf<String, ImageBitmap>()
         for (refId in refIds) {
             runCatching {
-                val request = ImageRequest.Builder(context)
-                    .data(refId)
-                    .allowHardware(false)
-                    .build()
-                val result = SingletonImageLoader.get(context).execute(request)
-                val image = (result as? SuccessResult)?.image
-                if (image != null) {
-                    val raw = image.toBitmap()
-                    val safe = if (raw.config == android.graphics.Bitmap.Config.ARGB_8888) raw
-                    else raw.copy(android.graphics.Bitmap.Config.ARGB_8888, false) ?: raw
-                    loaded[refId] = safe.asImageBitmap()
-                }
+                loadAppearanceBitmap(context, refId)?.let { loaded[refId] = it }
             }
         }
         bitmaps = loaded

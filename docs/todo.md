@@ -837,6 +837,15 @@ See [PRD § 8.7](product/PRD.md#87-non-destructive-media-appearance) and [PRD §
 - [ ] Per-field (`AppearancePath`) overrides, section-by-section (ColorAdjustments first).
 - [ ] `CanvasAction.ResetAppearance`; `CopyAppearance` / `PasteAppearance`.
 
+**Slice 2 — library/editor convenience (direction decided 2026-06-29, `to_discuss.md § 32`):**
+The MVP store + save/apply/edit/duplicate/delete already ship; this slice is management UX. Three decisions: global manager entry (no selection) + keep contextual Apply · full bottom sheet with big cards + per-card `⋮` overflow · quick-save-then-refine.
+- [ ] **Global preset manager** entry point reachable with **no selection** (add/edit/rename/duplicate/delete). Pick the home (album menu / top-bar overflow / Add sheet). Reuse `PresetLibrarySheet`, but decouple it from `presetLibraryEditing: List<Media>` so it opens selection-free.
+- [ ] **Preview subject when nothing is selected** — render cards against a **bundled sample node** (`media-presets.md § 10`) instead of the (absent) selection's first media.
+- [ ] **Promote `PresetLibrarySheet` from `Dialog` → full bottom sheet** (or dedicated screen): large preview cards; **Apply** primary; **Edit / Duplicate / Rename / Delete** in a per-card overflow (`⋮`) menu.
+- [ ] **Rename** as a first-class card action (today it's only inside `PresetDefinitionEditor`).
+- [ ] **Quick-save-then-refine** — keep name+Save instant; add a confirm/peek that offers **Edit** to adjust governed sections before/after creation.
+- [ ] Deferred for MVP: search / sort / folders (flat list ships); revisit when libraries grow.
+
 ### 20.4 Rendered derivatives
 - [ ] `CanvasAction.SaveRenderedDerivative` — flatten source + appearance into a new image file
 - [ ] Output settings: format (PNG/JPEG/WebP), quality, resolution strategy (source res or display res ×2)
@@ -1661,7 +1670,7 @@ Affected loaders, all the same `LaunchedEffect { SingletonImageLoader.execute(al
 - `rememberOverlayTextureBitmaps` — `OverlayRenderer.kt § 104`
 - `rememberVideoPosterBitmap` — `CanvasRenderer.kt § 648`
 
-Build order: **28.1 → 28.2 → 28.3 → 28.4** (each ships independently; the flicker should be largely gone after 28.2).
+Build order: **28.1 → 28.2 → 28.3 → 28.4** (each ships independently; the flicker should be largely gone after 28.2). **Status 2026-06-29:** 28.1 + 28.2 shipped and **verified on-device** — the content-first flicker is gone (decorated images + masked/overlay media + video poster all stay resident across zoom). **28.3 (atomic offscreen composite) deferred to future** — residency alone fixed the perceived flicker, so the extra offscreen buffering isn't needed now; kept for if intra-frame phase desync resurfaces.
 
 ### 28.1 Slice A — Cache-warm, copy-free appearance-asset loading (cause #1) — DONE 2026-06-28
 Make decoration / mask / overlay bitmaps resolve on the same memory-cached path as media content, without a per-load re-decode + ARGB_8888 copy. Implemented in `AppearanceAssetLoading.kt` (`loadAppearanceBitmap`); decoration/mask/overlay loaders repointed. Builds clean. (Video poster `rememberVideoPosterBitmap` was initially left on its own path, then folded into the § 28.2 cache as `VideoPoster` — see § 28.2.)
@@ -1690,20 +1699,58 @@ Checklist — IMPLEMENTED 2026-06-28, `compileDebugKotlin` green (on-device flic
 - [x] `ensure` / `get` / `retainOnly` with the LRU cold-tail cap (`DEFAULT_COLD_TAIL_CAP = 64`); loads via § 28.1 `loadAppearanceBitmap` on the holder's main-dispatched scope.
 - [x] Repointed the three loader wrappers (`rememberDecorationBitmaps` / `rememberAlphaMaskBitmap` / `rememberOverlayTextureBitmaps`) to `ensure` + synchronous `get` (signatures unchanged). Outside the canvas (preset-preview sheets, no provider) they fall back to a local `rememberAppearanceAssetCache()` = old non-resident behavior.
 - [x] Retain/prewarm wired in `CanvasScreen`: keys for nodes at detail ≥ Preview (Preview/Simplified/Full) → `ensure` + `retainOnly`, in a `LaunchedEffect` keyed on the asset-key *set* (fires on visibility change, not per zoom frame).
-- [ ] **On-device verification (next):** same decoration on many nodes = one stored bitmap; zoom across Full↔Simplified keeps decoration/mask/overlay resident with no content-first flash.
+- [x] **On-device verification — DONE 2026-06-29:** zoom across Full↔Simplified keeps decoration/mask/overlay (and video poster) resident with no content-first flash. The perceived flicker is gone.
 
-### 28.3 Slice C — Atomic offscreen composite for decorated media (cause #3)
+### 28.3 Slice C — Atomic offscreen composite for decorated media (cause #3) — DEFERRED 2026-06-29
+**Not needed for the flicker fix.** On-device, residency (28.1 + 28.2) removed the content-first flicker on its own — content + decorations now arrive together because the bitmaps are resident, so the extra offscreen buffer doesn't earn its memory/GPU cost yet. Kept here as a future lever **only if** intra-frame phase desync (a late layer within a *single* frame, not async arrival) is later observed on real media. If revisited, the work is:
 With assets resident (28.2), make content + decorations land as one buffer so nothing paints in a partial state.
 - [ ] Extend `needsLayer` in `FullMediaRenderer` (`CanvasRenderer.kt § 540`) from `contentMask != null` to also fire when `decorations.isNotEmpty()` || `overlays.isNotEmpty()` || `opening != null`. Route through the existing `withOptionalMaskOriginShift` / `CompositingStrategy.Offscreen` branch; keep the `DstIn` mask draw gated on `contentMask != null` only.
 - [ ] Verify the offscreen geometry (center transform origin + origin shift) is correct for the now-larger set of layered-but-unmasked nodes (previously only the masked path exercised it).
 - [ ] **Guardrails (per `to_discuss.md § 28`):** decide the gate — always-on for decorated media vs. bounded by node screen size / LOD; make it **fallback-safe for very large nodes** (drop to the direct, non-offscreen path rather than allocate a huge buffer at high zoom). Pick a max offscreen dimension threshold.
 - [ ] Confirm video parity: video already offscreen-composites via `VideoSurfaceChrome` (`§ 27.6` / `§ 27.9c`) — ensure the image-path change stays consistent and doesn't double-buffer.
 
-### 28.4 Slice D — Verification
-- [ ] Real-device (tablet): zoom in/out repeatedly across the `Full ↔ Simplified` boundary over scrapbook-preset media — **no content-then-frame flicker**; decoration is present on the first painted frame.
-- [ ] Same check for masked media and overlay-heavy media (the other late-async loaders).
-- [ ] Memory/perf sanity: appearance-asset cache size stays bounded as nodes scroll off-screen; offscreen buffers don't blow up at high zoom on large nodes (28.3 fallback engages).
-- [ ] No regression in `MediaAppearance` rendering output (decorations, opening, mask, overlays still composite identically — this is a *timing/atomicity* fix, not a visual change).
+### 28.4 Slice D — Verification — DONE 2026-06-29 (residency path)
+- [x] Real-device (tablet): zoom in/out repeatedly across the `Full ↔ Simplified` boundary over scrapbook-preset media — **no content-then-frame flicker**; decoration is present on the first painted frame.
+- [x] Same check for masked media and overlay-heavy media (the other late-async loaders).
+- [x] No regression in `MediaAppearance` rendering output (decorations, opening, mask, overlays still composite identically — this is a *timing/atomicity* fix, not a visual change).
+- [ ] *(deferred with 28.3)* Memory/perf sanity for offscreen buffers at high zoom on large nodes — only relevant if 28.3 is built. The appearance-asset cache size itself is already bounded by the 28.2 LRU cold-tail cap.
+
+---
+
+## 29. `MediaAppearance` editor audit (`to_discuss.md § 29`)
+
+Audit run **2026-06-29** against the code (`MediaAppearance.kt`, `CanvasRenderer.kt § FullMediaRenderer`, `MediaStyleEditors.kt` / `NodeStyleEditors.kt` / `OverlayListEditor.kt` / `AlphaMaskEditor.kt`, `CanvasScaffold.kt dispatchMediaConcept`, `EditorActionCatalog.kt`, `MediaAppearanceResolver.kt`). One row per `AppearanceSection`. Every section has a context-menu `edit.*` action and a concept editor; undo for **all** rides the per-popup-session compound on the canvas snapshot stack; the **override section-mark** (editing a bound node detaches that section) is wired for all via `dispatchMediaConcept(section)`. The gaps are concentrated in **render coverage**, **Mixed/multi-edit**, **in-editor preview**, and the **inherited/overridden visual language**.
+
+Legend: ✅ works end-to-end · ⚠️ UI exists but doesn't apply / partial · 🚧 editor exists, renderer missing · 📋 planned.
+
+| Section | Editor | Renderer | Mixed-aware | Notes / gap |
+|---|---|---|---|---|
+| **Opacity** | `MixedAwareOpacitySlider` | ✅ `surfaceAlpha` | ✅ | ✅ fully implemented |
+| **CornerRadius** | `MixedAwareCornerRadiusSlider` | ✅ rounded clip | ✅ | ✅ done (slated to be replaced by `clip: ClipShape`, § 20.6 — future) |
+| **Crop** | `CropEditor` + in-canvas `CropEdit` tool (live handles) | ✅ `toContentScale` + manual offset/zoom | ❌ firstDraft | ✅ most complete section; only multi-select Mixed missing |
+| **ColorAdjustments** | `ColorAdjustmentsEditor` | ❌ **NOT APPLIED** (editor itself says so) | ❌ firstDraft | ⚠️ **biggest gap.** Also editor exposes only **6 of 11** model fields (missing `tint`, `highlights`, `shadows`, `blur`, `sharpen`). |
+| **Overlays** | `OverlayListEditor` (reorder, Solid/Texture/Procedural, opacity, blend) | ✅ `drawOverlayStack` | ❌ firstDraft | ✅ renders; ⚠️ pending § 20 list redesign (visibility toggle, hide-vs-delete, combined preview) |
+| **ContentMask** | `AlphaMaskEditor` | ✅ `DstIn` offscreen | ❌ firstDraft | ✅ renders; ⚠️ **no real in-editor preview**; slice-0 limit: Below decorations cut by the mask |
+| **Opening** | `MediaOpeningEditor` (insets) | ✅ `openingRect` | ❌ firstDraft | ✅ implemented |
+| **Decorations** | `DecorationListEditor` (add/remove/reorder, placement, nine-slice) | ✅ `drawDecoration` Above/Below | ❌ firstDraft | ✅ renders (flicker fixed § 28); ⚠️ no in-editor preview; should adopt the § 20 list pattern |
+| **Border** | `BorderStyleEditor` | ✅ `drawNodeBorder` | ❌ firstDraft | ✅ fully implemented |
+| **Shadow** | `ShadowStyleEditor` | ✅ `drawNodeShadow` | ❌ firstDraft | ✅ fully implemented |
+| **Caption** | `CaptionStyleEditor` (text/show/size/color) | ❌ **NOT RENDERED** ("future slice") | ❌ firstDraft | 🚧 editor + model + resolver exist; renderer missing |
+
+**Cross-cutting findings:**
+- **Render coverage** — two sections store-but-don't-render: **ColorAdjustments** (⚠️) and **Caption** (🚧). Everything else paints in `FullMediaRenderer`.
+- **Mixed / multi-edit** — only **Opacity** + **CornerRadius** use Mixed-aware controls; every other editor silently edits from the *first* selected node's value (`firstDraft`) under multi-selection (`appearance.md § 14` "Mixed" not honored). `ConceptEditorSheet` already computes a `MixedValue<T>` and passes it down — the sub-editors just don't render it yet.
+- **Inherited / overridden visual language** — section-marking on edit works, but the per-concept sheets do **not** show inherited-vs-overridden state or a per-section reset ↺ (this is exactly `§ 20.3 Slice 1c — remaining`, still open).
+- **In-editor preview** — no content editor has a live preview; only preset *cards* preview (`MediaPresetPreview` via `CanvasNodeRenderer`). Mask / decorations / color editors would benefit most.
+- **Reset / Copy / Paste appearance** — `ResetAppearance`, `CopyAppearance`, `PasteAppearance` not implemented (`§ 20.5` / `§ 20.3 Slice 1c — remaining`).
+
+**Recommended next steps (priority order):**
+- [ ] **(1) Wire `colorAdjustments` into the renderer** — `ColorMatrix` for brightness/contrast/saturation/temperature/exposure on the content paint; vignette via radial gradient; defer blur/sharpen. Then drop the "not applied" notice and expose the missing 5 model fields in the editor. *(Closes the single biggest ⚠️; also the § 20.5 known dead-end.)*
+- [ ] **(2) Inherited/overridden visual language + per-section reset** on the concept sheets (`§ 20.3 Slice 1c`) — the audit's most user-visible gap for presets.
+- [ ] **(3) Make the remaining editors Mixed-aware** (Crop/Overlays/ContentMask/Opening/Decorations/Border/Shadow) — render the `MixedValue<T>` the sheet already supplies.
+- [x] **(4) Real in-editor preview — DONE 2026-06-29 (all 11 media editors, not just mask/decorations).** `ConceptEditorSheet` gained an optional `ConceptPreview<T>` (uri + base appearance + section + the same merge lambda the dispatch uses); when present it renders a 180dp `MediaPresetPreview` thumbnail at the top of the sheet, re-rendered live from the first selected node's `firstDraft`. **Hold-to-peek compare:** long-press strips the edited section to default (`withSection(section, MediaAppearance())`) so you see the photo *without* this part; release restores the live edit. Frame editors pass `null` (no photo) → unaffected. Wired at all media call sites in `CanvasScaffold.kt` via `mediaConceptPreview(...)`. Compiles green; on-device check pending. *(This is the faithful `CanvasNodeRenderer` path, not a plain ImageView — needed for decorations/masks/overlays to show correctly.)*
+- [ ] **(5) Caption rendering** slice — lowest priority (planned feature, not a regression).
+- [ ] **(6) `ResetAppearance` / `Copy` / `Paste` appearance** actions (`§ 20.5`).
 
 ---
 

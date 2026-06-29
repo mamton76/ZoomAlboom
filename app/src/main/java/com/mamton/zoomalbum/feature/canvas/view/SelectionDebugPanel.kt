@@ -13,16 +13,22 @@ import com.mamton.zoomalbum.core.designsystem.PanelBackground
 import com.mamton.zoomalbum.core.designsystem.TextSecondary
 import com.mamton.zoomalbum.core.math.Camera
 import com.mamton.zoomalbum.core.math.TransformUtils
+import com.mamton.zoomalbum.domain.model.AppearanceSection
 import com.mamton.zoomalbum.domain.model.CanvasNode
+import com.mamton.zoomalbum.domain.model.MediaStylePreset
+import com.mamton.zoomalbum.domain.model.nonDefaultSections
 
 /**
- * Small debug overlay showing details about the currently selected node(s).
+ * Small debug overlay showing details about the currently selected node(s):
+ * transform, plus — for media — which appearance parts are actually applied
+ * (non-default [AppearanceSection]s) and any bound preset + overridden sections.
  * Visible in debug builds or when explicitly toggled on.
  */
 @Composable
 fun SelectionDebugPanel(
     selectedNodes: List<CanvasNode>,
     camera: Camera,
+    presetsById: Map<String, MediaStylePreset> = emptyMap(),
     modifier: Modifier = Modifier,
 ) {
     if (selectedNodes.isEmpty()) return
@@ -68,6 +74,24 @@ fun SelectionDebugPanel(
                 ),
                 style = mono,
             )
+            if (node is CanvasNode.Media) {
+                val appr = node.appearance
+                val sections = appr?.nonDefaultSections().orEmpty()
+                val parts = if (sections.isEmpty()) "(none)" else sections.joinToString(", ") { sec ->
+                    when (sec) {
+                        AppearanceSection.Decorations -> "Decorations(${appr?.decorations?.size ?: 0})"
+                        AppearanceSection.Overlays -> "Overlays(${appr?.overlays?.size ?: 0})"
+                        else -> sec.name
+                    }
+                }
+                Text("  appr: $parts", style = mono)
+                node.presetBinding?.let { b ->
+                    val name = presetsById[b.presetId]?.name ?: "?${b.presetId.takeLast(6)}"
+                    val ovr = if (b.overridden.isEmpty()) ""
+                    else "  ovr:${b.overridden.joinToString(",") { it.name }}"
+                    Text("  preset: $name$ovr", style = mono)
+                }
+            }
         }
         if (selectedNodes.size > 5) {
             Text("... +${selectedNodes.size - 5} more", style = mono)

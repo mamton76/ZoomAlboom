@@ -4,10 +4,16 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -25,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mamton.zoomalbum.BuildConfig
 import com.mamton.zoomalbum.domain.model.AlphaMask
 import com.mamton.zoomalbum.domain.model.BackgroundData
 import com.mamton.zoomalbum.domain.model.BorderStyle
@@ -75,6 +82,7 @@ import com.mamton.zoomalbum.feature.ide_ui.ui.content.ShadowStyleEditor
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.AddContentBottomSheet
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.AlbumSettingsBottomSheet
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.ConceptEditorSheet
+import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.ConceptPreview
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.PresetLibrarySheet
 import com.mamton.zoomalbum.feature.ide_ui.ui.sheets.FrameListBottomSheet
 import com.mamton.zoomalbum.feature.ide_ui.viewmodel.IdeViewModel
@@ -86,6 +94,7 @@ fun CanvasScaffold(
 ) {
     val canvasViewModel: CanvasViewModel = hiltViewModel()
     val canvasState by canvasViewModel.state.collectAsStateWithLifecycle()
+    val mediaPresets by canvasViewModel.presets.collectAsStateWithLifecycle()
     val ideViewModel: IdeViewModel = hiltViewModel()
     val ideState by ideViewModel.state.collectAsStateWithLifecycle()
 
@@ -122,6 +131,9 @@ fun CanvasScaffold(
     var showFrameList by remember { mutableStateOf(false) }
     var showPanelConfig by remember { mutableStateOf(false) }
     var showAlbumSettings by remember { mutableStateOf(false) }
+    // Debug overlay (debug builds only) — toggled by the 🐛 chip; shows applied
+    // appearance parts per selected node. Defaults off so it stays out of the way.
+    var debugPanelEnabled by remember { mutableStateOf(false) }
     // Per-concept editor state (`appearance.md § 14.1`). Universal concepts
     // (opacity / cornerRadius / border / shadow / overlays) populate an
     // `AppearanceTarget` discriminator since they apply to either all-frames or
@@ -495,18 +507,34 @@ fun CanvasScaffold(
             }
             IdeOverlayScreen()
 
-            // Debug panel — shows info about selected nodes
-            if (selectedNodeIds.isNotEmpty()) {
-                val selectedNodes = canvasState.visibleNodes
-                    .filter { it.node.id in selectedNodeIds }
-                    .map { it.node }
-                SelectionDebugPanel(
-                    selectedNodes = selectedNodes,
-                    camera = canvasState.camera,
+            // Debug overlay (debug builds only): a 🐛 toggle chip + a panel that
+            // lists each selected node's applied appearance parts. Off by default.
+            if (BuildConfig.DEBUG) {
+                Column(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(8.dp),
-                )
+                ) {
+                    Text(
+                        text = if (debugPanelEnabled) "🐛✕" else "🐛",
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black.copy(alpha = 0.4f))
+                            .clickable { debugPanelEnabled = !debugPanelEnabled }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                    if (debugPanelEnabled && selectedNodeIds.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        val selectedNodes = canvasState.visibleNodes
+                            .filter { it.node.id in selectedNodeIds }
+                            .map { it.node }
+                        SelectionDebugPanel(
+                            selectedNodes = selectedNodes,
+                            camera = canvasState.camera,
+                            presetsById = mediaPresets.associateBy { it.id },
+                        )
+                    }
+                }
             }
 
         }
@@ -615,6 +643,7 @@ fun CanvasScaffold(
                 opacityEditing = AppearanceTarget.None
             },
             onDismiss = { opacityEditing = AppearanceTarget.None },
+            preview = mediaConceptPreview(t.nodes, AppearanceSection.Opacity) { base, v -> base.copy(opacity = v) },
         ) { mixed, _, onChange -> MixedAwareOpacitySlider(mixed, onChange) }
         AppearanceTarget.None -> Unit
     }
@@ -641,6 +670,7 @@ fun CanvasScaffold(
                 cornerRadiusEditing = AppearanceTarget.None
             },
             onDismiss = { cornerRadiusEditing = AppearanceTarget.None },
+            preview = mediaConceptPreview(t.nodes, AppearanceSection.CornerRadius) { base, v -> base.copy(cornerRadius = v) },
         ) { mixed, _, onChange -> MixedAwareCornerRadiusSlider(mixed, onChange) }
         AppearanceTarget.None -> Unit
     }
@@ -669,6 +699,7 @@ fun CanvasScaffold(
                 borderEditing = AppearanceTarget.None
             },
             onDismiss = { borderEditing = AppearanceTarget.None },
+            preview = mediaConceptPreview(t.nodes, AppearanceSection.Border) { base, v -> base.copy(border = v) },
         ) { _, firstDraft, onChange ->
             BorderStyleEditor(initial = firstDraft, onChange = onChange)
         }
@@ -699,6 +730,7 @@ fun CanvasScaffold(
                 shadowEditing = AppearanceTarget.None
             },
             onDismiss = { shadowEditing = AppearanceTarget.None },
+            preview = mediaConceptPreview(t.nodes, AppearanceSection.Shadow) { base, v -> base.copy(shadow = v) },
         ) { _, firstDraft, onChange ->
             ShadowStyleEditor(initial = firstDraft, onChange = onChange)
         }
@@ -733,6 +765,7 @@ fun CanvasScaffold(
                 overlaysEditing = AppearanceTarget.None
             },
             onDismiss = { overlaysEditing = AppearanceTarget.None },
+            preview = mediaConceptPreview(t.nodes, AppearanceSection.Overlays) { base, v -> base.copy(overlays = v) },
         ) { _, firstDraft, onChange ->
             OverlayListEditor(
                 overlays = firstDraft,
@@ -767,6 +800,7 @@ fun CanvasScaffold(
                 alphaMaskEditing = AppearanceTarget.None
             },
             onDismiss = { alphaMaskEditing = AppearanceTarget.None },
+            preview = mediaConceptPreview(t.nodes, AppearanceSection.ContentMask) { base, v -> base.copy(contentMask = v) },
         ) { _, firstDraft, onChange ->
             AlphaMaskEditor(initial = firstDraft, onChange = onChange)
         }
@@ -806,6 +840,7 @@ fun CanvasScaffold(
                 cropEditing = emptyList()
             },
             onDismiss = { cropEditing = emptyList() },
+            preview = mediaConceptPreview(nodes, AppearanceSection.Crop) { base, v -> base.copy(crop = v) },
         ) { _, firstDraft, onChange ->
             CropEditor(initial = firstDraft, onChange = onChange)
         }
@@ -823,6 +858,7 @@ fun CanvasScaffold(
                 colorAdjustmentsEditing = emptyList()
             },
             onDismiss = { colorAdjustmentsEditing = emptyList() },
+            preview = mediaConceptPreview(nodes, AppearanceSection.ColorAdjustments) { base, v -> base.copy(colorAdjustments = v) },
         ) { _, firstDraft, onChange ->
             ColorAdjustmentsEditor(initial = firstDraft, onChange = onChange)
         }
@@ -840,6 +876,7 @@ fun CanvasScaffold(
                 openingEditing = emptyList()
             },
             onDismiss = { openingEditing = emptyList() },
+            preview = mediaConceptPreview(nodes, AppearanceSection.Opening) { base, v -> base.copy(opening = v) },
         ) { _, firstDraft, onChange ->
             MediaOpeningEditor(initial = firstDraft, onChange = onChange)
         }
@@ -857,6 +894,7 @@ fun CanvasScaffold(
                 decorationsEditing = emptyList()
             },
             onDismiss = { decorationsEditing = emptyList() },
+            preview = mediaConceptPreview(nodes, AppearanceSection.Decorations) { base, v -> base.copy(decorations = v) },
         ) { _, firstDraft, onChange ->
             DecorationListEditor(initial = firstDraft, onChange = onChange)
         }
@@ -874,6 +912,7 @@ fun CanvasScaffold(
                 captionEditing = emptyList()
             },
             onDismiss = { captionEditing = emptyList() },
+            preview = mediaConceptPreview(nodes, AppearanceSection.Caption) { base, v -> base.copy(caption = v) },
         ) { _, firstDraft, onChange ->
             CaptionStyleEditor(initial = firstDraft, onChange = onChange)
         }
@@ -882,9 +921,8 @@ fun CanvasScaffold(
     if (presetLibraryEditing.isNotEmpty()) {
         val nodes = presetLibraryEditing
         val ids = remember(nodes) { nodes.map { it.id }.toSet() }
-        val presets by canvasViewModel.presets.collectAsStateWithLifecycle()
         PresetLibrarySheet(
-            presets = presets,
+            presets = mediaPresets,
             targetCount = nodes.size,
             targetBound = nodes.any { it.presetBinding != null },
             hasOverrides = nodes.any { it.presetBinding?.overridden?.isNotEmpty() == true },
@@ -985,4 +1023,26 @@ fun CanvasScaffold(
             )
         }
     }
+}
+
+/**
+ * Builds the live preview for a media concept editor: the first edited node's
+ * photo + appearance, plus the same merge lambda the dispatch uses, so the
+ * thumbnail re-renders with the in-progress draft. `null` when the set is empty.
+ */
+private fun <T> mediaConceptPreview(
+    nodes: List<CanvasNode.Media>,
+    section: AppearanceSection,
+    applyDraft: (base: MediaAppearance, draft: T) -> MediaAppearance,
+): ConceptPreview<T>? {
+    // Preview the LAST selected node (the most recently added to the selection).
+    val target = nodes.lastOrNull() ?: return null
+    return ConceptPreview(
+        uri = target.mediaRefId,
+        base = target.appearance ?: MediaAppearance(),
+        section = section,
+        nodeW = target.transform.renderW,
+        nodeH = target.transform.renderH,
+        applyDraft = applyDraft,
+    )
 }

@@ -928,7 +928,7 @@ fun CanvasScaffold(
             hasOverrides = nodes.any { it.presetBinding?.overridden?.isNotEmpty() == true },
             previewUri = nodes.firstOrNull()?.mediaRefId,
             onApply = { presetId, keep -> canvasViewModel.applyPreset(presetId, ids, keep) },
-            onSaveAs = { name -> nodes.firstOrNull()?.let { canvasViewModel.saveSelectionAsPreset(name, it.id) } },
+            onSaveAs = { name -> nodes.firstOrNull()?.let { canvasViewModel.saveSelectionAsPreset(name, it.id, ids) } },
             onDuplicate = { canvasViewModel.duplicatePreset(it) },
             onDelete = { canvasViewModel.deletePreset(it) },
             onEdit = { canvasViewModel.updatePreset(it) },

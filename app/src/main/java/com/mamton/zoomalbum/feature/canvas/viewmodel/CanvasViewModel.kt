@@ -1859,17 +1859,25 @@ class CanvasViewModel @Inject constructor(
     // ── Media appearance presets (app-level; see media-presets.md) ─────────────
 
     /** Saves the node's current resolved appearance as a new preset governing its non-default sections. */
-    fun saveSelectionAsPreset(name: String, nodeId: String) {
-        val media = _allNodes.value.firstOrNull { it.id == nodeId } as? CanvasNode.Media ?: return
+    /**
+     * Saves [sourceNodeId]'s resolved look as a new preset, then **binds the whole
+     * selection** ([applyToIds]) to it with overrides cleared — so the objects the
+     * preset was made from immediately follow it (editing the preset updates them).
+     */
+    fun saveSelectionAsPreset(name: String, sourceNodeId: String, applyToIds: Set<String>) {
+        val media = _allNodes.value.firstOrNull { it.id == sourceNodeId } as? CanvasNode.Media ?: return
         val resolved = resolveMediaAppearance(media, mediaPresetStore.presetsById) ?: MediaAppearance()
+        val presetId = UUID.randomUUID().toString()
         mediaPresetStore.add(
             MediaStylePreset(
-                id = UUID.randomUUID().toString(),
+                id = presetId,
                 name = name.ifBlank { "Preset" },
                 appearance = resolved,
                 sections = resolved.nonDefaultSections(),
             ),
         )
+        // Bind the selection to the new preset, clearing per-section overrides.
+        applyPreset(presetId, applyToIds, keepOverrides = false)
     }
 
     fun duplicatePreset(presetId: String) {

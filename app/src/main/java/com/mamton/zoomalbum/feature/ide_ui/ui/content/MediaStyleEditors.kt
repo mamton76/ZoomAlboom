@@ -170,6 +170,7 @@ fun ColorAdjustmentsEditor(
     var contrast by remember { mutableStateOf(initial?.contrast ?: 0f) }
     var saturation by remember { mutableStateOf(initial?.saturation ?: 0f) }
     var temperature by remember { mutableStateOf(initial?.temperature ?: 0f) }
+    var tint by remember { mutableStateOf(initial?.tint ?: 0f) }
     var exposure by remember { mutableStateOf(initial?.exposure ?: 0f) }
     var vignette by remember { mutableStateOf(initial?.vignette ?: 0f) }
 
@@ -180,6 +181,7 @@ fun ColorAdjustmentsEditor(
                 contrast = contrast,
                 saturation = saturation,
                 temperature = temperature,
+                tint = tint,
                 exposure = exposure,
                 vignette = vignette,
             ) else null,
@@ -195,17 +197,18 @@ fun ColorAdjustmentsEditor(
     }
 
     if (enabled) {
-        Text(
-            text = "Adjustments persist but aren't applied at render time yet.",
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(vertical = 4.dp),
-        )
         AdjustmentSlider("Brightness", brightness) { brightness = it; emit() }
         AdjustmentSlider("Contrast", contrast) { contrast = it; emit() }
         AdjustmentSlider("Saturation", saturation) { saturation = it; emit() }
         AdjustmentSlider("Temperature", temperature) { temperature = it; emit() }
+        AdjustmentSlider("Tint", tint) { tint = it; emit() }
         AdjustmentSlider("Exposure", exposure) { exposure = it; emit() }
         AdjustmentSlider("Vignette", vignette) { vignette = it; emit() }
+        Text(
+            text = "Highlights, shadows, blur and sharpen are not rendered yet.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(vertical = 4.dp),
+        )
     }
 }
 

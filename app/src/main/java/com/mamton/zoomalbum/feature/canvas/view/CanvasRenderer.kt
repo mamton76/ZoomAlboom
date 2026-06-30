@@ -525,6 +525,8 @@ private fun FullMediaRenderer(
     val contentMaskBitmap = rememberAlphaMaskBitmap(contentMask)
     val decorations = appearance?.decorations.orEmpty()
     val decorationBitmaps = rememberDecorationBitmaps(decorations)
+    val colorFilter = appearance?.colorAdjustments?.toContentColorFilter()
+    val vignette = appearance?.colorAdjustments?.vignette ?: 0f
     // The content mask needs the offscreen layer DstIn composites into.
     val needsLayer = contentMask != null
 
@@ -592,12 +594,14 @@ private fun FullMediaRenderer(
                             crop = appearance?.crop,
                             left = mLeft, top = mTop,
                             renderW = mRight - mLeft, renderH = mBottom - mTop,
+                            colorFilter = colorFilter,
                         )
                         drawOverlayStack(
                             overlays = overlays,
                             left = mLeft, top = mTop, right = mRight, bottom = mBottom,
                             textureBitmaps = overlayTextureBitmaps,
                         )
+                        drawVignette(vignette, mLeft, mTop, mRight, mBottom)
                     }
                 }
                 // Content mask — DstIn over the content in the offscreen layer.
@@ -737,6 +741,7 @@ private fun DrawScope.drawCroppedBitmap(
     crop: CropSettings?,
     left: Float, top: Float,
     renderW: Float, renderH: Float,
+    colorFilter: androidx.compose.ui.graphics.ColorFilter? = null,
 ) {
     if (crop?.mode == CropMode.Manual) {
         val intrinsic = painter.intrinsicSize
@@ -750,7 +755,7 @@ private fun DrawScope.drawCroppedBitmap(
             val drawLeft = -drawW / 2f + crop.offsetX
             val drawTop = -drawH / 2f + crop.offsetY
             translate(left = drawLeft, top = drawTop) {
-                with(painter) { draw(Size(drawW, drawH)) }
+                with(painter) { draw(Size(drawW, drawH), colorFilter = colorFilter) }
             }
             return
         }
@@ -758,7 +763,7 @@ private fun DrawScope.drawCroppedBitmap(
         // loading frame doesn't pop in from nothing.
     }
     translate(left = left, top = top) {
-        with(painter) { draw(Size(renderW, renderH)) }
+        with(painter) { draw(Size(renderW, renderH), colorFilter = colorFilter) }
     }
 }
 
